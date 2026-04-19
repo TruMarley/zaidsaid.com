@@ -53,6 +53,7 @@ const I = {
   globe: (p)=> <svg viewBox="0 0 24 24" width={p?.size||14} height={p?.size||14} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/></svg>,
   comment: (p)=> <svg viewBox="0 0 24 24" width={p?.size||14} height={p?.size||14} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M21 12a8 8 0 1 1-3.2-6.4L21 5v7z"/></svg>,
   clock: (p)=> <svg viewBox="0 0 24 24" width={p?.size||14} height={p?.size||14} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>,  palette: (p)=> <svg viewBox="0 0 24 24" width={p?.size||14} height={p?.size||14} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M12 3a9 9 0 1 0 0 18c1.5 0 2-1 2-2s-.5-1.5-.5-2 .5-1.5 2-1.5H18a3 3 0 0 0 3-3 9 9 0 0 0-9-9Z"/><circle cx="7.5" cy="10.5" r="1"/><circle cx="12" cy="7.5" r="1"/><circle cx="16.5" cy="10.5" r="1"/></svg>,
+  menu: (p)=> <svg viewBox="0 0 24 24" width={p?.size||14} height={p?.size||14} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M3 6h18M3 12h18M3 18h18"/></svg>,
   layers: (p)=> <svg viewBox="0 0 24 24" width={p?.size||14} height={p?.size||14} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M12 3 2 8l10 5 10-5-10-5Z"/><path d="M2 13l10 5 10-5"/><path d="M2 18l10 5 10-5"/></svg>,
   eye: (p)=> <svg viewBox="0 0 24 24" width={p?.size||14} height={p?.size||14} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>,
 
@@ -2704,32 +2705,322 @@ function TemplatePreview({ open, tpl, onClose, onUse }){
   );
 }
 function ProjectsTab(){
-  const [jobs] = useLocalState("jobs", ARCHIVE_JOBS);
-  const [filter, setFilter] = useState("All");
-  const filtered = useMemo(()=> filter==="All" ? jobs : jobs.filter(j => j.status.toLowerCase()===filter.toLowerCase()), [jobs, filter]);
+  const [jobs, setJobs] = React.useState(() => {
+    try { const raw = localStorage.getItem("zaidsaid.v2.projects"); if (raw) return JSON.parse(raw); } catch(e){}
+    return ARCHIVE_JOBS.map((j, i) => ({
+      ...j,
+      updated: Date.now() - (i+1) * 86400000,
+      owner: ["You","Ada","Kai","Maya"][i % 4],
+      kit: ["bk-zs","bk-edu","bk-news"][i % 3],
+      tags: (j.title||"").toLowerCase().includes("repurpose") ? ["repurpose","shorts"] : ((j.title||"").toLowerCase().includes("gps") ? ["physics","explainer"] : ["explainer"]),
+      versions: [
+        { v:"v1", at: Date.now() - (i+2)*86400000, note:"First pass render" },
+        { v:"v2", at: Date.now() - (i+1)*86400000, note:"Tightened pacing, fixed caption timing" }
+      ],
+      comments: i === 0 ? [
+        { author:"Ada", at: Date.now() - 3600000, body:"Love the opening beat. Can we shorten beat 2?" }
+      ] : []
+    }));
+  });
+  const [view, setView] = React.useState("grid"); // grid | list
+  const [status, setStatus] = React.useState("All");
+  const [q, setQ] = React.useState("");
+  const [sort, setSort] = React.useState("recent");
+  const [drawer, setDrawer] = React.useState(null);
+  const [toast, setToast] = React.useState(null);
+
+  React.useEffect(() => {
+    try { localStorage.setItem("zaidsaid.v2.projects", JSON.stringify(jobs)); } catch(e){}
+  }, [jobs]);
+
+  const statuses = ["All","done","running","queued","failed"];
+  const list = jobs
+    .filter(j => status === "All" || (j.status||"").toLowerCase() === status)
+    .filter(j => !q || (j.title+" "+(j.caption||"")+" "+(j.tags||[]).join(" ")).toLowerCase().includes(q.toLowerCase()))
+    .sort((a,b) => {
+      if (sort === "recent") return (b.updated||0) - (a.updated||0);
+      if (sort === "title") return (a.title||"").localeCompare(b.title||"");
+      if (sort === "duration") return (b.duration||0) - (a.duration||0);
+      return 0;
+    });
+
+  const onOpen = (j) => setDrawer(j);
+  const onDuplicate = (j) => {
+    const copy = { ...j, id: Math.random().toString(36).slice(2,14), title: j.title + " (copy)", status:"queued", updated: Date.now(), versions:[{ v:"v1", at:Date.now(), note:"Duplicated" }], comments:[] };
+    setJobs(prev => [copy, ...prev]);
+    setToast({ kind:"ok", msg:"Duplicated to queue" });
+  };
+  const onDelete = (j) => {
+    if (!confirm("Delete project \""+j.title+"\"? This cannot be undone.")) return;
+    setJobs(prev => prev.filter(x => x.id !== j.id));
+    setDrawer(null);
+    setToast({ kind:"warn", msg:"Deleted" });
+  };
+  const onStatus = (j, next) => {
+    setJobs(prev => prev.map(x => x.id === j.id ? { ...x, status: next, updated: Date.now() } : x));
+    setToast({ kind:"ok", msg:"Status: "+next });
+  };
+  const onAddComment = (j, body) => {
+    if (!body.trim()) return;
+    setJobs(prev => prev.map(x => x.id === j.id ? { ...x, comments: [...(x.comments||[]), { author:"You", at: Date.now(), body }] } : x));
+  };
+  const onNewVersion = (j) => {
+    const next = "v"+(((j.versions||[]).length)+1);
+    setJobs(prev => prev.map(x => x.id === j.id ? { ...x, versions: [...(x.versions||[]), { v: next, at: Date.now(), note:"Manual save" }], updated: Date.now() } : x));
+    setToast({ kind:"ok", msg:"Saved "+next });
+  };
+  const onReset = () => {
+    if (!confirm("Reset projects to demo data?")) return;
+    try { localStorage.removeItem("zaidsaid.v2.projects"); } catch(e){}
+    window.location.reload();
+  };
+
+  const live = drawer ? (jobs.find(j => j.id === drawer.id) || drawer) : null;
+
   return (
-    <Placeholder title="Projects" subtitle="Every video Zaidsaid has rendered for you. Versions and approvals land in Stage 5.">
-      <div className="flex items-center gap-2 mb-4">
-        {["All","Done","Running","Queued","Failed"].map(f => (
-          <button key={f} onClick={()=>setFilter(f)} className={"chip " + (filter===f?"text-white !border-white/20 bg-white/10":"")} aria-pressed={filter===f}>{f}</button>
-        ))}
-      </div>
-      <div className="grid md:grid-cols-3 gap-3">
-        {filtered.map(j => (
-          <div key={j.id} className="card p-5">
-            <div className={"h-32 rounded-xl mb-3 bg-gradient-to-br " + j.grad} aria-hidden />
-            <div className="flex items-center gap-2">
-              <span className="chip">{j.status}</span>
-              <span className="chip">{j.duration}s</span>
-              <span className="chip">{j.platforms} platforms</span>
-            </div>
-            <div className="font-semibold mt-2">{j.title}</div>
-            <div className="text-sm text-[color:var(--muted)] mt-1 line-clamp-2">{j.caption}</div>
-            <div className="text-[11px] text-[color:var(--muted)]/70 mt-2">{j.id.slice(0,8)} — {j.age}</div>
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <div className="text-xl font-semibold">Projects</div>
+          <div className="text-xs text-[color:var(--muted)]">All renders, drafts, and repurposes. Saved locally under zaidsaid.v2.projects.</div>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="relative">
+            <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Search projects" className="px-3 py-2 pr-8 rounded-xl bg-white/5 border border-white/10 text-sm outline-none focus:border-white/30 w-48" />
+            <span className="absolute right-2 top-1/2 -translate-y-1/2 opacity-60">{I.search({size:14})}</span>
           </div>
-        ))}
+          <select value={sort} onChange={e=>setSort(e.target.value)} className="px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-sm">
+            <option value="recent">Most recent</option>
+            <option value="title">Title A→Z</option>
+            <option value="duration">Longest first</option>
+          </select>
+          <div className="flex rounded-xl border border-white/10 overflow-hidden">
+            <button onClick={()=>setView("grid")} title="Grid view" className={"px-3 py-2 text-xs " + (view==="grid" ? "bg-white/10" : "")}>{I.layers({size:14})}</button>
+            <button onClick={()=>setView("list")} title="List view" className={"px-3 py-2 text-xs " + (view==="list" ? "bg-white/10" : "")}>{I.menu({size:14})}</button>
+          </div>
+          <button onClick={onReset} className="btn btn-ghost text-sm">{I.refresh({size:14})} Reset</button>
+        </div>
       </div>
-    </Placeholder>
+
+      <div className="flex items-center gap-1 flex-wrap">
+        {statuses.map(f => (
+          <button key={f} onClick={()=>setStatus(f)} className={"chip " + (status === f ? "chip-active" : "")}>{f === "All" ? "All" : f.charAt(0).toUpperCase()+f.slice(1)} <span className="opacity-60 ml-1 text-[10px]">{f === "All" ? jobs.length : jobs.filter(j => (j.status||"").toLowerCase() === f).length}</span></button>
+        ))}
+        <div className="flex-1"></div>
+        <div className="text-xs text-[color:var(--muted)]">{list.length} of {jobs.length}</div>
+      </div>
+
+      {list.length === 0 ? (
+        <EmptyState icon={I.layers({size:28})} title="No projects match" hint="Clear filters or create a new one from Studio." />
+      ) : view === "grid" ? (
+        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {list.map(j => <ProjectCard key={j.id} j={j} onOpen={onOpen} onDuplicate={onDuplicate} onDelete={onDelete} />)}
+        </div>
+      ) : (
+        <div className="rounded-xl border border-white/10 overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-white/5 text-[11px] uppercase tracking-wider text-[color:var(--muted)]">
+              <tr>
+                <th className="text-left px-3 py-2">Title</th>
+                <th className="text-left px-3 py-2">Status</th>
+                <th className="text-left px-3 py-2">Duration</th>
+                <th className="text-left px-3 py-2">Owner</th>
+                <th className="text-left px-3 py-2">Updated</th>
+                <th className="text-right px-3 py-2">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {list.map(j => (
+                <tr key={j.id} className="border-t border-white/5 hover:bg-white/5 cursor-pointer" onClick={()=>onOpen(j)}>
+                  <td className="px-3 py-2">
+                    <div className="font-medium line-clamp-1">{j.title}</div>
+                    <div className="text-[11px] text-[color:var(--muted)] line-clamp-1">{j.caption}</div>
+                  </td>
+                  <td className="px-3 py-2"><StatusChip status={j.status} /></td>
+                  <td className="px-3 py-2">{j.duration}s</td>
+                  <td className="px-3 py-2">{j.owner}</td>
+                  <td className="px-3 py-2 text-[11px] text-[color:var(--muted)]">{formatAge(j.updated)}</td>
+                  <td className="px-3 py-2 text-right">
+                    <button onClick={e=>{e.stopPropagation(); onDuplicate(j);}} className="btn btn-ghost text-xs">{I.copy({size:12})}</button>
+                    <button onClick={e=>{e.stopPropagation(); onDelete(j);}} className="btn btn-ghost text-xs text-rose-300">{I.trash({size:12})}</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <ProjectDrawer open={!!live} j={live} onClose={()=>setDrawer(null)} onDuplicate={onDuplicate} onDelete={onDelete} onStatus={onStatus} onAddComment={onAddComment} onNewVersion={onNewVersion} />
+      {toast && <Toast kind={toast.kind} msg={toast.msg} onClose={()=>setToast(null)} />}
+    </div>
+  );
+}
+
+function formatAge(ts){
+  if (!ts) return "—";
+  const s = Math.floor((Date.now() - ts) / 1000);
+  if (s < 60) return "just now";
+  const m = Math.floor(s/60); if (m < 60) return m+"m ago";
+  const h = Math.floor(m/60); if (h < 24) return h+"h ago";
+  const d = Math.floor(h/24); if (d < 30) return d+"d ago";
+  return new Date(ts).toLocaleDateString();
+}
+
+function StatusChip({ status }){
+  const s = (status || "queued").toLowerCase();
+  const map = {
+    done: { c:"bg-emerald-500/15 text-emerald-300 border-emerald-500/30", label:"Done" },
+    running: { c:"bg-sky-500/15 text-sky-300 border-sky-500/30", label:"Running" },
+    queued: { c:"bg-amber-500/15 text-amber-300 border-amber-500/30", label:"Queued" },
+    failed: { c:"bg-rose-500/15 text-rose-300 border-rose-500/30", label:"Failed" }
+  };
+  const m = map[s] || map.queued;
+  return <span className={"text-[11px] px-2 py-0.5 rounded-full border "+m.c}>{m.label}</span>;
+}
+
+function ProjectCard({ j, onOpen, onDuplicate, onDelete }){
+  return (
+    <div className="card overflow-hidden border border-white/10">
+      <button onClick={()=>onOpen(j)} className={"block w-full h-28 relative text-left bg-gradient-to-br "+(j.grad||"from-indigo-500 to-violet-700")}>
+        <div className="absolute inset-0 p-3 flex flex-col justify-between">
+          <div className="flex items-center justify-between">
+            <StatusChip status={j.status} />
+            <span className="text-[10px] bg-black/40 px-2 py-0.5 rounded-full border border-white/10">{j.duration}s</span>
+          </div>
+          <div>
+            <div className="text-base font-semibold leading-tight line-clamp-2">{j.title}</div>
+            <div className="text-[11px] opacity-80">{j.owner} · {formatAge(j.updated)}</div>
+          </div>
+        </div>
+      </button>
+      <div className="p-3 space-y-3">
+        <div className="text-xs text-[color:var(--muted)] line-clamp-2 min-h-[32px]">{j.caption}</div>
+        <div className="flex items-center gap-1 flex-wrap">
+          {(j.tags||[]).slice(0,3).map(t => <Tag key={t}>{t}</Tag>)}
+          <div className="flex-1"></div>
+          <span className="text-[10px] text-[color:var(--muted)]">v{(j.versions||[]).length || 1} · {(j.comments||[]).length} {(j.comments||[]).length === 1 ? "comment" : "comments"}</span>
+        </div>
+        <div className="flex items-center justify-between gap-2 pt-1">
+          <button onClick={()=>onOpen(j)} className="btn btn-ghost text-xs">{I.eye({size:12})} Open</button>
+          <div className="flex gap-1">
+            <button onClick={()=>onDuplicate(j)} title="Duplicate" className="btn btn-ghost text-xs">{I.copy({size:12})}</button>
+            <button onClick={()=>onDelete(j)} title="Delete" className="btn btn-ghost text-xs text-rose-300">{I.trash({size:12})}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ProjectDrawer({ open, j, onClose, onDuplicate, onDelete, onStatus, onAddComment, onNewVersion }){
+  const [tab, setTab] = React.useState("overview");
+  const [comment, setComment] = React.useState("");
+  React.useEffect(() => { setTab("overview"); setComment(""); }, [j && j.id]);
+  if (!open || !j) return null;
+  return (
+    <Drawer open={open} title={j.title} onClose={onClose} footer={
+      <div className="flex justify-between gap-2 items-center">
+        <div className="flex gap-1">
+          <button onClick={()=>onDuplicate(j)} className="btn btn-ghost text-xs">{I.copy({size:12})} Duplicate</button>
+          <button onClick={()=>onDelete(j)} className="btn btn-ghost text-xs text-rose-300">{I.trash({size:12})} Delete</button>
+        </div>
+        <button onClick={onClose} className="btn btn-primary text-sm">{I.check({size:14})} Done</button>
+      </div>
+    }>
+      <div className="space-y-4">
+        <div className={"rounded-xl overflow-hidden bg-gradient-to-br "+(j.grad||"from-indigo-500 to-violet-700")} style={{ aspectRatio:"16/9" }}>
+          <div className="w-full h-full flex items-end p-3">
+            <div>
+              <StatusChip status={j.status} />
+              <div className="text-lg font-semibold mt-1 drop-shadow line-clamp-2">{j.title}</div>
+              <div className="text-[11px] opacity-80">{j.owner} · {formatAge(j.updated)} · {j.duration}s</div>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-[color:var(--muted)]">Set status:</span>
+          {["done","running","queued","failed"].map(s => (
+            <button key={s} onClick={()=>onStatus(j, s)} className={"chip "+(j.status===s?"chip-active":"")}>{s}</button>
+          ))}
+        </div>
+
+        <div className="flex gap-1 border-b border-white/10">
+          {[["overview","Overview"],["versions","Versions"],["comments","Comments"],["details","Details"]].map(([id,label]) => (
+            <button key={id} onClick={()=>setTab(id)} className={"px-3 py-2 text-xs " + (tab === id ? "border-b-2 border-indigo-400 text-white" : "text-[color:var(--muted)]")}>{label}</button>
+          ))}
+        </div>
+
+        {tab === "overview" && (
+          <div className="space-y-3">
+            <p className="text-sm">{j.caption}</p>
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div className="p-2 rounded-lg border border-white/10"><div className="text-[color:var(--muted)]">Duration</div><div>{j.duration}s</div></div>
+              <div className="p-2 rounded-lg border border-white/10"><div className="text-[color:var(--muted)]">Platforms</div><div>{j.platforms} targets</div></div>
+              <div className="p-2 rounded-lg border border-white/10"><div className="text-[color:var(--muted)]">Brand kit</div><div className="font-mono">{j.kit}</div></div>
+              <div className="p-2 rounded-lg border border-white/10"><div className="text-[color:var(--muted)]">Versions</div><div>{(j.versions||[]).length || 1}</div></div>
+            </div>
+            <div className="flex flex-wrap gap-1">{(j.tags||[]).map(t => <Tag key={t}>{t}</Tag>)}</div>
+          </div>
+        )}
+
+        {tab === "versions" && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="text-xs uppercase tracking-wider text-[color:var(--muted)]">History</div>
+              <button onClick={()=>onNewVersion(j)} className="btn btn-ghost text-xs">{I.plus({size:12})} New version</button>
+            </div>
+            {(j.versions||[]).length === 0 ? (
+              <div className="text-xs text-[color:var(--muted)]">No versions yet.</div>
+            ) : (
+              <ul className="space-y-1">
+                {[...(j.versions||[])].reverse().map((v, i) => (
+                  <li key={i} className="p-2 rounded-lg border border-white/10 bg-white/5">
+                    <div className="flex items-center justify-between">
+                      <div className="font-mono text-xs">{v.v}</div>
+                      <div className="text-[10px] text-[color:var(--muted)]">{formatAge(v.at)}</div>
+                    </div>
+                    <div className="text-xs mt-1">{v.note}</div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+
+        {tab === "comments" && (
+          <div className="space-y-2">
+            <div className="space-y-1 max-h-52 overflow-auto">
+              {(j.comments||[]).length === 0 ? (
+                <div className="text-xs text-[color:var(--muted)]">No comments yet.</div>
+              ) : (j.comments||[]).map((c, i) => (
+                <div key={i} className="p-2 rounded-lg border border-white/10 bg-white/5">
+                  <div className="flex items-center justify-between">
+                    <div className="text-xs font-semibold">{c.author}</div>
+                    <div className="text-[10px] text-[color:var(--muted)]">{formatAge(c.at)}</div>
+                  </div>
+                  <div className="text-xs mt-1">{c.body}</div>
+                </div>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <input value={comment} onChange={e=>setComment(e.target.value)} onKeyDown={e=>{ if (e.key==='Enter' && comment.trim()) { onAddComment(j, comment); setComment(""); } }} placeholder="Write a comment…" className="flex-1 px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-sm" />
+              <button onClick={()=>{ if(comment.trim()) { onAddComment(j, comment); setComment(""); } }} className="btn btn-primary text-xs">{I.comment({size:12})} Post</button>
+            </div>
+          </div>
+        )}
+
+        {tab === "details" && (
+          <div className="space-y-2 text-xs">
+            <div className="p-2 rounded-lg border border-white/10 font-mono break-all">id: {j.id}</div>
+            <div className="p-2 rounded-lg border border-white/10">owner: {j.owner}</div>
+            <div className="p-2 rounded-lg border border-white/10">brand kit: <span className="font-mono">{j.kit}</span></div>
+            <div className="p-2 rounded-lg border border-white/10">updated: {new Date(j.updated).toLocaleString()}</div>
+          </div>
+        )}
+      </div>
+    </Drawer>
   );
 }
 function ArchitectureTab(){
