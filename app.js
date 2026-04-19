@@ -1249,6 +1249,36 @@ function StudioTab({ setTab, studioStep, setStudioStep }){
     if(project && typeof project === "object" && Array.isArray(project.scenes) && project.scenes.length > 0) return;
     setProject(STUDIO_SEED);
   }, []);
+  const [seeded, setSeeded] = React.useState(null);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("zaidsaid.v2.studio.seed");
+      if (!raw) return;
+      const seed = JSON.parse(raw);
+      if (!seed || !seed.templateId) return;
+      setSeeded(seed);
+      setProject(prev => ({
+        ...prev,
+        name: seed.name || prev.name,
+        source: (seed.steps && seed.steps.length) ? ("Template: " + seed.name + "\n\nBeats:\n" + seed.steps.map((s, i) => (i+1)+". "+s).join("\n")) : prev.source,
+        brandKitId: seed.kit || prev.brandKitId,
+        platforms: seed.platform ? [seed.platform] : prev.platforms,
+        preset: (seed.aspect === "16:9") ? "horizontal" : (seed.aspect === "1:1" ? "square" : "vertical"),
+        durationHint: seed.duration || prev.durationHint,
+        scenes: (seed.steps || []).map((label, i) => ({
+          id: "s" + (i+1),
+          title: label,
+          script: "",
+          duration: Math.max(3, Math.round((seed.duration || 60) / (seed.steps ? seed.steps.length : 1))),
+          aroll: "avatar",
+          broll: []
+        }))
+      }));
+      try { localStorage.removeItem("zaidsaid.v2.studio.seed"); } catch(e){}
+    } catch(e) {}
+  }, []);
+  const clearSeeded = () => setSeeded(null);
+
   const step = studioStep || "research";
   const goto = (id) => setStudioStep(id);
   const renderStep = () => {
@@ -1279,6 +1309,16 @@ function StudioTab({ setTab, studioStep, setStudioStep }){
           <button className="btn btn-ghost" onClick={resetProject}>{I.refresh({size:14})} Reset to example</button>
         </div>
       </div>
+      {seeded && (
+        <div className="mb-4 p-3 rounded-xl border border-indigo-500/40 bg-indigo-500/10 flex items-center gap-3">
+          <span className="w-8 h-8 rounded-lg bg-indigo-500/30 flex items-center justify-center">{I.spark({size:14})}</span>
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-semibold">Seeded from template: <span className="text-indigo-200">{seeded.name}</span></div>
+            <div className="text-[11px] text-[color:var(--muted)] truncate">{seeded.templateId} · {seeded.platform || "any platform"} · {seeded.duration || "?"}s · {(seeded.steps || []).length} beats</div>
+          </div>
+          <button onClick={clearSeeded} className="btn btn-ghost text-xs">{I.x({size:12})} Dismiss</button>
+        </div>
+      )}
       <div className="grid gap-3 mb-4">
         <StudioStepNav step={step} setStep={goto} />
         <StudioCharacterRow project={project} setProject={setProject} />
