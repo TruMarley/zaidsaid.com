@@ -101,6 +101,123 @@ const ARCHIVE_AVATARS = [
   { id:"you", name:"You", persona:"Your custom avatar, trained on your reference set", tags:["personal"] },
 ];
 
+/* ---------------- Providers (proxy-URL registry, no raw keys in client) ---------------- */
+const PROVIDERS = [
+  { id:"local", name:"Local / Free", vendor:"Browser-native", caps:["tts","stt","capture","render"], docs:"https://developer.mozilla.org/en-US/docs/Web/API/SpeechSynthesis", defaultPath:"" },
+  { id:"elevenlabs", name:"ElevenLabs", vendor:"ElevenLabs", caps:["tts","voiceClone"], docs:"https://elevenlabs.io/docs", defaultPath:"/api/elevenlabs" },
+  { id:"heygen", name:"HeyGen", vendor:"HeyGen", caps:["avatarVideo"], docs:"https://docs.heygen.com", defaultPath:"/api/heygen" },
+  { id:"synthesia", name:"Synthesia", vendor:"Synthesia", caps:["avatarVideo"], docs:"https://docs.synthesia.io", defaultPath:"/api/synthesia" },
+  { id:"openai", name:"OpenAI", vendor:"OpenAI", caps:["script","tts","stt","image"], docs:"https://platform.openai.com/docs", defaultPath:"/api/openai" },
+  { id:"anthropic", name:"Claude", vendor:"Anthropic", caps:["script","research"], docs:"https://docs.anthropic.com", defaultPath:"/api/anthropic" },
+  { id:"runway", name:"Runway", vendor:"Runway", caps:["motion"], docs:"https://docs.dev.runwayml.com", defaultPath:"/api/runway" },
+  { id:"kling", name:"Kling", vendor:"Kuaishou", caps:["motion"], docs:"https://klingai.com", defaultPath:"/api/kling" },
+  { id:"flux", name:"Flux", vendor:"Black Forest Labs", caps:["image"], docs:"https://docs.bfl.ml", defaultPath:"/api/flux" },
+  { id:"stability", name:"Stable Diffusion XL", vendor:"Stability", caps:["image"], docs:"https://platform.stability.ai/docs", defaultPath:"/api/stability" },
+  { id:"whisper", name:"Whisper V3", vendor:"OpenAI / self-hosted", caps:["stt"], docs:"https://github.com/openai/whisper", defaultPath:"/api/whisper" },
+  { id:"deepgram", name:"Deepgram", vendor:"Deepgram", caps:["stt"], docs:"https://developers.deepgram.com", defaultPath:"/api/deepgram" },
+  { id:"suno", name:"Suno", vendor:"Suno", caps:["music"], docs:"https://suno.com", defaultPath:"/api/suno" },
+  { id:"udio", name:"Udio", vendor:"Udio", caps:["music"], docs:"https://udio.com", defaultPath:"/api/udio" },
+  { id:"perplexity", name:"Perplexity", vendor:"Perplexity", caps:["research"], docs:"https://docs.perplexity.ai", defaultPath:"/api/perplexity" }
+];
+const PROVIDER_CAP_LABEL = { tts:"Text-to-speech", stt:"Speech-to-text", voiceClone:"Voice cloning", avatarVideo:"Avatar video", script:"Scripting", research:"Research", image:"Image gen", motion:"Motion / video gen", music:"Music", capture:"Media capture", render:"Render" };
+const PROVIDER_CAPS_ORDER = ["tts","voiceClone","avatarVideo","script","research","image","motion","stt","music"];
+function providersForCap(cap){ return PROVIDERS.filter(p => (p.caps||[]).includes(cap)); }
+function providerById(id){ return PROVIDERS.find(p => p.id === id) || PROVIDERS[0]; }
+
+function useProviderSettings(){
+  const [store, setStore] = useLocalState("providers", {});
+  const getPath = (id) => (store[id] && store[id].proxyUrl) || "";
+  const getEnabled = (id) => !!(store[id] && store[id].enabled);
+  const setPath = (id, proxyUrl) => setStore({ ...store, [id]: { ...(store[id]||{}), proxyUrl } });
+  const setEnabled = (id, enabled) => setStore({ ...store, [id]: { ...(store[id]||{}), enabled } });
+  const clear = (id) => { const n = { ...store }; delete n[id]; setStore(n); };
+  return { store, getPath, getEnabled, setPath, setEnabled, clear };
+}
+async function pingProvider(proxyUrl){
+  try {
+    const url = (proxyUrl || "").replace(/\/$/, "") + "/ping";
+    const r = await fetch(url, { method: "GET" });
+    const txt = await r.text().catch(()=> "");
+    return { ok: r.ok, status: r.status, body: txt.slice(0, 200) };
+  } catch(e){ return { ok: false, status: 0, body: (e && e.message) || "Network error" }; }
+}
+
+function ProviderRow({ provider, path, enabled, onChangePath, onChangeEnabled }){
+  const [testing, setTesting] = useState(false);
+  const [result, setResult] = useState(null);
+  const isLocal = provider.id === "local";
+  const onTest = async () => {
+    if(isLocal){ setResult({ ok: true, status: 200, body: "Local / browser-native capabilities are always available." }); return; }
+    if(!path){ setResult({ ok:false, status:0, body:"Set a proxy URL first." }); return; }
+    setTesting(true); setResult(null);
+    const r = await pingProvider(path);
+    setResult(r); setTesting(false);
+  };
+  return (
+    <div className="card p-4">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div>
+          <div className="font-semibold text-[14px] flex items-center gap-2">{provider.name}<span className="text-[11px] text-[color:var(--muted)]">{provider.vendor}</span></div>
+          <div className="mt-1 flex flex-wrap gap-1">{(provider.caps||[]).map(c => <Tag key={c}>{PROVIDER_CAP_LABEL[c]||c}</Tag>)}</div>
+        </div>
+        <label className="flex items-center gap-2 text-[12px] text-[color:var(--muted)]">
+          <input type="checkbox" checked={!!enabled} onChange={(e)=>onChangeEnabled(e.target.checked)} className="accent-white" />
+          <span>Enabled</span>
+        </label>
+      </div>
+      {!isLocal && (
+        <div className="mt-3">
+          <label className="block">
+            <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Proxy URL <span className="text-rose-300">(not your raw API key)</span></span>
+            <div className="mt-1 flex items-center gap-2 bg-transparent border border-[color:var(--line)] rounded-xl px-3 py-2 focus-within:border-white/20">
+              <span className="text-[color:var(--muted)]" aria-hidden>{I.link({size:14})}</span>
+              <input value={path||""} onChange={(e)=>onChangePath(e.target.value)} placeholder={"https://your-proxy.example.com" + (provider.defaultPath||"")} className="flex-1 bg-transparent text-sm focus:outline-none" />
+              <a href={provider.docs} target="_blank" rel="noopener" className="chip">{I.book({size:12})} Docs</a>
+            </div>
+          </label>
+          <div className="mt-2 flex items-center gap-2 flex-wrap">
+            <button className="btn" onClick={onTest} disabled={testing}>{testing ? "Testing…" : (I.check({size:12}), "Test")}</button>
+            {result && (
+              <span className={"chip " + (result.ok ? "text-emerald-200 !border-emerald-400/30 bg-emerald-500/10" : "text-rose-200 !border-rose-400/30 bg-rose-500/10")}>
+                {result.ok ? "OK" : "Fail"} {result.status||""}
+              </span>
+            )}
+            {result && result.body && <span className="text-[11px] text-[color:var(--muted)] truncate max-w-[280px]">{result.body}</span>}
+          </div>
+          <div className="mt-2 text-[11px] text-[color:var(--muted)]">
+            Paste the public URL of your server-side proxy for {provider.name}. Keys stay on your server; this app only calls your proxy.
+          </div>
+        </div>
+      )}
+      {isLocal && (
+        <div className="mt-3 text-[12px] text-[color:var(--muted)]">Uses browser-native APIs (Web Speech, MediaRecorder). Free, offline-capable, no proxy needed.</div>
+      )}
+    </div>
+  );
+}
+
+function ProvidersPanel({ filterCap }){
+  const { store, getPath, getEnabled, setPath, setEnabled } = useProviderSettings();
+  const list = filterCap ? providersForCap(filterCap) : PROVIDERS;
+  const counts = { configured: PROVIDERS.filter(p => p.id !== "local" && getPath(p.id)).length, enabled: PROVIDERS.filter(p => getEnabled(p.id)).length };
+  return (
+    <div className="card p-5">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div>
+          <div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Providers</div>
+          <div className="text-lg font-semibold">{filterCap ? (PROVIDER_CAP_LABEL[filterCap]+" providers") : "All providers"}</div>
+          <div className="text-[12px] text-[color:var(--muted)] mt-0.5">{counts.configured} configured · {counts.enabled} enabled · keys stay on your server</div>
+        </div>
+      </div>
+      <div className="mt-4 grid md:grid-cols-2 gap-3">
+        {list.map(p => (
+          <ProviderRow key={p.id} provider={p} path={getPath(p.id)} enabled={getEnabled(p.id)} onChangePath={(v)=>setPath(p.id, v)} onChangeEnabled={(v)=>setEnabled(p.id, v)} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /* ---------------- New IA ---------------- */
 const TABS = [
   { id:"home", label:"Home", icon:"home" },
