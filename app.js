@@ -1963,6 +1963,29 @@ function ToastProvider({ children }){
 }
 const useToast = () => useContext(ToastCtx) || (()=>{});
 
+// Stage 4/5 helper: a standalone Toast component used by tab-local setToast() callers.
+// Auto-dismisses in 1.8s. Accepts { kind, msg, onClose }.
+function Toast({ kind, msg, onClose }){
+  useEffect(() => {
+    if (!msg) return;
+    const t = setTimeout(() => { onClose && onClose(); }, 1800);
+    return () => clearTimeout(t);
+  }, [msg]);
+  if (!msg) return null;
+  const color = kind === "warn" ? "border-amber-500/40 bg-amber-500/10 text-amber-200"
+             : kind === "error" ? "border-rose-500/40 bg-rose-500/10 text-rose-200"
+             : "border-emerald-500/40 bg-emerald-500/10 text-emerald-200";
+  return (
+    <div className="fixed bottom-4 right-4 z-50">
+      <div className={"px-3 py-2 rounded-xl border shadow-lg backdrop-blur flex items-center gap-2 text-sm " + color}>
+        <span>{msg}</span>
+        <button onClick={()=>onClose && onClose()} className="opacity-60 hover:opacity-100 text-xs">✕</button>
+      </div>
+    </div>
+  );
+}
+
+
 /* ---------------- Modal ---------------- */
 function Modal({ open, onClose, title, subtitle, children, maxWidth }){
   useEffect(() => {
