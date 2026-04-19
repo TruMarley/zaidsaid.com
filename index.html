@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Zaidsaid ▸ The operating system for AI video</title>
+<meta name="description" content="Zaidsaid is a 13-stage pluggable AI video pipeline. Any input, every platform." />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0%25' stop-color='%236366F1'/%3E%3Cstop offset='100%25' stop-color='%2322D3EE'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpolygon points='16 3 29 27 3 27' fill='url(%23g)'/%3E%3C/svg%3E" />
+<script src="https://cdn.tailwindcss.com/"></script>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          ink:    "#05060A",
+          panel:  "#0B0B14",
+          line:   "#1E1F2E",
+          dim:    "#7E8499",
+          indigo: "#6366F1",
+          cyan:   "#22D3EE",
+          pink:   "#EC4899",
+          amber:  "#F59E0B",
+          emerald:"#10B981"
+        },
+        fontFamily: {
+          display: ['"Inter"', "system-ui", "sans-serif"],
+          mono: ['"JetBrains Mono"', "ui-monospace", "monospace"]
+        }
+      }
+    }
+  };
+</script>
+<style>
+  html,body { background:#05060A; color:#F8FAFC; }
+  body { font-family: Inter, system-ui, sans-serif; }
+  .glow { box-shadow: 0 0 120px -20px rgba(99,102,241,0.45), 0 0 120px -40px rgba(34,211,238,0.35); }
+  .grid-bg {
+    background-image:
+      radial-gradient(ellipse 60% 50% at 50% 0%, rgba(99,102,241,0.18), transparent 60%),
+      radial-gradient(ellipse 40% 30% at 90% 10%, rgba(34,211,238,0.15), transparent 60%),
+      linear-gradient(#0B0B14, #05060A);
+  }
+  .tick { font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body class="grid-bg min-h-screen">
+<div id="root"></div>
+<script type="text/babel" data-presets="react" src="app.js"></script>
+</body>
+</html>
