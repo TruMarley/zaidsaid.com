@@ -232,6 +232,7 @@ const TABS = [
   { id:"templates", label:"Templates", icon:"template" },
   { id:"projects", label:"Projects", icon:"folder" },
   { id:"architecture", label:"Architecture", icon:"blocks" },
+  { id:"settings", label:"Settings", icon:"grip" },
   { id:"docs", label:"Docs", icon:"book" },
 ];
 
@@ -3367,6 +3368,139 @@ function DocsTab(){
   );
 }
 
+
+function SettingsTab(){
+  const [section, setSection] = React.useState("providers");
+  const [toast, setToast] = React.useState(null);
+
+  const exportData = () => {
+    const dump = {};
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith("zaidsaid.v2.")) {
+        try { dump[k] = JSON.parse(localStorage.getItem(k)); } catch(e) { dump[k] = localStorage.getItem(k); }
+      }
+    }
+    const blob = new Blob([JSON.stringify(dump, null, 2)], { type:"application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "zaidsaid-settings-" + new Date().toISOString().slice(0,10) + ".json";
+    a.click();
+    URL.revokeObjectURL(url);
+    setToast({ kind:"ok", msg:"Exported settings" });
+  };
+
+  const wipeAll = () => {
+    if (!confirm("Wipe ALL Zaidsaid local data? This removes brand kits, projects, provider URLs, avatars, and preferences.")) return;
+    const keys = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith("zaidsaid.v2.")) keys.push(k);
+    }
+    keys.forEach(k => localStorage.removeItem(k));
+    setToast({ kind:"warn", msg:"Wiped "+keys.length+" entries. Reloading…" });
+    setTimeout(() => window.location.reload(), 900);
+  };
+
+  const keys = (() => {
+    const arr = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith("zaidsaid.v2.")) {
+        const v = localStorage.getItem(k) || "";
+        arr.push({ k, size: v.length });
+      }
+    }
+    return arr.sort((a,b) => b.size - a.size);
+  })();
+  const totalBytes = keys.reduce((s,x) => s + x.size, 0);
+
+  return (
+    <div className="grid md:grid-cols-[220px_1fr] gap-4">
+      <aside className="card p-3 h-fit sticky top-4">
+        <div className="text-[11px] uppercase tracking-wider text-[color:var(--muted)] px-2 py-1">Settings</div>
+        <nav className="space-y-1">
+          {[["providers","Providers","globe"],["storage","Local data","blocks"],["about","About","spark"]].map(([id,label,icon]) => (
+            <button key={id} onClick={()=>setSection(id)} className={"w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs text-left " + (section === id ? "bg-indigo-500/15 text-white" : "text-[color:var(--muted)] hover:bg-white/5")}>
+              <span className="w-5 h-5 rounded bg-white/10 flex items-center justify-center">{(I[icon] || I.blocks)({size:10})}</span>
+              {label}
+            </button>
+          ))}
+        </nav>
+      </aside>
+      <main className="card p-5 min-h-[320px] space-y-4">
+        {section === "providers" && (
+          <div className="space-y-3">
+            <div>
+              <h3 className="text-lg font-semibold">All providers</h3>
+              <p className="text-sm text-[color:var(--muted)]">Configure proxy URLs once here. Used by every tab. Keys never leave your proxy.</p>
+            </div>
+            {typeof ProvidersPanel === "function" ? (
+              <>
+                <ProvidersPanel capability="tts" title="Text-to-speech" />
+                <ProvidersPanel capability="voiceClone" title="Voice cloning" />
+                <ProvidersPanel capability="avatarVideo" title="Avatar video" />
+                <ProvidersPanel capability="script" title="Script / LLM" />
+                <ProvidersPanel capability="image" title="Image generation" />
+                <ProvidersPanel capability="motion" title="Video / motion (B-roll)" />
+                <ProvidersPanel capability="stt" title="Transcription (STT)" />
+                <ProvidersPanel capability="music" title="Music" />
+                <ProvidersPanel capability="research" title="Research" />
+              </>
+            ) : (
+              <div className="text-xs text-[color:var(--muted)]">Providers module not loaded.</div>
+            )}
+          </div>
+        )}
+        {section === "storage" && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-semibold">Local data</h3>
+                <p className="text-sm text-[color:var(--muted)]">Everything you do is stored in this browser under the <code>zaidsaid.v2.*</code> namespace.</p>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={exportData} className="btn btn-ghost text-sm">{I.down({size:14})} Export JSON</button>
+                <button onClick={wipeAll} className="btn btn-ghost text-sm text-rose-300">{I.trash({size:14})} Wipe all</button>
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-2 text-xs">
+              <div className="p-3 rounded-lg border border-white/10"><div className="text-[color:var(--muted)]">Keys</div><div className="text-xl font-semibold">{keys.length}</div></div>
+              <div className="p-3 rounded-lg border border-white/10"><div className="text-[color:var(--muted)]">Size (approx)</div><div className="text-xl font-semibold">{(totalBytes/1024).toFixed(1)} KB</div></div>
+              <div className="p-3 rounded-lg border border-white/10"><div className="text-[color:var(--muted)]">Scope</div><div className="text-xl font-semibold">this browser</div></div>
+            </div>
+            <div className="rounded-lg border border-white/10 overflow-hidden">
+              <table className="w-full text-xs">
+                <thead className="bg-white/5 text-[10px] uppercase tracking-wider text-[color:var(--muted)]"><tr><th className="text-left px-3 py-2">Key</th><th className="text-right px-3 py-2">Size</th></tr></thead>
+                <tbody>
+                  {keys.length === 0 ? (
+                    <tr><td colSpan="2" className="px-3 py-3 text-center text-[color:var(--muted)]">No data yet.</td></tr>
+                  ) : keys.map(x => (
+                    <tr key={x.k} className="border-t border-white/5"><td className="px-3 py-2 font-mono">{x.k}</td><td className="px-3 py-2 text-right">{x.size} B</td></tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+        {section === "about" && (
+          <div className="space-y-3">
+            <h3 className="text-lg font-semibold">About Zaidsaid v2</h3>
+            <p className="text-sm text-[color:var(--muted)]">A client-only, vendor-swappable video platform. No build step, no backend required. Provider calls go through your own proxy so this public site never sees a raw API key.</p>
+            <div className="grid md:grid-cols-2 gap-2 text-xs">
+              <div className="p-3 rounded-lg border border-white/10"><div className="text-[color:var(--muted)]">Stack</div><div>React 18 UMD · Tailwind CDN · Babel standalone</div></div>
+              <div className="p-3 rounded-lg border border-white/10"><div className="text-[color:var(--muted)]">Host</div><div>GitHub Pages (zaidsaid.com)</div></div>
+              <div className="p-3 rounded-lg border border-white/10"><div className="text-[color:var(--muted)]">Source</div><div><a href="https://github.com/TruMarley/zaidsaid.com" className="underline">TruMarley/zaidsaid.com</a></div></div>
+              <div className="p-3 rounded-lg border border-white/10"><div className="text-[color:var(--muted)]">License</div><div>MIT</div></div>
+            </div>
+          </div>
+        )}
+        {toast && <Toast kind={toast.kind} msg={toast.msg} onClose={()=>setToast(null)} />}
+      </main>
+    </div>
+  );
+}
+
 /* ---------------- App root ---------------- */
 function App(){
   const [tab, setTab] = useLocalState("tab", "home");
@@ -3411,6 +3545,7 @@ function App(){
       case "templates":    return <TemplatesTab/>;
       case "projects":     return <ProjectsTab/>;
       case "architecture": return <ArchitectureTab/>;
+      case "settings":     return <SettingsTab/>;
       case "docs":         return <DocsTab/>;
       default:             return <HomeTab setTab={setTab} startProject={startProject} />;
     }
