@@ -1,4 +1,4 @@
-/* Zaidsaid — app.js v2.0 — Stage 2: Studio wizard online
+/* Zaidsaid — app.js v2.0 — Stage 3: Repurpose online
  * Security: localStorage namespaced as zaidsaid.v2.*, error boundary, no innerHTML, no eval, no fetch.
  * Archived v1 seed data preserved under ARCHIVE_* for later reuse.
  */
@@ -40,6 +40,9 @@ const I = {
   down: (p)=> <svg viewBox="0 0 24 24" width={p?.size||14} height={p?.size||14} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="m6 9 6 6 6-6"/></svg>,
   plus: (p)=> <svg viewBox="0 0 24 24" width={p?.size||14} height={p?.size||14} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M12 5v14M5 12h14"/></svg>,
   x: (p)=> <svg viewBox="0 0 24 24" width={p?.size||14} height={p?.size||14} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M6 6l12 12M18 6 6 18"/></svg>,
+  wave: (p)=> <svg viewBox="0 0 24 24" width={p?.size||16} height={p?.size||16} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M3 12h2M7 8v8M11 5v14M15 9v6M19 11v2M21 12h0"/></svg>,
+  flame: (p)=> <svg viewBox="0 0 24 24" width={p?.size||16} height={p?.size||16} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M12 2s5 4 5 9a5 5 0 0 1-10 0c0-2 1-3 1-3s1 2 3 2c0-4 1-8 1-8z"/></svg>,
+  link: (p)=> <svg viewBox="0 0 24 24" width={p?.size||16} height={p?.size||16} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M10 14a5 5 0 0 1 0-7l3-3a5 5 0 0 1 7 7l-1.5 1.5M14 10a5 5 0 0 1 0 7l-3 3a5 5 0 0 1-7-7l1.5-1.5"/></svg>,
 };
 
 /* ---------------- Archived v1 seed data (preserved for later reuse) ---------------- */
@@ -1159,6 +1162,566 @@ function StudioTab({ setTab, studioStep, setStudioStep }){
   );
 }
 
+/* ---------------- Repurpose (Stage 3) ---------------- */
+const REPURPOSE_INTAKE_KINDS = [
+  { k:"url",     label:"URL",         hint:"YouTube, Vimeo, podcast feed, webinar link." },
+  { k:"upload",  label:"File",        hint:"MP4 / MOV / MP3 / WAV." },
+  { k:"rss",     label:"RSS",         hint:"Podcast or video feed." },
+  { k:"transcript", label:"Transcript", hint:"Paste a time-coded transcript." },
+];
+const REPURPOSE_STAGES = [
+  { k:"fetch",      label:"Fetch source",          ms: 700 },
+  { k:"transcribe", label:"Transcribe audio",      ms: 1400 },
+  { k:"segment",    label:"Segment into beats",    ms: 900 },
+  { k:"score",      label:"Score virality",        ms: 1100 },
+  { k:"trim",       label:"Trim to platform max",  ms: 700 },
+  { k:"reframe",    label:"Reframe 9:16 / 1:1",    ms: 1000 },
+  { k:"caption",    label:"Generate captions",     ms: 900 },
+  { k:"brand",      label:"Apply brand kit",       ms: 600 },
+];
+const REPURPOSE_PRESETS = [
+  { id:"vertical",  ratio:"9:16", label:"Vertical",  platforms:["TikTok","Reels","Shorts"] },
+  { id:"square",    ratio:"1:1",  label:"Square",    platforms:["X","LinkedIn"] },
+  { id:"landscape", ratio:"16:9", label:"Landscape", platforms:["YouTube","LinkedIn"] },
+];
+const REPURPOSE_SORTS = [
+  { k:"virality", label:"Virality" },
+  { k:"duration", label:"Duration" },
+  { k:"start",    label:"Timecode" },
+];
+function hmsFromSec(sec){
+  const s = Math.max(0, Math.floor(sec||0));
+  const h = Math.floor(s/3600);
+  const m = Math.floor((s%3600)/60);
+  const ss = s%60;
+  const pad = (n)=> String(n).padStart(2,"0");
+  return h>0 ? (h+":"+pad(m)+":"+pad(ss)) : (pad(m)+":"+pad(ss));
+}
+function viralityBand(v){
+  if(v >= 85) return { label:"Fire",    tone:"text-rose-300",    bg:"bg-rose-500/15",    border:"border-rose-400/30" };
+  if(v >= 70) return { label:"Strong",  tone:"text-amber-200",   bg:"bg-amber-500/15",   border:"border-amber-400/30" };
+  if(v >= 55) return { label:"Solid",   tone:"text-emerald-200", bg:"bg-emerald-500/15", border:"border-emerald-400/30" };
+  return            { label:"Okay",    tone:"text-sky-200",     bg:"bg-sky-500/15",     border:"border-sky-400/30" };
+}
+function platformFor(presetId){
+  const p = REPURPOSE_PRESETS.find(x=>x.id===presetId);
+  return p ? p.platforms[0] : "TikTok";
+}
+const REPURPOSE_SEED = {
+  name: "Huberman × Attia long-form → 5 shorts",
+  kind: "url",
+  source: "https://example.com/podcast/huberman-attia-longevity-ep42",
+  durationSec: 5520,
+  brandKitId: "bk-zs",
+  targetCount: 5,
+  clips: [
+    { id:"c1", title:"Zone 2 cardio is the single highest-ROI habit",                     start:  612, end:  654, virality: 92, hook:"The one zone that actually moves the needle.",        caption:"If you only do one thing for longevity, this is it.",             preset:"vertical",  status:"draft" },
+    { id:"c2", title:"Why VO2 max is the strongest predictor of all-cause mortality",     start: 1488, end: 1524, virality: 88, hook:"VO2 max beats every other biomarker for mortality.",   caption:"One number predicts how long you live.",                           preset:"vertical",  status:"draft" },
+    { id:"c3", title:"Protein per meal is the lever, not total daily grams",              start: 2340, end: 2385, virality: 74, hook:"Hit the per-meal threshold or the rest is wasted.",     caption:"Why your protein target is missing the point.",                    preset:"square",    status:"draft" },
+    { id:"c4", title:"The cold plunge debate: cortisol spike vs recovery",                start: 3180, end: 3222, virality: 66, hook:"When cold plunges help — and when they block gains.",   caption:"Cold plunge: the truth nobody says out loud.",                     preset:"vertical",  status:"draft" },
+    { id:"c5", title:"Sleep pressure is a muscle — train it",                             start: 4450, end: 4495, virality: 58, hook:"Build sleep pressure like you build strength.",         caption:"Sleep is a skill. Here's how to train it.",                        preset:"landscape", status:"draft" },
+  ],
+};
+function clipDuration(c){ return Math.max(0, (c.end||0) - (c.start||0)); }
+
+function RepurposeIntake({ project, setProject }){
+  return (
+    <div className="card p-5">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Source</div>
+          <div className="text-lg font-semibold">Point Zaidsaid at your long-form</div>
+        </div>
+        <div className="flex flex-wrap items-center gap-1">
+          {REPURPOSE_INTAKE_KINDS.map(k => {
+            const active = project.kind === k.k;
+            return (
+              <button key={k.k}
+                onClick={()=>setProject({ ...project, kind: k.k })}
+                aria-pressed={active}
+                className={"px-2.5 py-1.5 rounded-xl text-[12px] border " + (active ? "border-white/20 bg-white/10 text-white" : "border-[color:var(--line)] text-[color:var(--muted)] hover:text-white")}>
+                {k.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      <div className="mt-4 grid md:grid-cols-3 gap-3">
+        <label className="md:col-span-2 block">
+          <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">URL, transcript, or paste</span>
+          <div className="mt-1 flex items-center gap-2 bg-transparent border border-[color:var(--line)] rounded-xl px-3 py-2 focus-within:border-white/20">
+            <span className="text-[color:var(--muted)]" aria-hidden>{I.link({size:14})}</span>
+            <input
+              value={project.source || ""}
+              onChange={(e)=>setProject({ ...project, source: e.target.value })}
+              placeholder="https://youtube.com/watch?v=..."
+              className="flex-1 bg-transparent text-sm focus:outline-none"
+            />
+          </div>
+          <div className="mt-2 flex items-center gap-2 flex-wrap">
+            <label className="block flex-1 min-w-[200px]">
+              <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Project name</span>
+              <input
+                value={project.name || ""}
+                onChange={(e)=>setProject({ ...project, name: e.target.value })}
+                className="mt-1 w-full bg-transparent border border-[color:var(--line)] rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-white/20"
+              />
+            </label>
+            <label className="block">
+              <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Target clips</span>
+              <input
+                type="number" min={1} max={20}
+                value={project.targetCount || 5}
+                onChange={(e)=>setProject({ ...project, targetCount: Math.max(1, Math.min(20, parseInt(e.target.value||"0", 10)||0)) })}
+                className="mt-1 w-24 bg-transparent border border-[color:var(--line)] rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-white/20"
+              />
+            </label>
+            <label className="block">
+              <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Source length</span>
+              <div className="mt-1 chip">{hmsFromSec(project.durationSec||0)}</div>
+            </label>
+          </div>
+        </label>
+        <div>
+          <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Upload (UI only)</span>
+          <div className="mt-1 border border-dashed border-[color:var(--line)] rounded-xl p-6 text-center text-[12px] text-[color:var(--muted)]">
+            <div className="text-white/80 font-semibold">Drop a video or podcast</div>
+            <div className="mt-1">MP4 · MOV · MP3 · WAV</div>
+            <div className="mt-3 opacity-70">Uploads wire up in a later stage.</div>
+            <button type="button" className="btn mt-3" aria-disabled="true" onClick={(e)=>e.preventDefault()}>
+              Choose file
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RepurposeAnalyzer({ project, setProject, onComplete }){
+  const [running, setRunning] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [stageIdx, setStageIdx] = useState(-1);
+  const timersRef = useRef([]);
+  useEffect(()=>()=>{ timersRef.current.forEach(clearTimeout); timersRef.current = []; }, []);
+  const start = () => {
+    timersRef.current.forEach(clearTimeout);
+    timersRef.current = [];
+    setRunning(true); setProgress(0); setStageIdx(0);
+    let elapsed = 0;
+    const total = REPURPOSE_STAGES.reduce((a,s)=>a+s.ms, 0);
+    REPURPOSE_STAGES.forEach((s, i) => {
+      elapsed += s.ms;
+      const t = setTimeout(() => {
+        setStageIdx(i+1);
+        setProgress(Math.min(100, Math.round((elapsed/total)*100)));
+        if(i === REPURPOSE_STAGES.length - 1){
+          setRunning(false);
+          if(onComplete) onComplete();
+        }
+      }, elapsed);
+      timersRef.current.push(t);
+    });
+  };
+  const reset = () => {
+    timersRef.current.forEach(clearTimeout);
+    timersRef.current = [];
+    setRunning(false); setProgress(0); setStageIdx(-1);
+  };
+  return (
+    <div className="card p-5">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Analyzer</div>
+          <div className="text-lg font-semibold">Find the moments worth clipping</div>
+          <div className="text-[12px] text-[color:var(--muted)] mt-1">This is a visualization. No external calls are made.</div>
+        </div>
+        <div className="flex items-center gap-2">
+          <button className="btn" onClick={start} disabled={running}>{running ? "Analyzing…" : "Analyze"}</button>
+          <button className="btn btn-ghost" onClick={reset} disabled={running && stageIdx < REPURPOSE_STAGES.length}>Reset</button>
+        </div>
+      </div>
+      <div className="mt-4">
+        <div className="h-2 rounded-full bg-white/5 overflow-hidden">
+          <div className="h-full transition-all duration-500" style={{width: progress + "%", background:"linear-gradient(90deg,#f97316,#ec4899,#6366f1)"}} />
+        </div>
+        <div className="mt-2 flex items-center justify-between text-[11px] text-[color:var(--muted)]">
+          <span>{progress}%</span>
+          <span>{stageIdx >= REPURPOSE_STAGES.length ? "Complete" : (running ? "Working…" : (stageIdx < 0 ? "Idle" : "Paused"))}</span>
+        </div>
+      </div>
+      <div className="mt-4 grid md:grid-cols-4 gap-2">
+        {REPURPOSE_STAGES.map((s, i) => {
+          const state = i < stageIdx ? "done" : (i === stageIdx && running ? "active" : "pending");
+          return (
+            <div key={s.k}
+              className={"rounded-xl border p-3 text-[12px] transition-colors " +
+                (state==="done" ? "border-white/15 bg-white/[0.04] text-white" :
+                 state==="active" ? "border-white/20 bg-white/[0.08] text-white" :
+                 "border-[color:var(--line)] text-[color:var(--muted)]")}>
+              <div className="flex items-center gap-2">
+                <span className="w-5 h-5 rounded-full flex items-center justify-center text-[10px]"
+                  style={{background: state==="done" ? "linear-gradient(135deg,#f97316,#ec4899)" : (state==="active" ? "rgba(255,255,255,0.15)" : "rgba(255,255,255,0.05)")}}>
+                  {state==="done" ? I.check({size:12}) : (i+1)}
+                </span>
+                <span className="font-semibold">{s.label}</span>
+              </div>
+              <div className="mt-1 text-[11px] text-[color:var(--muted)]">{s.ms} ms</div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function RepurposeTranscriptStrip({ project }){
+  const dur = Math.max(1, project.durationSec || 1);
+  // Seed a deterministic waveform from the project id so it feels real but doesn't jitter
+  const bars = useMemo(() => {
+    const arr = [];
+    const seedStr = (project.name||"zaidsaid") + "|" + dur;
+    let h = 2166136261;
+    for(let i = 0; i < seedStr.length; i++){ h ^= seedStr.charCodeAt(i); h = Math.imul(h, 16777619); }
+    const rand = () => { h ^= h << 13; h ^= h >>> 17; h ^= h << 5; return ((h>>>0) % 1000) / 1000; };
+    for(let i = 0; i < 120; i++){ arr.push(0.15 + rand() * 0.85); }
+    return arr;
+  }, [project.name, dur]);
+  return (
+    <div className="card p-5">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Source timeline</div>
+          <div className="text-lg font-semibold">Highlights across {hmsFromSec(dur)}</div>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="chip">{project.clips.length} clips</span>
+          <span className="chip">{Math.round(project.clips.reduce((a,c)=>a+c.virality,0)/Math.max(1,project.clips.length))} avg virality</span>
+        </div>
+      </div>
+      <div className="mt-4 relative rounded-xl border border-[color:var(--line)] p-3" style={{background:"rgba(255,255,255,0.02)"}}>
+        <div className="flex items-end gap-[2px] h-20">
+          {bars.map((v, i) => (
+            <div key={i} className="flex-1 rounded-[2px]" style={{ height: (v*100)+"%", background:"linear-gradient(180deg, rgba(99,102,241,0.7), rgba(34,211,238,0.4))" }} aria-hidden />
+          ))}
+        </div>
+        <div className="relative h-8 mt-1">
+          {project.clips.map(c => {
+            const leftPct = (c.start / dur) * 100;
+            const widthPct = Math.max(0.5, (clipDuration(c) / dur) * 100);
+            const band = viralityBand(c.virality);
+            return (
+              <div key={c.id}
+                title={c.title + " · " + hmsFromSec(c.start) + "–" + hmsFromSec(c.end) + " · " + c.virality + "/100"}
+                className={"absolute top-0 h-6 rounded-md border " + band.border + " " + band.bg}
+                style={{ left: leftPct + "%", width: widthPct + "%", minWidth: "6px" }}>
+                <div className="text-[10px] text-white/80 px-1 truncate leading-6">{c.virality}</div>
+              </div>
+            );
+          })}
+        </div>
+        <div className="flex items-center justify-between text-[10px] text-[color:var(--muted)] mt-1">
+          <span>{hmsFromSec(0)}</span>
+          <span>{hmsFromSec(dur/2)}</span>
+          <span>{hmsFromSec(dur)}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RepurposeClipCard({ clip, onField, onRegen, onRemove }){
+  const band = viralityBand(clip.virality);
+  const preset = REPURPOSE_PRESETS.find(p => p.id === clip.preset) || REPURPOSE_PRESETS[0];
+  const previewW = preset.id === "vertical" ? 72 : (preset.id === "square" ? 90 : 128);
+  const previewH = preset.id === "vertical" ? 128 : (preset.id === "square" ? 90 : 72);
+  return (
+    <div className="card p-4">
+      <div className="flex items-start gap-4">
+        <div className="rounded-xl bg-gradient-to-br from-indigo-500 via-fuchsia-500 to-cyan-500 opacity-90 flex items-center justify-center text-white/80 text-[10px]"
+          style={{ width: previewW, height: previewH }} aria-hidden>
+          <span>{preset.ratio}</span>
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className={"px-2 py-0.5 rounded-md text-[11px] border " + band.border + " " + band.bg + " " + band.tone}>{I.flame({size:12})} {band.label} {clip.virality}</span>
+            <span className="chip">{hmsFromSec(clip.start)} – {hmsFromSec(clip.end)}</span>
+            <span className="chip">{clipDuration(clip)}s</span>
+            <span className="chip">{preset.ratio} · {platformFor(clip.preset)}</span>
+          </div>
+          <input
+            value={clip.title}
+            onChange={(e)=>onField("title", e.target.value)}
+            className="mt-2 w-full bg-transparent border border-transparent hover:border-[color:var(--line)] focus:border-white/20 rounded-md px-1 py-0.5 font-semibold text-[14px] focus:outline-none"
+            aria-label="Clip title"
+          />
+          <div className="text-[12px] text-[color:var(--muted)] mt-1">{clip.hook}</div>
+        </div>
+      </div>
+      <div className="grid md:grid-cols-2 gap-3 mt-3">
+        <label className="block">
+          <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Caption preview</span>
+          <textarea
+            value={clip.caption}
+            onChange={(e)=>onField("caption", e.target.value)}
+            rows={2}
+            className="mt-1 w-full bg-transparent border border-[color:var(--line)] rounded-lg p-2 text-sm focus:outline-none focus:border-white/20"
+          />
+          <div className="flex items-center justify-end mt-1">
+            <button className="chip" onClick={()=>onRegen("caption")}>{I.refresh({size:12})} Regenerate</button>
+          </div>
+        </label>
+        <div>
+          <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Preset</span>
+          <div className="mt-1 flex flex-wrap gap-1">
+            {REPURPOSE_PRESETS.map(p => {
+              const active = clip.preset === p.id;
+              return (
+                <button key={p.id}
+                  onClick={()=>onField("preset", p.id)}
+                  aria-pressed={active}
+                  className={"px-2.5 py-1.5 rounded-xl text-[12px] border " + (active ? "border-white/20 bg-white/10 text-white" : "border-[color:var(--line)] text-[color:var(--muted)] hover:text-white")}>
+                  {p.ratio}
+                </button>
+              );
+            })}
+          </div>
+          <div className="mt-2 text-[11px] text-[color:var(--muted)]">Platforms: {preset.platforms.join(" · ")}</div>
+          <div className="mt-2 flex items-center gap-2">
+            <label className="block">
+              <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Start</span>
+              <input type="number" min={0} value={clip.start}
+                onChange={(e)=>onField("start", Math.max(0, parseInt(e.target.value||"0", 10)||0))}
+                className="mt-1 w-24 bg-transparent border border-[color:var(--line)] rounded-md px-2 py-1 text-[12px] focus:outline-none focus:border-white/20"/>
+            </label>
+            <label className="block">
+              <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">End</span>
+              <input type="number" min={0} value={clip.end}
+                onChange={(e)=>onField("end", Math.max(0, parseInt(e.target.value||"0", 10)||0))}
+                className="mt-1 w-24 bg-transparent border border-[color:var(--line)] rounded-md px-2 py-1 text-[12px] focus:outline-none focus:border-white/20"/>
+            </label>
+          </div>
+        </div>
+      </div>
+      <div className="mt-3 flex items-center justify-between gap-2 flex-wrap">
+        <div className="flex items-center gap-1">
+          <button className="chip" onClick={()=>onRegen("title")}>{I.refresh({size:12})} Re-title</button>
+          <button className="chip" onClick={()=>onRegen("hook")}>{I.refresh({size:12})} Re-hook</button>
+          <button className="chip" onClick={()=>onRegen("virality")}>{I.flame({size:12})} Re-score</button>
+        </div>
+        <div className="flex items-center gap-1">
+          <span className="chip">Status: {clip.status || "draft"}</span>
+          <button className="chip" onClick={onRemove} aria-label="Remove clip">{I.x({size:12})}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function clipRegenerate(field, clip){
+  if(field === "title"){
+    const pool = [
+      "This one habit outperforms every supplement",
+      "The truth almost nobody says out loud",
+      "Why the top 1% do this every morning",
+      "The single biggest mistake people make here",
+      "What changed everything — in 60 seconds",
+    ];
+    return pool[Math.floor(Math.random()*pool.length)];
+  }
+  if(field === "hook"){
+    const pool = [
+      "If you remember one thing, remember this.",
+      "This is the part everybody skips. Don't.",
+      "Watch until the end — the payoff matters.",
+      "Here's the research-backed version.",
+    ];
+    return pool[Math.floor(Math.random()*pool.length)];
+  }
+  if(field === "caption"){
+    const pool = [
+      "The single highest-ROI move, explained in 30 seconds.",
+      "Save this for the next time it comes up.",
+      "Why experts disagree with your feed.",
+      "Counter-intuitive, but evidence-backed.",
+    ];
+    return pool[Math.floor(Math.random()*pool.length)];
+  }
+  if(field === "virality"){
+    const v = Math.max(35, Math.min(99, (clip.virality||60) + Math.round((Math.random()*14)-7)));
+    return v;
+  }
+  return null;
+}
+
+function RepurposeTab(){
+  const [project, setProject] = useLocalState("repurpose.project", REPURPOSE_SEED);
+  useEffect(() => {
+    if(project && typeof project === "object" && Array.isArray(project.clips) && project.clips.length > 0) return;
+    setProject(REPURPOSE_SEED);
+  }, []);
+  const [sort, setSort] = useLocalState("repurpose.sort", "virality");
+  const [selected, setSelected] = useLocalState("repurpose.selected", []);
+  const [batchPreset, setBatchPreset] = useLocalState("repurpose.batchPreset", "vertical");
+
+  const clipField = (clipId, field, value) => {
+    setProject({ ...project, clips: project.clips.map(c => c.id===clipId ? { ...c, [field]: value } : c) });
+  };
+  const clipRegen = (clipId, field) => {
+    const clip = project.clips.find(c => c.id === clipId);
+    if(!clip) return;
+    const v = clipRegenerate(field, clip);
+    if(v === null) return;
+    clipField(clipId, field, v);
+  };
+  const removeClip = (clipId) => {
+    setProject({ ...project, clips: project.clips.filter(c => c.id !== clipId) });
+    setSelected(selected.filter(id => id !== clipId));
+  };
+  const addClip = () => {
+    const nid = "c" + (project.clips.length + 1) + "_" + Math.random().toString(36).slice(2,6);
+    const lastEnd = project.clips.length ? project.clips[project.clips.length-1].end : 0;
+    setProject({
+      ...project,
+      clips: [...project.clips, {
+        id: nid, title:"New highlight — edit me",
+        start: lastEnd + 30, end: lastEnd + 65, virality: 60,
+        hook:"Hook copy here.", caption:"Caption copy here.",
+        preset:"vertical", status:"draft",
+      }],
+    });
+  };
+  const toggleSelected = (id) => {
+    setSelected(selected.includes(id) ? selected.filter(x=>x!==id) : [...selected, id]);
+  };
+  const selectAll = () => setSelected(project.clips.map(c=>c.id));
+  const clearSelected = () => setSelected([]);
+  const applyBatchPreset = () => {
+    if(!selected.length) return;
+    setProject({ ...project, clips: project.clips.map(c => selected.includes(c.id) ? { ...c, preset: batchPreset } : c) });
+  };
+  const markApproved = () => {
+    if(!selected.length) return;
+    setProject({ ...project, clips: project.clips.map(c => selected.includes(c.id) ? { ...c, status: "approved" } : c) });
+  };
+  const resetSeed = () => setProject(REPURPOSE_SEED);
+
+  const sorted = useMemo(() => {
+    const arr = project.clips.slice();
+    if(sort === "virality") arr.sort((a,b) => b.virality - a.virality);
+    else if(sort === "duration") arr.sort((a,b) => clipDuration(b) - clipDuration(a));
+    else if(sort === "start") arr.sort((a,b) => a.start - b.start);
+    return arr;
+  }, [project.clips, sort]);
+
+  const approvedCount = project.clips.filter(c => c.status === "approved").length;
+  const totalExportSec = project.clips
+    .filter(c => selected.includes(c.id) || (!selected.length && c.status === "approved"))
+    .reduce((a,c) => a + clipDuration(c), 0);
+
+  return (
+    <div className="max-w-[1400px] mx-auto px-5 py-8">
+      <div className="flex items-center justify-between gap-3 flex-wrap mb-5">
+        <div>
+          <h1 className="text-3xl font-bold">Repurpose</h1>
+          <p className="text-[color:var(--muted)] mt-1">Long-form in. Ranked, branded, platform-native shorts out.</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button className="btn btn-ghost" onClick={resetSeed}>{I.refresh({size:14})} Reset to example</button>
+        </div>
+      </div>
+
+      <div className="grid gap-4">
+        <RepurposeIntake project={project} setProject={setProject} />
+        <RepurposeAnalyzer project={project} setProject={setProject} />
+        <RepurposeTranscriptStrip project={project} />
+
+        <div className="card p-5">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div>
+              <div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Ranked highlights</div>
+              <div className="text-lg font-semibold">{project.clips.length} clips · top pick {Math.max(...project.clips.map(c=>c.virality))} virality</div>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Sort by</span>
+              {REPURPOSE_SORTS.map(s => (
+                <button key={s.k}
+                  onClick={()=>setSort(s.k)}
+                  aria-pressed={sort===s.k}
+                  className={"px-2.5 py-1.5 rounded-xl text-[12px] border " + (sort===s.k ? "border-white/20 bg-white/10 text-white" : "border-[color:var(--line)] text-[color:var(--muted)] hover:text-white")}>
+                  {s.label}
+                </button>
+              ))}
+              <button className="chip" onClick={addClip}>{I.plus({size:12})} Add clip</button>
+            </div>
+          </div>
+
+          <div className="mt-3 flex items-center gap-2 flex-wrap">
+            <button className="chip" onClick={selectAll}>Select all</button>
+            <button className="chip" onClick={clearSelected}>Clear</button>
+            <span className="chip">{selected.length} selected</span>
+          </div>
+
+          <div className="mt-4 grid gap-3">
+            {sorted.map(c => {
+              const checked = selected.includes(c.id);
+              return (
+                <div key={c.id} className={"relative " + (checked ? "ring-brand rounded-2xl" : "")}>
+                  <label className="absolute -top-2 -left-2 z-10 flex items-center gap-1 bg-[color:var(--bg)] rounded-full px-2 py-0.5 border border-[color:var(--line)] text-[11px] text-[color:var(--muted)] cursor-pointer">
+                    <input type="checkbox" checked={checked} onChange={()=>toggleSelected(c.id)} className="accent-white" />
+                    <span>Select</span>
+                  </label>
+                  <RepurposeClipCard
+                    clip={c}
+                    onField={(f,v)=>clipField(c.id, f, v)}
+                    onRegen={(f)=>clipRegen(c.id, f)}
+                    onRemove={()=>removeClip(c.id)}
+                  />
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="card p-5">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              <div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Batch export</div>
+              <div className="text-lg font-semibold">Ship the selected clips</div>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Preset</span>
+              {REPURPOSE_PRESETS.map(p => {
+                const active = batchPreset === p.id;
+                return (
+                  <button key={p.id}
+                    onClick={()=>setBatchPreset(p.id)}
+                    aria-pressed={active}
+                    className={"px-2.5 py-1.5 rounded-xl text-[12px] border " + (active ? "border-white/20 bg-white/10 text-white" : "border-[color:var(--line)] text-[color:var(--muted)] hover:text-white")}>
+                    {p.ratio}
+                  </button>
+                );
+              })}
+              <button className="btn" onClick={applyBatchPreset} disabled={!selected.length}>Apply to selected</button>
+              <button className="btn" onClick={markApproved} disabled={!selected.length}>{I.check({size:14})} Mark approved</button>
+            </div>
+          </div>
+          <div className="grid md:grid-cols-4 gap-3 mt-3 text-sm">
+            <div><div className="text-[color:var(--muted)] text-[11px]">Project</div><div className="truncate">{project.name}</div></div>
+            <div><div className="text-[color:var(--muted)] text-[11px]">Selected</div><div>{selected.length} of {project.clips.length}</div></div>
+            <div><div className="text-[color:var(--muted)] text-[11px]">Approved</div><div>{approvedCount}</div></div>
+            <div><div className="text-[color:var(--muted)] text-[11px]">Output duration</div><div>{totalExportSec}s</div></div>
+          </div>
+          <div className="mt-4 flex items-center gap-2">
+            <button className="btn btn-primary" onClick={(e)=>e.preventDefault()} aria-disabled="true">{I.play({size:14})} Export batch (stub)</button>
+            <span className="text-[11px] text-[color:var(--muted)]">Real export pipeline arrives in a later stage.</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ---------------- Placeholder tabs ---------------- */
 function Placeholder({ title, subtitle, children }){
   return (
@@ -1169,20 +1732,6 @@ function Placeholder({ title, subtitle, children }){
       </div>
       {children}
     </div>
-  );
-}
-function RepurposeTab(){
-  return (
-    <Placeholder title="Repurpose" subtitle="Long-form → shorts. Highlight detection and virality scoring. Coming online in Stage 3.">
-      <div className="grid md:grid-cols-3 gap-3">
-        {ARCHIVE_PLATFORMS.map(p => (
-          <div key={p.id} className="card p-4">
-            <div className="text-sm font-semibold">{p.name}</div>
-            <div className="text-xs text-[color:var(--muted)] mt-1">{p.ratio} • up to {p.max}</div>
-          </div>
-        ))}
-      </div>
-    </Placeholder>
   );
 }
 function AvatarsTab(){
