@@ -52,7 +52,9 @@ const I = {
   starOutline: (p)=> <svg viewBox="0 0 24 24" width={p?.size||14} height={p?.size||14} fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M12 2.5 14.9 9l6.6.6-5 4.4 1.5 6.5L12 17l-6 3.5L7.5 14l-5-4.4L9.1 9z"/></svg>,
   globe: (p)=> <svg viewBox="0 0 24 24" width={p?.size||14} height={p?.size||14} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/></svg>,
   comment: (p)=> <svg viewBox="0 0 24 24" width={p?.size||14} height={p?.size||14} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M21 12a8 8 0 1 1-3.2-6.4L21 5v7z"/></svg>,
-  clock: (p)=> <svg viewBox="0 0 24 24" width={p?.size||14} height={p?.size||14} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>,
+  clock: (p)=> <svg viewBox="0 0 24 24" width={p?.size||14} height={p?.size||14} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>,  palette: (p)=> <svg viewBox="0 0 24 24" width={p?.size||14} height={p?.size||14} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M12 3a9 9 0 1 0 0 18c1.5 0 2-1 2-2s-.5-1.5-.5-2 .5-1.5 2-1.5H18a3 3 0 0 0 3-3 9 9 0 0 0-9-9Z"/><circle cx="7.5" cy="10.5" r="1"/><circle cx="12" cy="7.5" r="1"/><circle cx="16.5" cy="10.5" r="1"/></svg>,
+  eye: (p)=> <svg viewBox="0 0 24 24" width={p?.size||14} height={p?.size||14} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>,
+
 };
 
 /* ---------------- Archived v1 seed data (preserved for later reuse) ---------------- */
@@ -2254,32 +2256,273 @@ function AvatarsTab(){
   );
 }
 function BrandsTab(){
+  const [kits, setKits] = React.useState(() => {
+    try { const raw = localStorage.getItem("zaidsaid.v2.brandkits"); if(raw) return JSON.parse(raw); } catch(e){}
+    return ARCHIVE_BRAND_KITS.map(k => ({ ...k, isDefault: k.id==="bk-zs", tagline: k.id==="bk-zs" ? "Cinematic AI studio for creators" : (k.id==="bk-edu" ? "Clean educational explainers" : "Authoritative field journalism"), captionStyle: k.motion==="cinematic" ? "serif-lower" : (k.motion==="clean" ? "sans-upper" : "mono-bold") }));
+  });
+  const [editing, setEditing] = React.useState(null);
+  const [search, setSearch] = React.useState("");
+  const [toast, setToast] = React.useState(null);
+  const [preview, setPreview] = React.useState(null);
+
+  React.useEffect(() => {
+    try { localStorage.setItem("zaidsaid.v2.brandkits", JSON.stringify(kits)); } catch(e){}
+  }, [kits]);
+
+  const filtered = kits.filter(k => !search || (k.name+" "+(k.tagline||"")+" "+k.font+" "+k.motion+" "+k.voice).toLowerCase().includes(search.toLowerCase()));
+
+  const onSave = (updated) => {
+    setKits(prev => prev.map(k => k.id===updated.id ? updated : k));
+    setEditing(null);
+    setToast({ kind:"ok", msg:"Brand kit saved" });
+  };
+  const onNew = () => {
+    const id = "bk-" + Math.random().toString(36).slice(2,8);
+    const nk = { id, name:"New brand kit", tagline:"", primary:"#6366f1", secondary:"#22d3ee", accent:"#ec4899", font:"Inter", motion:"cinematic", voice:"warm", captionStyle:"sans-upper", isDefault:false };
+    setKits(prev => [nk, ...prev]);
+    setEditing(nk);
+  };
+  const onDuplicate = (k) => {
+    const copy = { ...k, id:"bk-"+Math.random().toString(36).slice(2,8), name:k.name+" (copy)", isDefault:false };
+    setKits(prev => [copy, ...prev]);
+    setToast({ kind:"ok", msg:"Duplicated" });
+  };
+  const onDelete = (k) => {
+    if (!confirm("Delete brand kit \""+k.name+"\"?")) return;
+    setKits(prev => prev.filter(x => x.id!==k.id));
+    setToast({ kind:"warn", msg:"Deleted" });
+  };
+  const onSetDefault = (k) => {
+    setKits(prev => prev.map(x => ({ ...x, isDefault: x.id===k.id })));
+    setToast({ kind:"ok", msg:"Default kit: "+k.name });
+  };
+  const onReset = () => {
+    if (!confirm("Reset brand kits to the original demo set?")) return;
+    try { localStorage.removeItem("zaidsaid.v2.brandkits"); } catch(e){}
+    setKits(ARCHIVE_BRAND_KITS.map(k => ({ ...k, isDefault: k.id==="bk-zs", tagline: k.id==="bk-zs" ? "Cinematic AI studio for creators" : (k.id==="bk-edu" ? "Clean educational explainers" : "Authoritative field journalism"), captionStyle: k.motion==="cinematic" ? "serif-lower" : (k.motion==="clean" ? "sans-upper" : "mono-bold") })));
+    setToast({ kind:"ok", msg:"Reset to demo" });
+  };
+
   return (
-    <Placeholder title="Brand Kits" subtitle="Palettes, typography, motion presets, caption styles, intros, outros. Full editor lands in Stage 5.">
-      <div className="grid md:grid-cols-3 gap-3">
-        {ARCHIVE_BRAND_KITS.map(b => (
-          <div key={b.id} className="card p-4">
-            <div className="font-semibold">{b.name}</div>
-            <div className="text-xs text-[color:var(--muted)] mt-1">{b.font} • {b.motion} • {b.voice}</div>
-            <div className="flex gap-2 mt-3">
-              <span className="w-8 h-8 rounded-lg" style={{background:b.primary}}/>
-              <span className="w-8 h-8 rounded-lg" style={{background:b.secondary}}/>
-              <span className="w-8 h-8 rounded-lg" style={{background:b.accent}}/>
-            </div>
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <div className="text-xl font-semibold">Brand Kits</div>
+          <div className="text-xs text-[color:var(--muted)]">Palettes, typography, motion & caption presets. Saved locally under zaidsaid.v2.brandkits.</div>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="relative">
+            <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search kits" className="px-3 py-2 pr-8 rounded-xl bg-white/5 border border-white/10 text-sm outline-none focus:border-white/30" />
+            <span className="absolute right-2 top-1/2 -translate-y-1/2 opacity-60">{I.search({size:14})}</span>
           </div>
-        ))}
+          <button onClick={onReset} className="btn btn-ghost text-sm">{I.refresh({size:14})} Reset demo</button>
+          <button onClick={onNew} className="btn btn-primary text-sm">{I.plus({size:14})} New kit</button>
+        </div>
       </div>
-    </Placeholder>
+
+      {filtered.length === 0 ? (
+        <EmptyState icon={I.palette({size:28})} title="No brand kits match" hint="Clear the search or create a new kit." action={<button onClick={onNew} className="btn btn-primary text-sm">{I.plus({size:14})} New kit</button>} />
+      ) : (
+        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {filtered.map(k => (
+            <BrandKitCard key={k.id} kit={k} onEdit={setEditing} onPreview={setPreview} onDuplicate={onDuplicate} onDelete={onDelete} onSetDefault={onSetDefault} />
+          ))}
+        </div>
+      )}
+
+      <BrandKitEditor open={!!editing} kit={editing} onClose={()=>setEditing(null)} onSave={onSave} />
+      <BrandKitPreview open={!!preview} kit={preview} onClose={()=>setPreview(null)} />
+      {toast && <Toast kind={toast.kind} msg={toast.msg} onClose={()=>setToast(null)} />}
+    </div>
   );
 }
-const TEMPLATE_PREVIEW = [
-  { id:"ads", name:"Ads", blurb:"DR hooks, benefit stacks, CTA cards, captions." },
-  { id:"explainer", name:"Explainer", blurb:"Topic intro, 3-beat body, takeaway, outro." },
-  { id:"faceless", name:"Faceless", blurb:"B-roll + captions + VO. No camera needed." },
-  { id:"training", name:"Training", blurb:"Module intro, lesson chapters, recap, quiz." },
-  { id:"youtube", name:"YouTube", blurb:"Cold open, section markers, B-roll beats." },
-  { id:"social", name:"Social short", blurb:"Hook → payoff → ask. Under 45s." },
+
+function BrandKitCard({ kit, onEdit, onPreview, onDuplicate, onDelete, onSetDefault }){
+  const style = {
+    background: "linear-gradient(135deg, "+kit.primary+"33, "+kit.secondary+"22, "+kit.accent+"22)",
+    borderColor: kit.primary+"55"
+  };
+  return (
+    <div className="card overflow-hidden border" style={{ borderColor:"rgba(255,255,255,0.08)" }}>
+      <div className="h-28 relative" style={style}>
+        <div className="absolute inset-0 flex items-end p-3">
+          <div>
+            <div className="text-xs uppercase tracking-wider opacity-70">{kit.motion} · {kit.voice}</div>
+            <div className="text-lg font-semibold" style={{ fontFamily: kit.font }}>{kit.name}</div>
+          </div>
+        </div>
+        {kit.isDefault && (
+          <span className="absolute top-2 right-2 text-[10px] px-2 py-0.5 rounded-full bg-black/50 border border-white/15">DEFAULT</span>
+        )}
+      </div>
+      <div className="p-3 space-y-3">
+        <div className="text-xs text-[color:var(--muted)] line-clamp-2 min-h-[32px]">{kit.tagline || "No tagline yet."}</div>
+        <div className="flex gap-2">
+          <span title="Primary" className="w-7 h-7 rounded-lg border border-white/10" style={{ background: kit.primary }}></span>
+          <span title="Secondary" className="w-7 h-7 rounded-lg border border-white/10" style={{ background: kit.secondary }}></span>
+          <span title="Accent" className="w-7 h-7 rounded-lg border border-white/10" style={{ background: kit.accent }}></span>
+          <div className="flex-1"></div>
+          <Tag>{kit.font}</Tag>
+          <Tag>{kit.captionStyle || "caption"}</Tag>
+        </div>
+        <div className="flex items-center justify-between gap-2 pt-1">
+          <div className="flex gap-1">
+            <button onClick={()=>onEdit(kit)} className="btn btn-ghost text-xs">{I.edit({size:12})} Edit</button>
+            <button onClick={()=>onPreview(kit)} className="btn btn-ghost text-xs">{I.eye({size:12})} Preview</button>
+          </div>
+          <div className="flex gap-1">
+            <button onClick={()=>onDuplicate(kit)} title="Duplicate" className="btn btn-ghost text-xs">{I.copy({size:12})}</button>
+            {!kit.isDefault && <button onClick={()=>onSetDefault(kit)} title="Set default" className="btn btn-ghost text-xs">{I.star({size:12})}</button>}
+            <button onClick={()=>onDelete(kit)} title="Delete" className="btn btn-ghost text-xs text-rose-300">{I.trash({size:12})}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const BRAND_FONTS = ["Inter","IBM Plex Sans","Source Serif Pro","Space Grotesk","JetBrains Mono","Playfair Display","Roboto","DM Sans","Merriweather","Poppins"];
+const BRAND_MOTIONS = [
+  { id:"cinematic", label:"Cinematic", hint:"Slow parallax, deep focus, lens flare" },
+  { id:"clean", label:"Clean", hint:"Flat cards, soft fades, steady pacing" },
+  { id:"kinetic", label:"Kinetic", hint:"Big type, whip pans, hard cuts" },
+  { id:"whiteboard", label:"Whiteboard", hint:"Hand-drawn reveal, marker strokes" },
+  { id:"docu", label:"Docu", hint:"Handheld, grain, interview kens" }
 ];
+const BRAND_VOICES = [
+  { id:"warm", label:"Warm & conversational" },
+  { id:"friendly", label:"Friendly & upbeat" },
+  { id:"authoritative", label:"Authoritative & serious" },
+  { id:"playful", label:"Playful & quirky" },
+  { id:"analytical", label:"Analytical & calm" }
+];
+const BRAND_CAPTIONS = [
+  { id:"sans-upper", label:"Sans, uppercase, bold", preview:"WE SHIP ON FRIDAYS" },
+  { id:"serif-lower", label:"Serif, lowercase, soft", preview:"we ship on fridays" },
+  { id:"mono-bold", label:"Mono, bold, tight", preview:"WE_SHIP_ON_FRIDAYS" },
+  { id:"karaoke", label:"Karaoke word-by-word", preview:"we · ship · on · fridays" }
+];
+
+function BrandKitEditor({ open, kit, onClose, onSave }){
+  const [draft, setDraft] = React.useState(kit || null);
+  React.useEffect(() => { setDraft(kit); }, [kit && kit.id]);
+  if (!open || !draft) return null;
+  const set = (patch) => setDraft(d => ({ ...d, ...patch }));
+  const swatchRow = (label, key) => (
+    <label className="flex items-center justify-between gap-3 py-1">
+      <span className="text-xs text-[color:var(--muted)] w-20">{label}</span>
+      <div className="flex items-center gap-2 flex-1">
+        <input type="color" value={draft[key]} onChange={e=>set({[key]:e.target.value})} className="w-10 h-8 rounded-md bg-transparent border border-white/10" />
+        <input type="text" value={draft[key]} onChange={e=>set({[key]:e.target.value})} className="flex-1 px-2 py-1 text-xs rounded-md bg-white/5 border border-white/10 font-mono" />
+      </div>
+    </label>
+  );
+  return (
+    <Drawer open={open} title={"Edit · "+draft.name} onClose={onClose} footer={
+      <div className="flex justify-end gap-2">
+        <button onClick={onClose} className="btn btn-ghost text-sm">Cancel</button>
+        <button onClick={()=>onSave(draft)} className="btn btn-primary text-sm">{I.check({size:14})} Save kit</button>
+      </div>
+    }>
+      <div className="space-y-5">
+        <div className="space-y-2">
+          <div className="text-xs uppercase tracking-wider text-[color:var(--muted)]">Identity</div>
+          <label className="block">
+            <span className="text-xs text-[color:var(--muted)]">Name</span>
+            <input value={draft.name} onChange={e=>set({name:e.target.value})} className="mt-1 w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-sm" />
+          </label>
+          <label className="block">
+            <span className="text-xs text-[color:var(--muted)]">Tagline</span>
+            <input value={draft.tagline||""} onChange={e=>set({tagline:e.target.value})} placeholder="One-line description used in previews" className="mt-1 w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-sm" />
+          </label>
+        </div>
+
+        <div className="space-y-2">
+          <div className="text-xs uppercase tracking-wider text-[color:var(--muted)]">Palette</div>
+          {swatchRow("Primary","primary")}
+          {swatchRow("Secondary","secondary")}
+          {swatchRow("Accent","accent")}
+        </div>
+
+        <div className="space-y-2">
+          <div className="text-xs uppercase tracking-wider text-[color:var(--muted)]">Typography</div>
+          <select value={draft.font} onChange={e=>set({font:e.target.value})} className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-sm">
+            {BRAND_FONTS.map(f => <option key={f} value={f}>{f}</option>)}
+          </select>
+          <div className="p-3 rounded-lg border border-white/10 bg-black/20">
+            <div className="text-2xl" style={{ fontFamily: draft.font, color: draft.primary }}>The quick brown fox</div>
+            <div className="text-sm opacity-80" style={{ fontFamily: draft.font }}>jumps over the lazy dog — 0123456789</div>
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <div className="text-xs uppercase tracking-wider text-[color:var(--muted)]">Motion preset</div>
+          <div className="grid grid-cols-2 gap-2">
+            {BRAND_MOTIONS.map(m => (
+              <button key={m.id} onClick={()=>set({motion:m.id})} className={"text-left p-2 rounded-lg border text-xs " + (draft.motion===m.id ? "border-indigo-400 bg-indigo-500/10" : "border-white/10 hover:border-white/20")}>
+                <div className="font-semibold">{m.label}</div>
+                <div className="text-[color:var(--muted)] mt-0.5">{m.hint}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <div className="text-xs uppercase tracking-wider text-[color:var(--muted)]">Voice tone</div>
+          <div className="grid grid-cols-1 gap-1">
+            {BRAND_VOICES.map(v => (
+              <label key={v.id} className={"flex items-center gap-2 p-2 rounded-lg border text-xs cursor-pointer " + (draft.voice===v.id ? "border-indigo-400 bg-indigo-500/10" : "border-white/10")}>
+                <input type="radio" name="bvoice" checked={draft.voice===v.id} onChange={()=>set({voice:v.id})} />
+                <span>{v.label}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <div className="text-xs uppercase tracking-wider text-[color:var(--muted)]">Caption style</div>
+          <div className="grid grid-cols-1 gap-2">
+            {BRAND_CAPTIONS.map(c => (
+              <button key={c.id} onClick={()=>set({captionStyle:c.id})} className={"text-left p-2 rounded-lg border text-xs " + (draft.captionStyle===c.id ? "border-indigo-400 bg-indigo-500/10" : "border-white/10 hover:border-white/20")}>
+                <div className="font-semibold">{c.label}</div>
+                <div className="mt-1 font-mono text-[11px] opacity-80">{c.preview}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </Drawer>
+  );
+}
+
+function BrandKitPreview({ open, kit, onClose }){
+  if (!open || !kit) return null;
+  const captionSample = (BRAND_CAPTIONS.find(c => c.id === kit.captionStyle) || BRAND_CAPTIONS[0]).preview;
+  return (
+    <Modal open={open} title={"Preview · "+kit.name} onClose={onClose}>
+      <div className="space-y-3">
+        <div className="rounded-xl overflow-hidden border border-white/10" style={{ aspectRatio:"16/9", background:"linear-gradient(135deg, "+kit.primary+", "+kit.secondary+" 60%, "+kit.accent+")" }}>
+          <div className="w-full h-full flex flex-col justify-between p-4">
+            <div className="flex items-center justify-between">
+              <div className="text-[11px] uppercase tracking-[0.2em] opacity-80" style={{ fontFamily: kit.font }}>{kit.motion} · {kit.voice}</div>
+              <div className="text-[11px] opacity-70" style={{ fontFamily: kit.font }}>zaidsaid.com</div>
+            </div>
+            <div>
+              <div className="text-3xl font-semibold leading-tight drop-shadow" style={{ fontFamily: kit.font }}>{kit.name}</div>
+              <div className="text-sm opacity-90 mt-1" style={{ fontFamily: kit.font }}>{kit.tagline || "Your brand preview"}</div>
+            </div>
+            <div className="self-start inline-block px-3 py-1 rounded-md text-[11px] font-bold" style={{ background:"rgba(0,0,0,0.55)", color: "#fff", fontFamily: kit.captionStyle === "mono-bold" ? "JetBrains Mono, monospace" : kit.font, letterSpacing: kit.captionStyle === "sans-upper" ? "0.1em" : "0" }}>{captionSample}</div>
+          </div>
+        </div>
+        <div className="grid grid-cols-3 gap-2 text-[11px]">
+          <div className="p-2 rounded-lg border border-white/10"><div className="text-[color:var(--muted)]">Primary</div><div className="font-mono">{kit.primary}</div></div>
+          <div className="p-2 rounded-lg border border-white/10"><div className="text-[color:var(--muted)]">Secondary</div><div className="font-mono">{kit.secondary}</div></div>
+          <div className="p-2 rounded-lg border border-white/10"><div className="text-[color:var(--muted)]">Accent</div><div className="font-mono">{kit.accent}</div></div>
+        </div>
+      </div>
+    </Modal>
+  );
+}
 function TemplatesTab(){
   return (
     <Placeholder title="Templates" subtitle="Start from a shape. Full library and previews land in Stage 5.">
