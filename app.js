@@ -53,6 +53,7 @@ const I = {
   globe: (p)=> <svg viewBox="0 0 24 24" width={p?.size||14} height={p?.size||14} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/></svg>,
   comment: (p)=> <svg viewBox="0 0 24 24" width={p?.size||14} height={p?.size||14} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M21 12a8 8 0 1 1-3.2-6.4L21 5v7z"/></svg>,
   clock: (p)=> <svg viewBox="0 0 24 24" width={p?.size||14} height={p?.size||14} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>,  palette: (p)=> <svg viewBox="0 0 24 24" width={p?.size||14} height={p?.size||14} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M12 3a9 9 0 1 0 0 18c1.5 0 2-1 2-2s-.5-1.5-.5-2 .5-1.5 2-1.5H18a3 3 0 0 0 3-3 9 9 0 0 0-9-9Z"/><circle cx="7.5" cy="10.5" r="1"/><circle cx="12" cy="7.5" r="1"/><circle cx="16.5" cy="10.5" r="1"/></svg>,
+  layers: (p)=> <svg viewBox="0 0 24 24" width={p?.size||14} height={p?.size||14} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M12 3 2 8l10 5 10-5-10-5Z"/><path d="M2 13l10 5 10-5"/><path d="M2 18l10 5 10-5"/></svg>,
   eye: (p)=> <svg viewBox="0 0 24 24" width={p?.size||14} height={p?.size||14} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>,
 
 };
@@ -2523,18 +2524,183 @@ function BrandKitPreview({ open, kit, onClose }){
     </Modal>
   );
 }
+const TEMPLATES_SEED = [
+  { id:"tpl-explainer-60", name:"60s Explainer", cat:"Education", platform:"TikTok", duration:60, aspect:"9:16", difficulty:"easy", kit:"bk-edu", blurb:"Hook → 3 beats → CTA. Works for any 'how it works' topic.", steps:["Hook (5s)","Beat 1","Beat 2","Beat 3","CTA"], tags:["explainer","edu","short"], hero:{ from:"#0ea5e9", to:"#22c55e" } },
+  { id:"tpl-product-reveal", name:"Product Reveal", cat:"Marketing", platform:"Reels", duration:45, aspect:"9:16", difficulty:"medium", kit:"bk-zs", blurb:"Teaser → feature sweep → price → CTA. Cinematic brand-heavy cut.", steps:["Teaser","Feature 1","Feature 2","Feature 3","Price","CTA"], tags:["product","launch","reel"], hero:{ from:"#6366f1", to:"#ec4899" } },
+  { id:"tpl-news-hit", name:"News Hit", cat:"News", platform:"YouTube Shorts", duration:75, aspect:"9:16", difficulty:"medium", kit:"bk-news", blurb:"Breaking headline → context → receipts → takeaway.", steps:["Headline","Context","Receipts","Takeaway"], tags:["news","timely"], hero:{ from:"#111827", to:"#f97316" } },
+  { id:"tpl-interview-long", name:"Interview Teaser → Long", cat:"Podcast", platform:"YouTube", duration:240, aspect:"16:9", difficulty:"hard", kit:"bk-zs", blurb:"Cold-open clip → guest intro → 3 segments → outro.", steps:["Cold open","Intro","Segment 1","Segment 2","Segment 3","Outro"], tags:["interview","podcast","longform"], hero:{ from:"#7c3aed", to:"#22d3ee" } },
+  { id:"tpl-devtalk", name:"Dev Talk — whiteboard", cat:"Education", platform:"YouTube", duration:180, aspect:"16:9", difficulty:"medium", kit:"bk-edu", blurb:"Problem → bad approach → good approach → code demo.", steps:["Problem","Naive approach","Better approach","Demo","Recap"], tags:["coding","tech","whiteboard"], hero:{ from:"#0ea5e9", to:"#6366f1" } },
+  { id:"tpl-list-top5", name:"Top 5 Listicle", cat:"Entertainment", platform:"TikTok", duration:50, aspect:"9:16", difficulty:"easy", kit:"bk-zs", blurb:"Countdown with big captions, kinetic cuts, punchy SFX.", steps:["Tease #1","#5","#4","#3","#2","#1","CTA"], tags:["list","fast","fun"], hero:{ from:"#ec4899", to:"#f97316" } },
+  { id:"tpl-testimonial", name:"Testimonial Cutdown", cat:"Marketing", platform:"LinkedIn", duration:45, aspect:"1:1", difficulty:"easy", kit:"bk-zs", blurb:"Pull quote → B-roll → metric card → CTA.", steps:["Pull quote","B-roll","Metric","CTA"], tags:["social-proof","b2b"], hero:{ from:"#22c55e", to:"#0ea5e9" } },
+  { id:"tpl-tutorial", name:"Tutorial — step by step", cat:"Education", platform:"YouTube", duration:360, aspect:"16:9", difficulty:"medium", kit:"bk-edu", blurb:"Intro → prerequisites → 5 steps → recap.", steps:["Intro","Prereqs","Step 1","Step 2","Step 3","Step 4","Step 5","Recap"], tags:["tutorial","howto"], hero:{ from:"#22c55e", to:"#eab308" } },
+  { id:"tpl-case-study", name:"Case Study", cat:"B2B", platform:"LinkedIn", duration:120, aspect:"16:9", difficulty:"hard", kit:"bk-news", blurb:"Challenge → solution → result → lesson.", steps:["Challenge","Solution","Result","Lesson"], tags:["b2b","enterprise"], hero:{ from:"#111827", to:"#6366f1" } },
+  { id:"tpl-ama", name:"AMA Quick Answer", cat:"Community", platform:"Reels", duration:30, aspect:"9:16", difficulty:"easy", kit:"bk-zs", blurb:"Question on screen → avatar answer → CTA to follow.", steps:["Question","Answer","CTA"], tags:["community","q&a"], hero:{ from:"#f59e0b", to:"#ef4444" } },
+  { id:"tpl-recap", name:"Weekly Recap", cat:"News", platform:"YouTube Shorts", duration:90, aspect:"9:16", difficulty:"medium", kit:"bk-news", blurb:"5 headlines → sponsor card → 1 takeaway.", steps:["Intro","Story 1","Story 2","Story 3","Story 4","Story 5","Takeaway"], tags:["recap","weekly"], hero:{ from:"#ef4444", to:"#f59e0b" } },
+  { id:"tpl-pov", name:"POV Skit", cat:"Entertainment", platform:"TikTok", duration:20, aspect:"9:16", difficulty:"easy", kit:"bk-zs", blurb:"Setup → twist → reaction.", steps:["Setup","Twist","Reaction"], tags:["skit","fun"], hero:{ from:"#ec4899", to:"#22d3ee" } }
+];
+
 function TemplatesTab(){
+  const [q, setQ] = React.useState("");
+  const [cat, setCat] = React.useState("All");
+  const [platform, setPlatform] = React.useState("All");
+  const [diff, setDiff] = React.useState("All");
+  const [preview, setPreview] = React.useState(null);
+  const [toast, setToast] = React.useState(null);
+  const [favs, setFavs] = React.useState(() => {
+    try { return JSON.parse(localStorage.getItem("zaidsaid.v2.template.favs") || "[]"); } catch(e){ return []; }
+  });
+  React.useEffect(() => {
+    try { localStorage.setItem("zaidsaid.v2.template.favs", JSON.stringify(favs)); } catch(e){}
+  }, [favs]);
+
+  const cats = ["All", ...new Set(TEMPLATES_SEED.map(t => t.cat))];
+  const plats = ["All", ...new Set(TEMPLATES_SEED.map(t => t.platform))];
+  const diffs = ["All","easy","medium","hard"];
+
+  const list = TEMPLATES_SEED.filter(t => {
+    if (cat !== "All" && t.cat !== cat) return false;
+    if (platform !== "All" && t.platform !== platform) return false;
+    if (diff !== "All" && t.difficulty !== diff) return false;
+    if (q) {
+      const hay = (t.name+" "+t.blurb+" "+t.tags.join(" ")+" "+t.cat+" "+t.platform).toLowerCase();
+      if (!hay.includes(q.toLowerCase())) return false;
+    }
+    return true;
+  });
+
+  const toggleFav = (id) => setFavs(f => f.includes(id) ? f.filter(x => x!==id) : [...f, id]);
+
+  const useTemplate = (t) => {
+    try {
+      localStorage.setItem("zaidsaid.v2.studio.seed", JSON.stringify({
+        templateId: t.id, name: t.name, steps: t.steps, kit: t.kit,
+        platform: t.platform, duration: t.duration, aspect: t.aspect,
+        seededAt: Date.now()
+      }));
+    } catch(e){}
+    setToast({ kind:"ok", msg:"Seeded Studio with "+t.name });
+    setTimeout(() => { window.location.hash = "#studio?step=research"; }, 600);
+  };
+
   return (
-    <Placeholder title="Templates" subtitle="Start from a shape. Full library and previews land in Stage 5.">
-      <div className="grid md:grid-cols-3 gap-3">
-        {TEMPLATE_PREVIEW.map(t => (
-          <div key={t.id} className="card p-5">
-            <div className="font-semibold">{t.name}</div>
-            <div className="text-sm text-[color:var(--muted)] mt-1">{t.blurb}</div>
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <div className="text-xl font-semibold">Templates</div>
+          <div className="text-xs text-[color:var(--muted)]">Start from a proven shape. Click a card to preview, then 'Use template' to seed Studio.</div>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="relative">
+            <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Search templates" className="px-3 py-2 pr-8 rounded-xl bg-white/5 border border-white/10 text-sm outline-none focus:border-white/30 w-52" />
+            <span className="absolute right-2 top-1/2 -translate-y-1/2 opacity-60">{I.search({size:14})}</span>
           </div>
-        ))}
+          <select value={cat} onChange={e=>setCat(e.target.value)} className="px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-sm">
+            {cats.map(c => <option key={c} value={c}>{c === "All" ? "All categories" : c}</option>)}
+          </select>
+          <select value={platform} onChange={e=>setPlatform(e.target.value)} className="px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-sm">
+            {plats.map(p => <option key={p} value={p}>{p === "All" ? "All platforms" : p}</option>)}
+          </select>
+          <select value={diff} onChange={e=>setDiff(e.target.value)} className="px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-sm">
+            {diffs.map(d => <option key={d} value={d}>{d === "All" ? "Any difficulty" : d}</option>)}
+          </select>
+        </div>
       </div>
-    </Placeholder>
+
+      <div className="text-xs text-[color:var(--muted)]">{list.length} of {TEMPLATES_SEED.length} templates</div>
+
+      {list.length === 0 ? (
+        <EmptyState icon={I.layers({size:28})} title="No templates match your filters" hint="Try clearing the search or changing platform." />
+      ) : (
+        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {list.map(t => (
+            <TemplateCard key={t.id} tpl={t} fav={favs.includes(t.id)} onFav={toggleFav} onPreview={setPreview} onUse={useTemplate} />
+          ))}
+        </div>
+      )}
+
+      <TemplatePreview open={!!preview} tpl={preview} onClose={()=>setPreview(null)} onUse={useTemplate} />
+      {toast && <Toast kind={toast.kind} msg={toast.msg} onClose={()=>setToast(null)} />}
+    </div>
+  );
+}
+
+function TemplateCard({ tpl, fav, onFav, onPreview, onUse }){
+  const diffColor = tpl.difficulty === "easy" ? "text-emerald-300" : (tpl.difficulty === "medium" ? "text-amber-300" : "text-rose-300");
+  return (
+    <div className="card overflow-hidden border border-white/10">
+      <button onClick={()=>onPreview(tpl)} className="block w-full h-28 relative text-left" style={{ background: "linear-gradient(135deg, "+tpl.hero.from+", "+tpl.hero.to+")" }}>
+        <div className="absolute inset-0 p-3 flex flex-col justify-between">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] uppercase tracking-wider bg-black/40 px-2 py-0.5 rounded-full border border-white/10">{tpl.platform}</span>
+            <span className="text-[10px] bg-black/40 px-2 py-0.5 rounded-full border border-white/10">{tpl.aspect}</span>
+          </div>
+          <div>
+            <div className="text-base font-semibold leading-tight">{tpl.name}</div>
+            <div className="text-[11px] opacity-80">{tpl.duration}s · {tpl.cat}</div>
+          </div>
+        </div>
+      </button>
+      <div className="p-3 space-y-3">
+        <div className="text-xs text-[color:var(--muted)] line-clamp-2 min-h-[32px]">{tpl.blurb}</div>
+        <div className="flex items-center gap-1 flex-wrap">
+          <span className={"text-[10px] "+diffColor}>● {tpl.difficulty}</span>
+          <span className="text-[color:var(--muted)] text-[10px]">·</span>
+          <span className="text-[10px] text-[color:var(--muted)]">{tpl.steps.length} steps</span>
+          <div className="flex-1"></div>
+          {tpl.tags.slice(0,2).map(tag => <Tag key={tag}>{tag}</Tag>)}
+        </div>
+        <div className="flex items-center justify-between gap-2 pt-1">
+          <div className="flex gap-1">
+            <button onClick={()=>onPreview(tpl)} className="btn btn-ghost text-xs">{I.eye({size:12})} Preview</button>
+            <button onClick={()=>onUse(tpl)} className="btn btn-primary text-xs">{I.play({size:12})} Use template</button>
+          </div>
+          <button onClick={()=>onFav(tpl.id)} title={fav?"Unfavorite":"Favorite"} className="btn btn-ghost text-xs">
+            {fav ? <span className="text-amber-300">{I.star({size:14})}</span> : I.starOutline({size:14})}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TemplatePreview({ open, tpl, onClose, onUse }){
+  if (!open || !tpl) return null;
+  return (
+    <Modal open={open} title={tpl.name} onClose={onClose} footer={
+      <div className="flex justify-end gap-2">
+        <button onClick={onClose} className="btn btn-ghost text-sm">Close</button>
+        <button onClick={()=>{ onUse(tpl); onClose(); }} className="btn btn-primary text-sm">{I.play({size:14})} Use template</button>
+      </div>
+    }>
+      <div className="space-y-3">
+        <div className="rounded-xl overflow-hidden border border-white/10" style={{ aspectRatio:"16/9", background:"linear-gradient(135deg, "+tpl.hero.from+", "+tpl.hero.to+")" }}>
+          <div className="w-full h-full flex flex-col justify-between p-4">
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] uppercase tracking-wider bg-black/40 px-2 py-0.5 rounded-full border border-white/10">{tpl.platform}</span>
+              <span className="text-[11px] bg-black/40 px-2 py-0.5 rounded-full border border-white/10">{tpl.aspect}</span>
+              <span className="text-[11px] bg-black/40 px-2 py-0.5 rounded-full border border-white/10">{tpl.duration}s</span>
+            </div>
+            <div className="text-2xl font-semibold">{tpl.name}</div>
+          </div>
+        </div>
+        <p className="text-sm text-[color:var(--muted)]">{tpl.blurb}</p>
+        <div>
+          <div className="text-xs uppercase tracking-wider text-[color:var(--muted)] mb-2">Structure ({tpl.steps.length} beats)</div>
+          <ol className="space-y-1 text-sm">
+            {tpl.steps.map((s, i) => (
+              <li key={i} className="flex items-center gap-2 p-2 rounded-lg border border-white/10 bg-white/5">
+                <span className="text-[10px] w-5 h-5 rounded-full border border-white/20 flex items-center justify-center">{i+1}</span>
+                <span>{s}</span>
+              </li>
+            ))}
+          </ol>
+        </div>
+        <div className="flex flex-wrap gap-1">
+          {tpl.tags.map(tag => <Tag key={tag}>{tag}</Tag>)}
+        </div>
+        <div className="text-xs text-[color:var(--muted)]">Brand kit: <span className="font-mono">{tpl.kit}</span> · difficulty: <span className="capitalize">{tpl.difficulty}</span> · category: {tpl.cat}</div>
+      </div>
+    </Modal>
   );
 }
 function ProjectsTab(){
