@@ -1722,6 +1722,118 @@ function RepurposeTab(){
   );
 }
 
+/* ---------------- Toast system ---------------- */
+const ToastCtx = React.createContext(null);
+function ToastProvider({ children }){
+  const [toasts, setToasts] = useState([]);
+  const push = useCallback((msg, kind) => {
+    const id = Math.random().toString(36).slice(2,8);
+    setToasts(t => [...t, { id, msg, kind: kind || "info" }]);
+    setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 3200);
+  }, []);
+  return (
+    <ToastCtx.Provider value={push}>
+      {children}
+      <div className="fixed bottom-5 right-5 z-50 flex flex-col gap-2 pointer-events-none">
+        {toasts.map(t => (
+          <div key={t.id} className={"pointer-events-auto rounded-xl border px-4 py-2.5 text-sm shadow-lg backdrop-blur " + (
+            t.kind === "success" ? "border-emerald-400/30 bg-emerald-500/15 text-emerald-100" :
+            t.kind === "error" ? "border-rose-400/30 bg-rose-500/15 text-rose-100" :
+            "border-white/15 bg-white/10 text-white"
+          )}>{t.msg}</div>
+        ))}
+      </div>
+    </ToastCtx.Provider>
+  );
+}
+const useToast = () => useContext(ToastCtx) || (()=>{});
+
+/* ---------------- Modal ---------------- */
+function Modal({ open, onClose, title, subtitle, children, maxWidth }){
+  useEffect(() => {
+    if(!open) return;
+    const onKey = (e) => { if(e.key === "Escape" && onClose) onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+  if(!open) return null;
+  const mw = maxWidth || "max-w-xl";
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center p-4" role="dialog" aria-modal="true">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} aria-hidden />
+      <div className={"relative w-full " + mw + " card p-6 max-h-[90vh] overflow-auto"}>
+        <div className="flex items-start justify-between gap-4 mb-3">
+          <div>
+            {title && <div className="text-lg font-semibold">{title}</div>}
+            {subtitle && <div className="text-[12px] text-[color:var(--muted)] mt-0.5">{subtitle}</div>}
+          </div>
+          <button className="chip" onClick={onClose} aria-label="Close">{I.x({size:12})}</button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- Drawer ---------------- */
+function Drawer({ open, onClose, title, subtitle, children, width }){
+  useEffect(() => {
+    if(!open) return;
+    const onKey = (e) => { if(e.key === "Escape" && onClose) onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+  if(!open) return null;
+  const w = Math.min(width || 460, typeof window !== "undefined" ? window.innerWidth - 20 : 460);
+  return (
+    <div className="fixed inset-0 z-40" role="dialog" aria-modal="true">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} aria-hidden />
+      <div className="absolute top-0 right-0 h-full bg-[color:var(--bg)] border-l border-[color:var(--line)] overflow-auto" style={{ width: w }}>
+        <div className="p-5 border-b border-[color:var(--line)] flex items-start justify-between gap-3 sticky top-0 bg-[color:var(--bg)]/95 backdrop-blur z-10">
+          <div>
+            {title && <div className="text-lg font-semibold">{title}</div>}
+            {subtitle && <div className="text-[12px] text-[color:var(--muted)] mt-0.5">{subtitle}</div>}
+          </div>
+          <button className="chip" onClick={onClose} aria-label="Close">{I.x({size:12})}</button>
+        </div>
+        <div className="p-5">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- EmptyState / Tag / CopyButton ---------------- */
+function EmptyState({ title, subtitle, action }){
+  return (
+    <div className="card p-10 text-center">
+      <div className="text-lg font-semibold">{title}</div>
+      {subtitle && <div className="text-[13px] text-[color:var(--muted)] mt-1">{subtitle}</div>}
+      {action && <div className="mt-4">{action}</div>}
+    </div>
+  );
+}
+function Tag({ children, tone }){
+  const map = {
+    default: "border-[color:var(--line)] bg-white/5 text-white/80",
+    success: "border-emerald-400/30 bg-emerald-500/10 text-emerald-200",
+    warn: "border-amber-400/30 bg-amber-500/10 text-amber-200",
+    danger: "border-rose-400/30 bg-rose-500/10 text-rose-200",
+    info: "border-sky-400/30 bg-sky-500/10 text-sky-200",
+    brand: "border-indigo-400/30 bg-indigo-500/10 text-indigo-200"
+  };
+  const cls = map[tone || "default"] || map.default;
+  return <span className={"inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] border " + cls}>{children}</span>;
+}
+function CopyButton({ text, label }){
+  const toast = useToast();
+  const [copied, setCopied] = useState(false);
+  const onCopy = async () => {
+    try { await navigator.clipboard.writeText(text); setCopied(true); toast("Copied","success"); setTimeout(()=>setCopied(false),1400); }
+    catch(e){ toast("Couldn't copy","error"); }
+  };
+  return <button className="chip" onClick={onCopy} aria-label={label || "Copy"}>{copied ? "Copied" : (label || "Copy")}</button>;
+}
+
 /* ---------------- Placeholder tabs ---------------- */
 function Placeholder({ title, subtitle, children }){
   return (
