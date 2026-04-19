@@ -3182,20 +3182,188 @@ function ArchitectureTab(){
     </div>
   );
 }
+const DOC_SECTIONS = [
+  { id:"quickstart", label:"Quickstart", icon:"play" },
+  { id:"concepts", label:"Core concepts", icon:"layers" },
+  { id:"api", label:"REST API", icon:"globe" },
+  { id:"webhooks", label:"Webhooks", icon:"flame" },
+  { id:"sdks", label:"SDKs", icon:"link" },
+  { id:"ratelimits", label:"Rate limits", icon:"clock" },
+  { id:"proxy", label:"Proxy guide", icon:"wave" },
+  { id:"changelog", label:"Changelog", icon:"refresh" }
+];
+
 function DocsTab(){
-  return (
-    <Placeholder title="Docs" subtitle="REST API, webhooks, rate limits, SDKs. Full docs land in Stage 6.">
-      <div className="grid md:grid-cols-2 gap-4">
-        <div className="card p-5">
-          <div className="font-semibold">Quickstart</div>
-          <div className="text-sm text-[color:var(--muted)] mt-2">Start a project from text, a URL, or a file. Zaidsaid handles the rest.</div>
-        </div>
-        <div className="card p-5">
-          <div className="font-semibold">REST API</div>
-          <div className="text-sm text-[color:var(--muted)] mt-2">Programmatic pipelines for agencies. Signed webhooks on every stage.</div>
+  const [active, setActive] = React.useState(() => {
+    const m = (window.location.hash || "").match(/docs\?s=([\w-]+)/);
+    return (m && DOC_SECTIONS.find(s => s.id === m[1])) ? m[1] : "quickstart";
+  });
+  const [q, setQ] = React.useState("");
+  const [copied, setCopied] = React.useState("");
+
+  const copy = (text, key) => {
+    try { navigator.clipboard.writeText(text); setCopied(key); setTimeout(()=>setCopied(""), 1200); } catch(e){}
+  };
+
+  const Code = ({ lang, code, ckey }) => (
+    <div className="rounded-lg border border-white/10 bg-black/40 overflow-hidden">
+      <div className="flex items-center justify-between px-3 py-1.5 bg-white/5 text-[10px] uppercase tracking-wider text-[color:var(--muted)]">
+        <span>{lang}</span>
+        <button onClick={()=>copy(code, ckey)} className="btn btn-ghost text-[10px]">{copied === ckey ? I.check({size:10}) : I.copy({size:10})} {copied === ckey ? "copied" : "copy"}</button>
+      </div>
+      <pre className="p-3 text-xs overflow-auto leading-relaxed"><code>{code}</code></pre>
+    </div>
+  );
+
+  const H = ({ children }) => <h3 className="text-lg font-semibold mt-4 mb-2">{children}</h3>;
+  const P = ({ children }) => <p className="text-sm text-[color:var(--muted)] leading-relaxed mb-2">{children}</p>;
+
+  const sections = {
+    quickstart: (
+      <div className="space-y-3">
+        <H>Quickstart</H>
+        <P>Zaidsaid turns a topic into a finished, multi-platform video. The fastest path is to pick a template, tweak the script, and render.</P>
+        <ol className="space-y-2 text-sm list-decimal list-inside">
+          <li>Open the <a href="#templates" className="underline">Templates</a> tab and click <b>Use template</b>.</li>
+          <li>Studio opens pre-seeded. Edit the outline and script beats.</li>
+          <li>Pick a brand kit in <a href="#brands" className="underline">Brand Kits</a> — fonts, colors, captions.</li>
+          <li>Attach an avatar + voice from <a href="#avatars" className="underline">Avatars & Voices</a>.</li>
+          <li>Review provider choices in <a href="#architecture" className="underline">Architecture</a>, then render.</li>
+        </ol>
+        <Code lang="bash" ckey="qs-curl" code={'curl -X POST https://YOUR-PROXY.example.com/v1/renders \\\n  -H "Content-Type: application/json" \\\n  -d \'{\n    "template": "tpl-explainer-60",\n    "topic": "How GPS uses relativity",\n    "kit": "bk-edu",\n    "voice": "nova"\n  }\''} />
+        <P>All calls go to <b>your own proxy</b>, never direct to a vendor from the browser. See the Proxy guide.</P>
+      </div>
+    ),
+    concepts: (
+      <div className="space-y-3">
+        <H>Core concepts</H>
+        <div className="grid md:grid-cols-2 gap-2">
+          {[
+            { k:"Project", v:"A single render job with script, assets, versions, comments." },
+            { k:"Template", v:"A reusable beat structure (hook, beats, CTA)." },
+            { k:"Brand kit", v:"Palette, typography, motion, caption style, voice tone." },
+            { k:"Avatar", v:"A named voice + portrait + locale, with optional clone." },
+            { k:"Provider", v:"Any upstream service (local or cloud) that does work." },
+            { k:"Stage", v:"A step in the pipeline: research, script, voice, avatar, …" }
+          ].map(x => (
+            <div key={x.k} className="p-3 rounded-lg border border-white/10 bg-white/5">
+              <div className="text-sm font-semibold">{x.k}</div>
+              <div className="text-xs text-[color:var(--muted)] mt-1">{x.v}</div>
+            </div>
+          ))}
         </div>
       </div>
-    </Placeholder>
+    ),
+    api: (
+      <div className="space-y-3">
+        <H>REST API</H>
+        <P>Base URL: <code>https://YOUR-PROXY.example.com/v1</code> (you deploy this; see Proxy guide).</P>
+        <div className="rounded-lg border border-white/10 overflow-hidden text-sm">
+          <table className="w-full">
+            <thead className="bg-white/5 text-[11px] uppercase tracking-wider text-[color:var(--muted)]"><tr><th className="text-left px-3 py-2">Method</th><th className="text-left px-3 py-2">Path</th><th className="text-left px-3 py-2">Purpose</th></tr></thead>
+            <tbody>
+              {[
+                ["POST","/v1/renders","Start a new render"],
+                ["GET","/v1/renders/:id","Get render status + URLs"],
+                ["GET","/v1/projects","List projects"],
+                ["POST","/v1/projects/:id/versions","Save a new version"],
+                ["POST","/v1/voices","Upload a voice sample for cloning"],
+                ["GET","/v1/templates","List templates"],
+                ["POST","/v1/publish","Schedule or publish to a platform"]
+              ].map(([m,p,d], i) => (
+                <tr key={i} className="border-t border-white/5"><td className="px-3 py-2 font-mono text-xs"><span className={"px-2 py-0.5 rounded border "+(m==="POST"?"border-indigo-500/40 text-indigo-300":"border-emerald-500/40 text-emerald-300")}>{m}</span></td><td className="px-3 py-2 font-mono text-xs">{p}</td><td className="px-3 py-2 text-xs">{d}</td></tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <Code lang="http" ckey="api-post" code={'POST /v1/renders HTTP/1.1\nHost: YOUR-PROXY.example.com\nContent-Type: application/json\n\n{\n  "template": "tpl-product-reveal",\n  "topic": "Launch: Vector DB",\n  "kit": "bk-zs",\n  "voice": "atlas"\n}'} />
+      </div>
+    ),
+    webhooks: (
+      <div className="space-y-3">
+        <H>Webhooks</H>
+        <P>Register a URL on your proxy to receive render status updates. Events are signed with HMAC-SHA256.</P>
+        <Code lang="json" ckey="wh-json" code={'{\n  "event": "render.completed",\n  "project_id": "1ac278127fe7",\n  "version": "v3",\n  "outputs": {\n    "16x9": "https://cdn.../1ac2-v3-16x9.mp4",\n    "9x16": "https://cdn.../1ac2-v3-9x16.mp4"\n  },\n  "duration": 28.4,\n  "signed_at": 1755720000\n}'} />
+        <P>Events: <code>render.queued</code>, <code>render.started</code>, <code>render.completed</code>, <code>render.failed</code>, <code>publish.scheduled</code>.</P>
+      </div>
+    ),
+    sdks: (
+      <div className="space-y-3">
+        <H>SDKs</H>
+        <P>Thin clients that call your proxy. Browser-safe — they never see vendor keys.</P>
+        <Code lang="javascript" ckey="sdk-js" code={'import { Zaidsaid } from "@zaidsaid/sdk";\n\nconst zs = new Zaidsaid({ baseUrl: "https://YOUR-PROXY.example.com/v1" });\n\nconst render = await zs.renders.create({\n  template: "tpl-explainer-60",\n  topic: "Mycorrhizal networks",\n  kit: "bk-edu"\n});\n\nconsole.log(render.id, render.status);'} />
+        <Code lang="python" ckey="sdk-py" code={'from zaidsaid import Zaidsaid\n\nzs = Zaidsaid(base_url="https://YOUR-PROXY.example.com/v1")\nrender = zs.renders.create(\n  template="tpl-explainer-60",\n  topic="Mycorrhizal networks",\n  kit="bk-edu"\n)\nprint(render.id, render.status)'} />
+      </div>
+    ),
+    ratelimits: (
+      <div className="space-y-3">
+        <H>Rate limits</H>
+        <P>Default per-tenant limits. Bursts are allowed via token bucket.</P>
+        <div className="grid md:grid-cols-3 gap-2 text-sm">
+          {[["Renders","30 / min","burst 60"],["Status polls","600 / min","no burst"],["Webhooks","unlimited","signed"]].map(([k,v,b], i) => (
+            <div key={i} className="p-3 rounded-lg border border-white/10"><div className="text-[11px] uppercase tracking-wider text-[color:var(--muted)]">{k}</div><div className="font-semibold mt-1">{v}</div><div className="text-[11px] text-[color:var(--muted)]">{b}</div></div>
+          ))}
+        </div>
+        <P>When exceeded, calls return <code>429 Too Many Requests</code> with a <code>Retry-After</code> header.</P>
+      </div>
+    ),
+    proxy: (
+      <div className="space-y-3">
+        <H>Proxy guide</H>
+        <P className="!text-rose-300"><b>Never put vendor API keys in the browser.</b> This site is public. All provider calls route through a proxy that you control.</P>
+        <P>The simplest shape: a Cloudflare Worker or Vercel Edge Function that holds your keys in environment variables and forwards requests.</P>
+        <Code lang="javascript" ckey="wk" code={'// cloudflare-worker.js\nexport default {\n  async fetch(req, env) {\n    const url = new URL(req.url);\n    if (url.pathname === "/ping") return new Response("ok");\n    if (url.pathname.startsWith("/elevenlabs/")) {\n      const path = url.pathname.replace("/elevenlabs", "");\n      const r = await fetch("https://api.elevenlabs.io" + path + url.search, {\n        method: req.method,\n        headers: { "xi-api-key": env.ELEVEN_KEY, "Content-Type": "application/json" },\n        body: req.method === "GET" ? undefined : await req.text()\n      });\n      return new Response(r.body, { status: r.status, headers: { "Content-Type": r.headers.get("content-type") || "application/octet-stream", "Access-Control-Allow-Origin": "*" } });\n    }\n    return new Response("not found", { status: 404 });\n  }\n};'} />
+        <P>Put the deployed URL into <b>Avatars & Voices → Voice & avatar providers</b> as the <i>Proxy URL</i> for ElevenLabs. The site will call <code>&lt;proxy&gt;/ping</code> to verify and <code>&lt;proxy&gt;/elevenlabs/...</code> for real work.</P>
+      </div>
+    ),
+    changelog: (
+      <div className="space-y-3">
+        <H>Changelog</H>
+        <ul className="space-y-2 text-sm">
+          {[
+            { v:"2.0.7", at:"2026-04-19", notes:["DocsTab live — 8 sections, copy-to-clipboard code blocks"] },
+            { v:"2.0.6", at:"2026-04-19", notes:["ArchitectureTab — interactive 10-stage pipeline, Free/Balanced/Premium presets"] },
+            { v:"2.0.5", at:"2026-04-19", notes:["ProjectsTab — grid/list, drawer with versions + comments"] },
+            { v:"2.0.4", at:"2026-04-19", notes:["TemplatesTab — 12 templates, seeds Studio"] },
+            { v:"2.0.3", at:"2026-04-19", notes:["BrandsTab — palette editor, motion & caption presets, live preview"] },
+            { v:"2.0.2", at:"2026-04-19", notes:["AvatarsTab — gallery, Web Speech TTS, MediaRecorder clone, providers"] },
+            { v:"2.0.1", at:"2026-04-19", notes:["Shared UI helpers: Toast, Modal, Drawer, EmptyState, Tag"] },
+            { v:"2.0.0", at:"2026-04-18", notes:["Rebuild: hash routing, error boundary, v2 localStorage namespace"] }
+          ].map(c => (
+            <li key={c.v} className="p-3 rounded-lg border border-white/10 bg-white/5">
+              <div className="flex items-center justify-between">
+                <div className="font-mono text-xs">v{c.v}</div>
+                <div className="text-[10px] text-[color:var(--muted)]">{c.at}</div>
+              </div>
+              <ul className="mt-2 text-xs list-disc list-inside space-y-0.5">
+                {c.notes.map((n, i) => <li key={i}>{n}</li>)}
+              </ul>
+            </li>
+          ))}
+        </ul>
+      </div>
+    )
+  };
+
+  const match = (s) => !q || (s.label + " " + s.id).toLowerCase().includes(q.toLowerCase());
+
+  return (
+    <div className="grid md:grid-cols-[220px_1fr] gap-4">
+      <aside className="card p-3 h-fit sticky top-4">
+        <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Search docs" className="w-full px-2 py-1.5 mb-2 text-xs rounded-lg bg-white/5 border border-white/10" />
+        <nav className="space-y-1">
+          {DOC_SECTIONS.filter(match).map(s => (
+            <button key={s.id} onClick={()=>{ setActive(s.id); window.location.hash = "#docs?s="+s.id; }} className={"w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs text-left " + (active === s.id ? "bg-indigo-500/15 text-white" : "text-[color:var(--muted)] hover:bg-white/5")}>
+              <span className="w-5 h-5 rounded bg-white/10 flex items-center justify-center">{(I[s.icon] || I.book)({size:10})}</span>
+              {s.label}
+            </button>
+          ))}
+        </nav>
+      </aside>
+      <main className="card p-5 min-h-[320px]">
+        {sections[active] || sections.quickstart}
+      </main>
+    </div>
   );
 }
 
