@@ -515,6 +515,48 @@ function sceneRegenerateBlurbs(field){
   return list[Math.floor(Math.random()*list.length)];
 }
 
+
+function StudioStageProvider({ step, setTab }){
+  // Map Studio steps to Architecture pipeline stages
+  const MAP = {
+    research: "research",
+    script: "script",
+    storyboard: "storyboard",
+    assets: "broll",
+    motion: "broll",
+    voice: "voice",
+    edit: "edit",
+    mix: "edit",
+    captions: "captions",
+    publish: "publish"
+  };
+  const picks = (() => {
+    try { return JSON.parse(localStorage.getItem("zaidsaid.v2.arch.picks") || "{}"); } catch(e){ return {}; }
+  })();
+  const archId = MAP[step] || "research";
+  const stageDef = (typeof PIPELINE_STAGES !== "undefined") ? PIPELINE_STAGES.find(x => x.id === archId) : null;
+  const providerId = picks[archId] || (stageDef ? stageDef.defaultProvider : null);
+  const meta = (providerId && typeof PROVIDER_META !== "undefined") ? PROVIDER_META[providerId] : null;
+  if (!stageDef) return null;
+  const isLocal = meta && meta.kind === "local";
+  return (
+    <div className="card p-3 flex items-center gap-3 flex-wrap">
+      <span className="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center">{(I[stageDef.icon] || I.spark)({size:14})}</span>
+      <div className="min-w-0">
+        <div className="text-[11px] uppercase tracking-wider text-[color:var(--muted)]">Provider for this stage</div>
+        <div className="text-sm font-semibold truncate">{meta ? meta.label : (providerId || "(none selected)")}</div>
+      </div>
+      {meta && (
+        <span className={"text-[10px] px-2 py-0.5 rounded-full border " + (isLocal ? "border-emerald-500/30 text-emerald-300" : "border-sky-500/30 text-sky-300")}>{isLocal ? "LOCAL / FREE" : "CLOUD"}</span>
+      )}
+      <div className="text-[11px] text-[color:var(--muted)]">Latency ~{(isLocal ? stageDef.latency * 0.7 : stageDef.latency).toFixed(1)}s · Cost {isLocal ? "$0.00" : ("$"+stageDef.cost.toFixed(2))}</div>
+      <div className="flex-1"></div>
+      <button onClick={()=>setTab && setTab("architecture")} className="btn btn-ghost text-xs">{I.blocks({size:12})} Change in Architecture</button>
+      <button onClick={()=>setTab && setTab("settings")} className="btn btn-ghost text-xs">{I.grip({size:12})} Proxy URL</button>
+    </div>
+  );
+}
+
 function StudioStepNav({ step, setStep }){
   return (
     <div className="card p-2 flex items-center gap-1 overflow-x-auto scrollbar">
@@ -1321,6 +1363,7 @@ function StudioTab({ setTab, studioStep, setStudioStep }){
       )}
       <div className="grid gap-3 mb-4">
         <StudioStepNav step={step} setStep={goto} />
+        <StudioStageProvider step={step} setTab={setTab} />
         <StudioCharacterRow project={project} setProject={setProject} />
         <StudioBrandKitSelect project={project} setProject={setProject} />
       </div>
