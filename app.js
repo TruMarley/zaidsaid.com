@@ -1846,19 +1846,266 @@ function Placeholder({ title, subtitle, children }){
     </div>
   );
 }
-function AvatarsTab(){
+const AVATAR_SEED = [
+  { id:"nova", name:"Nova", persona:"Anchor — calm and authoritative", tags:["news","explainer"], grad:"from-sky-500 via-indigo-500 to-violet-600", language:"English", voiceKind:"builtin", voiceName:"Google US English", rate:1.0, pitch:1.0, isDefault:true, clipDataUrl:null, builtIn:true, created: Date.now()-86400000*14 },
+  { id:"atlas", name:"Atlas", persona:"Coach — energetic and warm", tags:["training","marketing"], grad:"from-amber-400 via-orange-500 to-rose-500", language:"English", voiceKind:"builtin", voiceName:"", rate:1.05, pitch:1.1, isDefault:false, clipDataUrl:null, builtIn:true, created: Date.now()-86400000*9 },
+  { id:"vera", name:"Vera", persona:"Host — curious and bright", tags:["social","educational"], grad:"from-rose-400 via-pink-500 to-fuchsia-600", language:"English", voiceKind:"builtin", voiceName:"", rate:1.0, pitch:1.15, isDefault:false, clipDataUrl:null, builtIn:true, created: Date.now()-86400000*6 },
+  { id:"orion", name:"Orion", persona:"Expert — deep and deliberate", tags:["longform","podcast"], grad:"from-emerald-400 via-teal-500 to-cyan-600", language:"English", voiceKind:"builtin", voiceName:"", rate:0.95, pitch:0.9, isDefault:false, clipDataUrl:null, builtIn:true, created: Date.now()-86400000*3 }
+];
+
+function getSpeechVoices(){
+  try { return (typeof window !== "undefined" && window.speechSynthesis) ? window.speechSynthesis.getVoices() : []; }
+  catch(e){ return []; }
+}
+function speakText(text, opts){
+  try {
+    if(!window.speechSynthesis || !window.SpeechSynthesisUtterance) return false;
+    window.speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(String(text||"").slice(0,500));
+    if(opts){
+      if(opts.rate) u.rate = Math.max(0.5, Math.min(2, opts.rate));
+      if(opts.pitch) u.pitch = Math.max(0, Math.min(2, opts.pitch));
+      if(opts.voiceName){
+        const v = getSpeechVoices().find(x => x.name === opts.voiceName);
+        if(v) u.voice = v;
+      }
+      if(opts.lang) u.lang = opts.lang;
+    }
+    window.speechSynthesis.speak(u);
+    return true;
+  } catch(e){ return false; }
+}
+function stopSpeech(){ try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch(e){} }
+
+const LANG_CODE = { English:"en-US", Spanish:"es-ES", Portuguese:"pt-BR", French:"fr-FR", German:"de-DE", Arabic:"ar-SA", Hindi:"hi-IN", Mandarin:"zh-CN", Japanese:"ja-JP", Korean:"ko-KR" };
+
+function AvatarCard({ avatar, onEdit, onDuplicate, onDelete, onSetDefault, onPreview }){
+  const isDef = !!avatar.isDefault;
+  const gradient = avatar.grad || "from-indigo-500 via-fuchsia-500 to-cyan-500";
   return (
-    <Placeholder title="Avatars & Voices" subtitle="Custom avatars, voice cloning, lip sync, and translation. Coming online in Stage 4.">
-      <div className="grid md:grid-cols-3 gap-3">
-        {ARCHIVE_AVATARS.map(a => (
-          <div key={a.id} className="card p-4">
-            <div className="w-14 h-14 rounded-full mb-3" style={{background:"linear-gradient(135deg,#6366f1,#22d3ee)"}}/>
-            <div className="font-semibold">{a.name}</div>
-            <div className="text-xs text-[color:var(--muted)]">{a.persona}</div>
-          </div>
-        ))}
+    <div className="card p-5 flex flex-col">
+      <div className={"relative h-36 rounded-xl mb-3 bg-gradient-to-br " + gradient} aria-hidden>
+        <div className="absolute inset-0 flex items-center justify-center text-white/90 text-4xl font-black">{(avatar.name||"?").slice(0,1).toUpperCase()}</div>
+        {isDef && <div className="absolute top-2 left-2"><Tag tone="brand">Default</Tag></div>}
+        {avatar.clipDataUrl && <div className="absolute top-2 right-2"><Tag tone="success">{I.mic({size:10})} Clone</Tag></div>}
       </div>
-    </Placeholder>
+      <div className="flex items-center gap-2">
+        <div className="font-semibold text-[15px]">{avatar.name}</div>
+        <span className="text-[11px] text-[color:var(--muted)]">{avatar.language}</span>
+      </div>
+      <div className="text-[12px] text-[color:var(--muted)] mt-1 line-clamp-2">{avatar.persona}</div>
+      <div className="mt-2 flex flex-wrap gap-1">{(avatar.tags||[]).map(t => <span key={t} className="chip">{t}</span>)}</div>
+      <div className="mt-4 flex items-center gap-1 flex-wrap">
+        <button className="chip" onClick={()=>onPreview(avatar)} aria-label="Preview voice">{I.play({size:12})} Preview</button>
+        <button className="chip" onClick={()=>onEdit(avatar)}>{I.edit({size:12})} Edit</button>
+        <button className="chip" onClick={()=>onDuplicate(avatar)}>{I.copy({size:12})} Duplicate</button>
+        {!isDef && <button className="chip" onClick={()=>onSetDefault(avatar)}>{I.starOutline({size:12})} Default</button>}
+        {!avatar.builtIn && <button className="chip" onClick={()=>onDelete(avatar)} aria-label="Delete avatar">{I.trash({size:12})}</button>}
+      </div>
+    </div>
+  );
+}
+
+function AvatarEditor({ open, avatar, onClose, onSave }){
+  const [form, setForm] = useState(avatar || null);
+  const [voices, setVoices] = useState(getSpeechVoices());
+  const [recording, setRecording] = useState(false);
+  const [previewText, setPreviewText] = useState("Hello, I'm your new avatar. Let's make something great.");
+  const mediaRef = useRef(null);
+  const chunksRef = useRef([]);
+  const streamRef = useRef(null);
+  const toast = useToast();
+  useEffect(() => { setForm(avatar); }, [avatar && avatar.id]);
+  useEffect(() => {
+    if(!open) return;
+    const refresh = () => setVoices(getSpeechVoices());
+    refresh();
+    if(window.speechSynthesis){
+      window.speechSynthesis.onvoiceschanged = refresh;
+      return () => { try { window.speechSynthesis.onvoiceschanged = null; } catch(e){} };
+    }
+  }, [open]);
+  useEffect(() => () => {
+    try { stopSpeech(); } catch(e){}
+    if(streamRef.current){ try { streamRef.current.getTracks().forEach(t => t.stop()); } catch(e){} }
+  }, []);
+  if(!open || !form) return null;
+  const set = (patch) => setForm(f => ({ ...f, ...patch }));
+  const langCode = LANG_CODE[form.language] || "en-US";
+  const voicesForLang = voices.filter(v => (v.lang||"").toLowerCase().startsWith((langCode||"").toLowerCase().slice(0,2)));
+  const onPreview = () => {
+    const ok = speakText(previewText, { rate: form.rate, pitch: form.pitch, voiceName: form.voiceName, lang: langCode });
+    if(!ok) toast("Speech synthesis is not available in this browser.", "error");
+  };
+  const startRec = async () => {
+    try {
+      if(!navigator.mediaDevices || !window.MediaRecorder){ toast("Recording is not supported here.", "error"); return; }
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      const mr = new MediaRecorder(stream);
+      mediaRef.current = mr;
+      chunksRef.current = [];
+      mr.ondataavailable = (e) => { if(e.data && e.data.size) chunksRef.current.push(e.data); };
+      mr.onstop = () => {
+        try {
+          const blob = new Blob(chunksRef.current, { type: "audio/webm" });
+          const reader = new FileReader();
+          reader.onload = () => { set({ clipDataUrl: reader.result }); toast("Voice sample saved to this avatar.", "success"); };
+          reader.readAsDataURL(blob);
+        } catch(e){ toast("Could not save recording.", "error"); }
+        try { streamRef.current && streamRef.current.getTracks().forEach(t => t.stop()); } catch(e){}
+        streamRef.current = null;
+      };
+      mr.start();
+      setRecording(true);
+    } catch(e){ toast("Microphone permission denied.", "error"); }
+  };
+  const stopRec = () => { try { mediaRef.current && mediaRef.current.stop(); } catch(e){} setRecording(false); };
+  return (
+    <Drawer open={open} onClose={onClose} title={form.id ? "Edit avatar" : "New avatar"} subtitle="Persona, voice, and a short sample." width={520}>
+      <div className="flex flex-col gap-4">
+        <div className={"relative h-32 rounded-xl bg-gradient-to-br " + (form.grad || "from-indigo-500 via-fuchsia-500 to-cyan-500")} aria-hidden>
+          <div className="absolute inset-0 flex items-center justify-center text-white/90 text-4xl font-black">{(form.name||"?").slice(0,1).toUpperCase()}</div>
+        </div>
+        <label className="block">
+          <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Name</span>
+          <input value={form.name||""} onChange={(e)=>set({ name: e.target.value })} className="mt-1 w-full bg-transparent border border-[color:var(--line)] rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-white/20" />
+        </label>
+        <label className="block">
+          <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Persona</span>
+          <textarea value={form.persona||""} onChange={(e)=>set({ persona: e.target.value })} rows={2} className="mt-1 w-full bg-transparent border border-[color:var(--line)] rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-white/20" />
+        </label>
+        <div className="grid grid-cols-2 gap-3">
+          <label className="block">
+            <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Language</span>
+            <select value={form.language||"English"} onChange={(e)=>set({ language: e.target.value, voiceName: "" })} className="mt-1 w-full bg-transparent border border-[color:var(--line)] rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-white/20">
+              {["English","Spanish","Portuguese","French","German","Arabic","Hindi","Mandarin","Japanese","Korean"].map(l => <option key={l} value={l} style={{background:"#0b0b10"}}>{l}</option>)}
+            </select>
+          </label>
+          <label className="block">
+            <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Built-in voice</span>
+            <select value={form.voiceName||""} onChange={(e)=>set({ voiceName: e.target.value })} className="mt-1 w-full bg-transparent border border-[color:var(--line)] rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-white/20">
+              <option value="" style={{background:"#0b0b10"}}>System default</option>
+              {voicesForLang.map(v => <option key={v.name} value={v.name} style={{background:"#0b0b10"}}>{v.name} — {v.lang}</option>)}
+            </select>
+          </label>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <label className="block">
+            <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Rate {Number(form.rate||1).toFixed(2)}</span>
+            <input type="range" min="0.5" max="2" step="0.05" value={form.rate||1} onChange={(e)=>set({ rate: parseFloat(e.target.value) })} className="w-full mt-1" />
+          </label>
+          <label className="block">
+            <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Pitch {Number(form.pitch||1).toFixed(2)}</span>
+            <input type="range" min="0" max="2" step="0.05" value={form.pitch||1} onChange={(e)=>set({ pitch: parseFloat(e.target.value) })} className="w-full mt-1" />
+          </label>
+        </div>
+        <div className="card p-3">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div>
+              <div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Voice clone sample</div>
+              <div className="text-[12px] text-[color:var(--muted)] mt-0.5">Record 10–30s of clean speech. Sample stays on this device.</div>
+            </div>
+            {!recording ? (
+              <button className="chip" onClick={startRec}>{I.mic({size:12})} Record</button>
+            ) : (
+              <button className="chip" onClick={stopRec}>{I.x({size:12})} Stop</button>
+            )}
+          </div>
+          {form.clipDataUrl && (
+            <div className="mt-3">
+              <audio controls src={form.clipDataUrl} className="w-full" />
+              <div className="flex justify-end mt-1"><button className="chip" onClick={()=>set({ clipDataUrl: null })}>{I.trash({size:12})} Remove sample</button></div>
+            </div>
+          )}
+        </div>
+        <div className="card p-3">
+          <div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Preview text</div>
+          <textarea value={previewText} onChange={(e)=>setPreviewText(e.target.value)} rows={2} className="mt-1 w-full bg-transparent border border-[color:var(--line)] rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-white/20" />
+          <div className="mt-2 flex items-center gap-2">
+            <button className="btn" onClick={onPreview}>{I.play({size:12})} Speak</button>
+            <button className="chip" onClick={stopSpeech}>{I.x({size:12})} Stop</button>
+          </div>
+        </div>
+        <div className="flex items-center justify-end gap-2 pt-2">
+          <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" onClick={()=>{ onSave(form); onClose(); }}>{I.check({size:14})} Save</button>
+        </div>
+      </div>
+    </Drawer>
+  );
+}
+
+function AvatarsTab(){
+  const [avatars, setAvatars] = useLocalState("avatars", AVATAR_SEED);
+  const [query, setQuery] = useState("");
+  const [editing, setEditing] = useState(null);
+  const toast = useToast();
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if(!q) return avatars;
+    return avatars.filter(a => [a.name, a.persona, a.language, (a.tags||[]).join(" ")].join(" ").toLowerCase().includes(q));
+  }, [avatars, query]);
+  const onNew = () => {
+    const id = "av_" + Math.random().toString(36).slice(2,8);
+    const grads = ["from-sky-500 via-indigo-500 to-violet-600","from-amber-400 via-orange-500 to-rose-500","from-rose-400 via-pink-500 to-fuchsia-600","from-emerald-400 via-teal-500 to-cyan-600","from-fuchsia-400 via-purple-500 to-indigo-700"];
+    setEditing({ id, name:"New avatar", persona:"Describe this persona.", tags:["custom"], grad: grads[Math.floor(Math.random()*grads.length)], language:"English", voiceKind:"builtin", voiceName:"", rate:1.0, pitch:1.0, isDefault:false, clipDataUrl:null, builtIn:false, created: Date.now() });
+  };
+  const onSave = (a) => {
+    setAvatars(list => {
+      const exists = list.some(x => x.id === a.id);
+      return exists ? list.map(x => x.id === a.id ? a : x) : [a, ...list];
+    });
+    toast("Avatar saved.", "success");
+  };
+  const onDuplicate = (a) => {
+    const copy = { ...a, id: "av_" + Math.random().toString(36).slice(2,8), name: a.name + " copy", isDefault: false, builtIn: false, created: Date.now() };
+    setAvatars(list => [copy, ...list]);
+    toast("Duplicated.", "success");
+  };
+  const onDelete = (a) => {
+    if(a.builtIn) { toast("Built-in avatars can't be deleted.", "error"); return; }
+    if(!confirm("Delete " + a.name + "?")) return;
+    setAvatars(list => list.filter(x => x.id !== a.id));
+    toast("Deleted.", "info");
+  };
+  const onSetDefault = (a) => {
+    setAvatars(list => list.map(x => ({ ...x, isDefault: x.id === a.id })));
+    toast(a.name + " is now the default.", "success");
+  };
+  const onPreview = (a) => {
+    const ok = speakText("Hi, I'm " + (a.name||"this avatar") + ". " + (a.persona||""), { rate: a.rate, pitch: a.pitch, voiceName: a.voiceName, lang: LANG_CODE[a.language] || "en-US" });
+    if(!ok) toast("Speech synthesis unavailable.", "error");
+  };
+  const resetDemo = () => { if(!confirm("Reset avatars to the built-in demo set?")) return; setAvatars(AVATAR_SEED); toast("Reset.", "info"); };
+  return (
+    <div className="max-w-[1400px] mx-auto px-5 py-8">
+      <div className="flex items-start justify-between gap-3 flex-wrap mb-5">
+        <div>
+          <h1 className="text-3xl font-bold">Avatars &amp; Voices</h1>
+          <p className="text-[color:var(--muted)] mt-1 max-w-2xl">Personas, language, and a sample voice. Use the built-in browser voice for free, or record a short clip for future voice cloning when a provider is connected.</p>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-2 bg-transparent border border-[color:var(--line)] rounded-xl px-3 py-2 focus-within:border-white/20">
+            <span className="text-[color:var(--muted)]" aria-hidden>{I.search({size:14})}</span>
+            <input value={query} onChange={(e)=>setQuery(e.target.value)} placeholder="Search avatars" className="bg-transparent text-sm focus:outline-none w-44" />
+          </div>
+          <button className="btn btn-ghost" onClick={resetDemo}>{I.refresh({size:14})} Reset demo</button>
+          <button className="btn btn-primary" onClick={onNew}>{I.plus({size:14})} New avatar</button>
+        </div>
+      </div>
+      <div className="mb-4">
+        <Tag tone="info">Local/free mode. When you connect a voice-cloning provider in Settings, recorded samples will be used to synthesize natural speech.</Tag>
+      </div>
+      {filtered.length === 0 ? (
+        <EmptyState title="No avatars match" subtitle="Try a different search or create a new avatar." action={<button className="btn btn-primary" onClick={onNew}>{I.plus({size:14})} New avatar</button>} />
+      ) : (
+        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {filtered.map(a => <AvatarCard key={a.id} avatar={a} onEdit={setEditing} onDuplicate={onDuplicate} onDelete={onDelete} onSetDefault={onSetDefault} onPreview={onPreview} />)}
+        </div>
+      )}
+      <AvatarEditor open={!!editing} avatar={editing} onClose={()=>setEditing(null)} onSave={onSave} />
+    </div>
   );
 }
 function BrandsTab(){
