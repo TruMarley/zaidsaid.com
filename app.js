@@ -1,4 +1,4 @@
-/* Zaidsaid — app.js v2.0 — Stage 1: IA shell + Home
+/* Zaidsaid — app.js v2.0 — Stage 2: Studio wizard online
  * Security: localStorage namespaced as zaidsaid.v2.*, error boundary, no innerHTML, no eval, no fetch.
  * Archived v1 seed data preserved under ARCHIVE_* for later reuse.
  */
@@ -34,6 +34,12 @@ const I = {
   play: (p)=> <svg viewBox="0 0 24 24" width={p?.size||18} height={p?.size||18} fill="currentColor" aria-hidden><path d="M8 5v14l11-7z"/></svg>,
   check: (p)=> <svg viewBox="0 0 24 24" width={p?.size||14} height={p?.size||14} fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="m5 12 5 5L20 7"/></svg>,
   arrow: (p)=> <svg viewBox="0 0 24 24" width={p?.size||16} height={p?.size||16} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M5 12h14M13 6l6 6-6 6"/></svg>,
+  refresh: (p)=> <svg viewBox="0 0 24 24" width={p?.size||16} height={p?.size||16} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M21 12a9 9 0 1 1-3-6.7M21 4v5h-5"/></svg>,
+  grip: (p)=> <svg viewBox="0 0 24 24" width={p?.size||16} height={p?.size||16} fill="currentColor" aria-hidden><circle cx="9" cy="6" r="1.4"/><circle cx="15" cy="6" r="1.4"/><circle cx="9" cy="12" r="1.4"/><circle cx="15" cy="12" r="1.4"/><circle cx="9" cy="18" r="1.4"/><circle cx="15" cy="18" r="1.4"/></svg>,
+  up: (p)=> <svg viewBox="0 0 24 24" width={p?.size||14} height={p?.size||14} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="m6 15 6-6 6 6"/></svg>,
+  down: (p)=> <svg viewBox="0 0 24 24" width={p?.size||14} height={p?.size||14} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="m6 9 6 6 6-6"/></svg>,
+  plus: (p)=> <svg viewBox="0 0 24 24" width={p?.size||14} height={p?.size||14} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M12 5v14M5 12h14"/></svg>,
+  x: (p)=> <svg viewBox="0 0 24 24" width={p?.size||14} height={p?.size||14} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M6 6l12 12M18 6 6 18"/></svg>,
 };
 
 /* ---------------- Archived v1 seed data (preserved for later reuse) ---------------- */
@@ -55,21 +61,21 @@ const ARCHIVE_PIPELINE = [
 ];
 const ARCHIVE_PROVIDERS = [
   { stage:"Research", primary:"Perplexity", fallback:"You.com", latency:"2.1s" },
-  { stage:"Script",   primary:"Claude 3.5", fallback:"GPT-4.1", latency:"1.4s" },
+  { stage:"Script", primary:"Claude 3.5", fallback:"GPT-4.1", latency:"1.4s" },
   { stage:"Storyboard", primary:"Flux 1.1 Pro", fallback:"SDXL", latency:"6.2s" },
-  { stage:"Voice",    primary:"ElevenLabs", fallback:"PlayHT", latency:"1.1s" },
-  { stage:"Avatar",   primary:"HeyGen", fallback:"Synthesia", latency:"9.8s" },
-  { stage:"Motion",   primary:"Runway Gen-3", fallback:"Kling", latency:"11.5s" },
-  { stage:"Music",    primary:"Suno", fallback:"Udio", latency:"2.9s" },
+  { stage:"Voice", primary:"ElevenLabs", fallback:"PlayHT", latency:"1.1s" },
+  { stage:"Avatar", primary:"HeyGen", fallback:"Synthesia", latency:"9.8s" },
+  { stage:"Motion", primary:"Runway Gen-3", fallback:"Kling", latency:"11.5s" },
+  { stage:"Music", primary:"Suno", fallback:"Udio", latency:"2.9s" },
   { stage:"Captions", primary:"Whisper V3", fallback:"Deepgram", latency:"0.8s" },
-  { stage:"Edit",     primary:"Zaidsaid Timeline", fallback:"—", latency:"0.2s" },
-  { stage:"Publish",  primary:"Direct to platform", fallback:"Buffer", latency:"1.6s" },
+  { stage:"Edit", primary:"Zaidsaid Timeline", fallback:"—", latency:"0.2s" },
+  { stage:"Publish", primary:"Direct to platform", fallback:"Buffer", latency:"1.6s" },
 ];
 const ARCHIVE_PLATFORMS = [
   { id:"shorts", name:"YouTube Shorts", ratio:"9/16", max:"60s" },
-  { id:"reels",  name:"Instagram Reels", ratio:"9/16", max:"90s" },
+  { id:"reels", name:"Instagram Reels", ratio:"9/16", max:"90s" },
   { id:"tiktok", name:"TikTok", ratio:"9/16", max:"3m" },
-  { id:"x",      name:"X / Twitter", ratio:"1/1", max:"2m 20s" },
+  { id:"x", name:"X / Twitter", ratio:"1/1", max:"2m 20s" },
   { id:"linkedin", name:"LinkedIn", ratio:"1/1", max:"10m" },
   { id:"youtube", name:"YouTube", ratio:"16/9", max:"12h" },
 ];
@@ -84,16 +90,38 @@ const ARCHIVE_AVATARS = [
 
 /* ---------------- New IA ---------------- */
 const TABS = [
-  { id:"home",       label:"Home",             icon:"home"     },
-  { id:"studio",     label:"Studio",           icon:"studio"   },
-  { id:"repurpose",  label:"Repurpose",        icon:"scissors" },
-  { id:"avatars",    label:"Avatars & Voices", icon:"avatar"   },
-  { id:"brands",     label:"Brand Kits",       icon:"brand"    },
-  { id:"templates",  label:"Templates",        icon:"template" },
-  { id:"projects",   label:"Projects",         icon:"folder"   },
-  { id:"architecture", label:"Architecture",   icon:"blocks"   },
-  { id:"docs",       label:"Docs",             icon:"book"     },
+  { id:"home", label:"Home", icon:"home" },
+  { id:"studio", label:"Studio", icon:"studio" },
+  { id:"repurpose", label:"Repurpose", icon:"scissors" },
+  { id:"avatars", label:"Avatars & Voices", icon:"avatar" },
+  { id:"brands", label:"Brand Kits", icon:"brand" },
+  { id:"templates", label:"Templates", icon:"template" },
+  { id:"projects", label:"Projects", icon:"folder" },
+  { id:"architecture", label:"Architecture", icon:"blocks" },
+  { id:"docs", label:"Docs", icon:"book" },
 ];
+
+/* ---------------- Hash routing helpers ---------------- */
+function parseHash(){
+  const raw = (location.hash||"").replace(/^#/, "");
+  const [path, query] = raw.split("?");
+  const params = {};
+  if(query){
+    query.split("&").forEach(kv => {
+      const [k,v] = kv.split("=");
+      if(k) params[decodeURIComponent(k)] = v==null?"":decodeURIComponent(v);
+    });
+  }
+  return { path: path || "", params };
+}
+function setHash(path, params){
+  let h = "#" + (path||"");
+  if(params){
+    const keys = Object.keys(params).filter(k => params[k]!=null && params[k]!=="");
+    if(keys.length) h += "?" + keys.map(k => encodeURIComponent(k)+"="+encodeURIComponent(params[k])).join("&");
+  }
+  history.replaceState(null, "", h);
+}
 
 /* ---------------- Error Boundary ---------------- */
 class Boundary extends React.Component {
@@ -117,7 +145,7 @@ class Boundary extends React.Component {
 }
 
 /* ---------------- Shell ---------------- */
-function TopBar({ tab, setTab }){
+function TopBar({ tab, setTab, onNewProject }){
   return (
     <header className="sticky top-0 z-20 backdrop-blur bg-[color:var(--bg)]/70 border-b border-[color:var(--line)]">
       <div className="max-w-[1400px] mx-auto px-5 py-3 flex items-center gap-4">
@@ -137,7 +165,7 @@ function TopBar({ tab, setTab }){
         </nav>
         <div className="ml-auto flex items-center gap-2">
           <span className="chip"><span className="dot"/> all systems nominal</span>
-          <button className="btn btn-primary" onClick={()=>setTab("studio")}>
+          <button className="btn btn-primary" onClick={()=>{ onNewProject && onNewProject(); }}>
             {I.spark({size:16})} <span>New project</span>
           </button>
         </div>
@@ -171,7 +199,7 @@ const INPUTS = [
   { k:"text", label:"Text / script" },
   { k:"link", label:"URL / article" },
   { k:"audio", label:"Audio or podcast" },
-  { k:"pdf",  label:"PDF / doc" },
+  { k:"pdf", label:"PDF / doc" },
   { k:"image", label:"Image / set" },
 ];
 const PILLARS = [
@@ -194,8 +222,7 @@ const FEATURES = [
   { t:"API & webhooks", d:"Programmatic pipelines for agencies. Rate-limited, auditable, signed webhooks on every stage." },
 ];
 const INTEGRATIONS = ["TikTok","Instagram","YouTube","LinkedIn","X","Slack","Notion","Google Drive","Dropbox","Zapier"];
-
-function HomeTab({ setTab }){
+function HomeTab({ setTab, startProject }){
   return (
     <div className="max-w-[1400px] mx-auto px-5">
       <section className="py-14 md:py-20 relative">
@@ -209,7 +236,7 @@ function HomeTab({ setTab }){
             Zaidsaid turns text, links, audio, articles, podcasts, PDFs, and images into polished, branded, social-ready videos. Research, scripting, storyboarding, assets, motion graphics, voiceover, avatar narration, editing, and repurposing — all automated, all in one place.
           </p>
           <div className="flex flex-wrap items-center gap-3">
-            <button className="btn btn-primary" onClick={()=>setTab("studio")}>{I.spark({size:16})} <span>Start a project</span></button>
+            <button className="btn btn-primary" onClick={()=>{ startProject && startProject(); }}>{I.spark({size:16})} <span>Start a project</span></button>
             <button className="btn" onClick={()=>setTab("repurpose")}>{I.scissors({size:16})} <span>Repurpose long-form</span></button>
             <button className="btn btn-ghost" onClick={()=>setTab("templates")}>{I.template({size:16})} <span>Browse templates</span></button>
           </div>
@@ -268,11 +295,866 @@ function HomeTab({ setTab }){
             <p className="text-[color:var(--muted)] mt-1">Start in the Studio, or drop a long-form file and we'll cut shorts automatically.</p>
           </div>
           <div className="md:ml-auto flex flex-wrap gap-3">
-            <button className="btn btn-primary" onClick={()=>setTab("studio")}>{I.play({size:14})} Start a project</button>
+            <button className="btn btn-primary" onClick={()=>{ startProject && startProject(); }}>{I.play({size:14})} Start a project</button>
             <button className="btn" onClick={()=>setTab("docs")}>{I.book({size:14})} Read the docs</button>
           </div>
         </div>
       </section>
+    </div>
+  );
+}
+
+/* ---------------- Studio wizard (Stage 2) ---------------- */
+const STUDIO_STEPS = [
+  { id:"research",   label:"Research",     blurb:"Gather sources, angles, and claims." },
+  { id:"script",     label:"Script",       blurb:"Tight, spoken copy with beats." },
+  { id:"storyboard", label:"Storyboard",   blurb:"Frame-by-frame visual plan." },
+  { id:"assets",     label:"Assets",       blurb:"B-roll, stills, music, SFX." },
+  { id:"motion",     label:"Motion",       blurb:"Camera moves, transitions, kinetic type." },
+  { id:"voice",      label:"Voice/Avatar", blurb:"Narration, clone, or avatar performance." },
+  { id:"timeline",   label:"Timeline",     blurb:"Arrange scenes. Drag to reorder." },
+  { id:"export",     label:"Export",       blurb:"Aspect and platform presets." },
+];
+const STUDIO_INPUT_KINDS = [
+  { k:"text",    label:"Text",    hint:"Paste a prompt, outline, or full draft." },
+  { k:"link",    label:"Link",    hint:"Article, blog, landing page." },
+  { k:"audio",   label:"Audio",   hint:"MP3 / WAV voice memo." },
+  { k:"article", label:"Article", hint:"Long-form RSS or newsletter." },
+  { k:"podcast", label:"Podcast", hint:"Episode URL or audio file." },
+  { k:"pdf",     label:"PDF",     hint:"Whitepaper, brief, deck." },
+  { k:"image",   label:"Image",   hint:"Single image or a set." },
+];
+const STUDIO_PIPELINE_STAGES = [
+  { k:"ingest",    label:"Ingest source",      ms: 600 },
+  { k:"research",  label:"Research the angle", ms: 900 },
+  { k:"outline",   label:"Outline beats",      ms: 700 },
+  { k:"script",    label:"Write the script",   ms: 1100 },
+  { k:"board",     label:"Storyboard frames",  ms: 1300 },
+  { k:"assets",    label:"Match assets",       ms: 1100 },
+  { k:"motion",    label:"Plan motion",        ms: 900 },
+  { k:"voice",     label:"Synthesize voice",   ms: 1000 },
+  { k:"assemble",  label:"Assemble timeline",  ms: 800 },
+];
+const STUDIO_EXPORT_PRESETS = [
+  { id:"vertical",   ratio:"9:16", label:"Vertical",   platforms:["TikTok","Reels","Shorts"] },
+  { id:"square",     ratio:"1:1",  label:"Square",     platforms:["X","LinkedIn"] },
+  { id:"landscape",  ratio:"16:9", label:"Landscape",  platforms:["YouTube","LinkedIn"] },
+];
+const STUDIO_CHARACTERS = [
+  { id:"nova",  name:"Nova",  role:"Anchor" },
+  { id:"atlas", name:"Atlas", role:"Coach" },
+  { id:"vera",  name:"Vera",  role:"Host" },
+];
+const STUDIO_SEED = {
+  name: "Why mushrooms talk to trees underground",
+  kind: "idea",
+  source: "Mycorrhizal networks: how fungi wire forests for carbon and warning signals.",
+  brandKitId: "bk-zs",
+  characterId: "nova",
+  language: "English",
+  platforms: ["TikTok","Reels","Shorts"],
+  preset: "vertical",
+  research: [
+    { id:"r1", claim:"Up to 90% of land plants form mycorrhizal partnerships with fungi.",    source:"Nature Reviews Microbiology, 2020", confidence: 0.94 },
+    { id:"r2", claim:"Trees trade carbon through hyphal networks, sometimes across species.",  source:"Simard et al., University of British Columbia", confidence: 0.88 },
+    { id:"r3", claim:"Chemical warnings travel along fungal networks in minutes.",             source:"Current Biology, 2013",            confidence: 0.82 },
+    { id:"r4", claim:"A single gram of forest soil can contain kilometers of fungal hyphae.", source:"USDA Forest Service",              confidence: 0.90 },
+  ],
+  scenes: [
+    { id:"s1", title:"Hook",     voLine:"Under your feet, trees are talking.",                           shot:"Macro push-in on forest floor, morning light.",       duration: 3, motion:"slow push-in",     asset:"b-roll: dew on moss",   captions:"Under your feet, trees are talking." },
+    { id:"s2", title:"Setup",    voLine:"They use a living underground network made of fungi.",         shot:"Diagram overlay: hyphal web between roots.",          duration: 5, motion:"parallax drift",   asset:"graphic: mycorrhizal map", captions:"A living network, made of fungi." },
+    { id:"s3", title:"Evidence", voLine:"Ninety percent of land plants plug into it. Carbon flows.",   shot:"Kinetic text: 90% + cross-fade to canopy.",           duration: 5, motion:"kinetic type",     asset:"stock: forest canopy",   captions:"90% of land plants plug in." },
+    { id:"s4", title:"Twist",    voLine:"And when a tree is attacked, neighbors get warned.",          shot:"Time-lapse: beetle on bark, particles across roots.", duration: 5, motion:"time-lapse",       asset:"stock: bark + particles", captions:"Attacked trees warn neighbors." },
+    { id:"s5", title:"Payoff",   voLine:"The forest isn't a crowd. It's a conversation.",              shot:"Wide hero shot, slow dolly-out, title card.",          duration: 4, motion:"dolly-out hero",   asset:"hero: old-growth wide",  captions:"The forest is a conversation." },
+  ],
+};
+function sceneRegenerateBlurbs(field){
+  const bank = {
+    voLine:  ["Rewritten for rhythm.","Punchier cadence, same meaning.","Tightened to 12 words.","Added a crisp verb."],
+    shot:    ["New angle: low, looking up.","Swapped to a macro detail shot.","Added a subtle parallax layer.","Switched to golden-hour wide."],
+    motion:  ["Softened the ease.","Added a frame-on-frame cut.","Kinetic type, 24fr hold.","Slow dolly, not push."],
+    asset:   ["Swapped to a provenance-clean stock.","Matched palette to brand kit.","New clip has better negative space.","Paired with ambient bed."],
+    captions:["Tightened caption to 7 words.","Rewrote with a hook verb.","Matched platform caption style.","Dropped jargon."],
+  };
+  const list = bank[field] || ["Regenerated."];
+  return list[Math.floor(Math.random()*list.length)];
+}
+
+function StudioStepNav({ step, setStep }){
+  return (
+    <div className="card p-2 flex items-center gap-1 overflow-x-auto scrollbar">
+      {STUDIO_STEPS.map((s, i) => {
+        const active = s.id === step;
+        return (
+          <button key={s.id}
+            onClick={()=>setStep(s.id)}
+            aria-current={active?"step":undefined}
+            className={"flex items-center gap-2 px-3 py-2 rounded-xl text-[12.5px] whitespace-nowrap " + (active ? "bg-white/10 text-white border border-white/10" : "text-[color:var(--muted)] hover:text-white")}>
+            <span className="text-[10px] text-[color:var(--muted)]">{String(i+1).padStart(2,"0")}</span>
+            <span>{s.label}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function StudioCharacterRow({ project, setProject }){
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="card p-3 flex items-center gap-2 flex-wrap">
+      <div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)] mr-1">Characters</div>
+      {STUDIO_CHARACTERS.map(c => {
+        const active = project.characterId === c.id;
+        return (
+          <button key={c.id}
+            onClick={()=>setProject({ ...project, characterId: c.id })}
+            aria-pressed={active}
+            className={"flex items-center gap-2 px-2.5 py-1.5 rounded-full border text-[12px] " + (active ? "border-white/20 bg-white/10 text-white" : "border-[color:var(--line)] text-[color:var(--muted)] hover:text-white")}>
+            <span className="w-6 h-6 rounded-full" style={{background:"linear-gradient(135deg,#6366f1,#22d3ee)"}} aria-hidden />
+            <span>{c.name}</span>
+            <span className="text-[10px] text-[color:var(--muted)]">{c.role}</span>
+          </button>
+        );
+      })}
+      <button className="chip" onClick={()=>setOpen(o=>!o)} aria-expanded={open}>
+        {I.plus({size:12})} Add character
+      </button>
+      {open && (
+        <div className="basis-full text-[12px] text-[color:var(--muted)] mt-2">
+          Character creation lands in Stage 4 (Avatars & Voices). This chip row keeps the selected persona consistent across scenes.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StudioBrandKitSelect({ project, setProject }){
+  return (
+    <div className="card p-3 flex items-center gap-3 flex-wrap">
+      <div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Brand kit</div>
+      {ARCHIVE_BRAND_KITS.map(b => {
+        const active = project.brandKitId === b.id;
+        return (
+          <button key={b.id}
+            onClick={()=>setProject({ ...project, brandKitId: b.id })}
+            aria-pressed={active}
+            className={"flex items-center gap-2 px-2.5 py-1.5 rounded-xl border text-[12px] " + (active ? "border-white/20 bg-white/10 text-white" : "border-[color:var(--line)] text-[color:var(--muted)] hover:text-white")}>
+            <span className="flex items-center gap-0.5">
+              <span className="w-3 h-3 rounded-sm" style={{background:b.primary}}/>
+              <span className="w-3 h-3 rounded-sm" style={{background:b.secondary}}/>
+              <span className="w-3 h-3 rounded-sm" style={{background:b.accent}}/>
+            </span>
+            <span>{b.name}</span>
+          </button>
+        );
+      })}
+      <span className="text-[11px] text-[color:var(--muted)]">Full brand-kit editor arrives in Stage 5.</span>
+    </div>
+  );
+}
+
+function StudioInputAccepter({ project, setProject }){
+  return (
+    <div className="card p-5">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Source</div>
+          <div className="text-lg font-semibold">What are we turning into a video?</div>
+        </div>
+        <div className="flex flex-wrap items-center gap-1">
+          {STUDIO_INPUT_KINDS.map(k => {
+            const active = project.kind === k.k;
+            return (
+              <button key={k.k}
+                onClick={()=>setProject({ ...project, kind: k.k })}
+                aria-pressed={active}
+                className={"px-2.5 py-1.5 rounded-xl text-[12px] border " + (active ? "border-white/20 bg-white/10 text-white" : "border-[color:var(--line)] text-[color:var(--muted)] hover:text-white")}>
+                {k.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      <div className="mt-4 grid md:grid-cols-3 gap-3">
+        <label className="md:col-span-2 block">
+          <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Prompt or paste</span>
+          <textarea
+            value={project.source || ""}
+            onChange={(e)=>setProject({ ...project, source: e.target.value })}
+            placeholder="Paste text, a URL, or describe the video you want."
+            rows={6}
+            className="mt-1 w-full bg-transparent border border-[color:var(--line)] rounded-xl p-3 text-sm focus:outline-none focus:border-white/20"
+          />
+        </label>
+        <div>
+          <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Upload (UI only)</span>
+          <div className="mt-1 border border-dashed border-[color:var(--line)] rounded-xl p-6 text-center text-[12px] text-[color:var(--muted)]">
+            <div className="text-white/80 font-semibold">Drop a file</div>
+            <div className="mt-1">Audio · PDF · Image · Podcast</div>
+            <div className="mt-3 opacity-70">Uploads wire up in a later stage.</div>
+            <button type="button" className="btn mt-3" aria-disabled="true" onClick={(e)=>e.preventDefault()}>
+              Choose file
+            </button>
+          </div>
+          <div className="text-[11px] text-[color:var(--muted)] mt-2">
+            Currently selected: <span className="text-white">{(STUDIO_INPUT_KINDS.find(x=>x.k===project.kind)||{}).label || "Text"}</span>
+          </div>
+        </div>
+      </div>
+      <div className="mt-3 flex items-center gap-2 flex-wrap">
+        <input
+          value={project.name || ""}
+          onChange={(e)=>setProject({ ...project, name: e.target.value })}
+          placeholder="Project name"
+          className="bg-transparent border border-[color:var(--line)] rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-white/20 flex-1 min-w-[240px]"
+        />
+        <select
+          value={project.language || "English"}
+          onChange={(e)=>setProject({ ...project, language: e.target.value })}
+          className="bg-transparent border border-[color:var(--line)] rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-white/20">
+          {ARCHIVE_LANGS.map(l => <option key={l} value={l} style={{background:"#0b0b10"}}>{l}</option>)}
+        </select>
+      </div>
+    </div>
+  );
+}
+
+function StudioPipelineSimulator({ project, setProject }){
+  const [running, setRunning] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [stageIdx, setStageIdx] = useState(-1);
+  const timersRef = useRef([]);
+  useEffect(()=>()=>{ timersRef.current.forEach(clearTimeout); timersRef.current = []; }, []);
+  const start = () => {
+    timersRef.current.forEach(clearTimeout);
+    timersRef.current = [];
+    setRunning(true);
+    setProgress(0);
+    setStageIdx(0);
+    let elapsed = 0;
+    const total = STUDIO_PIPELINE_STAGES.reduce((a,s)=>a+s.ms, 0);
+    STUDIO_PIPELINE_STAGES.forEach((s, i) => {
+      elapsed += s.ms;
+      const t = setTimeout(() => {
+        setStageIdx(i+1);
+        setProgress(Math.min(100, Math.round((elapsed/total)*100)));
+        if(i === STUDIO_PIPELINE_STAGES.length - 1){
+          setRunning(false);
+        }
+      }, elapsed);
+      timersRef.current.push(t);
+    });
+  };
+  const reset = () => {
+    timersRef.current.forEach(clearTimeout);
+    timersRef.current = [];
+    setRunning(false);
+    setProgress(0);
+    setStageIdx(-1);
+  };
+  return (
+    <div className="card p-5">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Pipeline simulator</div>
+          <div className="text-lg font-semibold">Watch Zaidsaid work the steps</div>
+          <div className="text-[12px] text-[color:var(--muted)] mt-1">This is a visualization. No external calls are made.</div>
+        </div>
+        <div className="flex items-center gap-2">
+          <button className="btn" onClick={start} disabled={running}>{running ? "Running…" : "Run simulation"}</button>
+          <button className="btn btn-ghost" onClick={reset} disabled={running && stageIdx < STUDIO_PIPELINE_STAGES.length}>Reset</button>
+        </div>
+      </div>
+      <div className="mt-4">
+        <div className="h-2 rounded-full bg-white/5 overflow-hidden">
+          <div className="h-full transition-all duration-500" style={{width: progress + "%", background:"linear-gradient(90deg,#6366f1,#22d3ee)"}} />
+        </div>
+        <div className="mt-2 flex items-center justify-between text-[11px] text-[color:var(--muted)]">
+          <span>{progress}%</span>
+          <span>{stageIdx >= STUDIO_PIPELINE_STAGES.length ? "Complete" : (running ? "Working…" : (stageIdx < 0 ? "Idle" : "Paused"))}</span>
+        </div>
+      </div>
+      <div className="mt-4 grid md:grid-cols-3 gap-2">
+        {STUDIO_PIPELINE_STAGES.map((s, i) => {
+          const state = i < stageIdx ? "done" : (i === stageIdx && running ? "active" : "pending");
+          return (
+            <div key={s.k}
+              className={"rounded-xl border p-3 text-[12px] transition-colors " +
+                (state==="done" ? "border-white/15 bg-white/[0.04] text-white" :
+                 state==="active" ? "border-white/20 bg-white/[0.08] text-white" :
+                 "border-[color:var(--line)] text-[color:var(--muted)]")}>
+              <div className="flex items-center gap-2">
+                <span className="w-5 h-5 rounded-full flex items-center justify-center text-[10px]"
+                  style={{background: state==="done" ? "linear-gradient(135deg,#6366f1,#22d3ee)" : (state==="active" ? "rgba(255,255,255,0.15)" : "rgba(255,255,255,0.05)")}}>
+                  {state==="done" ? I.check({size:12}) : (i+1)}
+                </span>
+                <span className="font-semibold">{s.label}</span>
+              </div>
+              <div className="mt-1 text-[11px] text-[color:var(--muted)]">{s.ms} ms</div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function SceneCard({ scene, onField, onRegen, onMove, onRemove, index, total }){
+  return (
+    <div className="card p-4">
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="chip">Scene {index+1}</span>
+        <input
+          value={scene.title}
+          onChange={(e)=>onField("title", e.target.value)}
+          className="bg-transparent border border-[color:var(--line)] rounded-lg px-2 py-1 text-[13px] focus:outline-none focus:border-white/20 min-w-[120px]"
+          aria-label="Scene title"
+        />
+        <span className="chip">{scene.duration}s</span>
+        <div className="ml-auto flex items-center gap-1">
+          <button className="chip" onClick={()=>onMove(-1)} disabled={index===0} aria-label="Move up">{I.up({size:12})}</button>
+          <button className="chip" onClick={()=>onMove(1)} disabled={index===total-1} aria-label="Move down">{I.down({size:12})}</button>
+          <button className="chip" onClick={onRemove} aria-label="Remove scene">{I.x({size:12})}</button>
+        </div>
+      </div>
+      <div className="grid md:grid-cols-2 gap-3 mt-3">
+        <label className="block">
+          <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">VO line</span>
+          <textarea
+            value={scene.voLine}
+            onChange={(e)=>onField("voLine", e.target.value)}
+            rows={2}
+            className="mt-1 w-full bg-transparent border border-[color:var(--line)] rounded-lg p-2 text-sm focus:outline-none focus:border-white/20"
+          />
+          <div className="flex items-center justify-between mt-1">
+            <span className="text-[11px] text-[color:var(--muted)]">Read time {(scene.voLine||"").split(/\s+/).filter(Boolean).length} words</span>
+            <button className="chip" onClick={()=>onRegen("voLine")}>{I.refresh({size:12})} Regenerate</button>
+          </div>
+        </label>
+        <label className="block">
+          <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Shot</span>
+          <textarea
+            value={scene.shot}
+            onChange={(e)=>onField("shot", e.target.value)}
+            rows={2}
+            className="mt-1 w-full bg-transparent border border-[color:var(--line)] rounded-lg p-2 text-sm focus:outline-none focus:border-white/20"
+          />
+          <div className="flex items-center justify-end mt-1">
+            <button className="chip" onClick={()=>onRegen("shot")}>{I.refresh({size:12})} Regenerate</button>
+          </div>
+        </label>
+      </div>
+      <div className="grid md:grid-cols-3 gap-3 mt-2">
+        <label className="block">
+          <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Motion</span>
+          <input value={scene.motion} onChange={(e)=>onField("motion", e.target.value)}
+            className="mt-1 w-full bg-transparent border border-[color:var(--line)] rounded-lg p-2 text-sm focus:outline-none focus:border-white/20"/>
+          <div className="flex justify-end mt-1"><button className="chip" onClick={()=>onRegen("motion")}>{I.refresh({size:12})} Regenerate</button></div>
+        </label>
+        <label className="block">
+          <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Asset</span>
+          <input value={scene.asset} onChange={(e)=>onField("asset", e.target.value)}
+            className="mt-1 w-full bg-transparent border border-[color:var(--line)] rounded-lg p-2 text-sm focus:outline-none focus:border-white/20"/>
+          <div className="flex justify-end mt-1"><button className="chip" onClick={()=>onRegen("asset")}>{I.refresh({size:12})} Regenerate</button></div>
+        </label>
+        <label className="block">
+          <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Captions</span>
+          <input value={scene.captions} onChange={(e)=>onField("captions", e.target.value)}
+            className="mt-1 w-full bg-transparent border border-[color:var(--line)] rounded-lg p-2 text-sm focus:outline-none focus:border-white/20"/>
+          <div className="flex justify-end mt-1"><button className="chip" onClick={()=>onRegen("captions")}>{I.refresh({size:12})} Regenerate</button></div>
+        </label>
+      </div>
+    </div>
+  );
+}
+
+function StepResearch({ project, setProject }){
+  const regenClaim = (id) => {
+    const variations = [
+      "Tighter framing of the same evidence.",
+      "Cross-referenced a second source.",
+      "Narrowed the scope to keep it on-topic.",
+      "Restated as a hook-friendly claim.",
+    ];
+    setProject({
+      ...project,
+      research: project.research.map(r => r.id===id ? { ...r, claim: (r.claim + " — " + variations[Math.floor(Math.random()*variations.length)]).slice(0,180), confidence: Math.min(0.99, (r.confidence||0.8) + 0.01) } : r),
+    });
+  };
+  const addClaim = () => {
+    const nid = "r" + (project.research.length + 1) + "_" + Math.random().toString(36).slice(2,6);
+    setProject({
+      ...project,
+      research: [...project.research, { id: nid, claim:"New claim — edit me.", source:"Pending source", confidence: 0.7 }],
+    });
+  };
+  return (
+    <div className="flex flex-col gap-4">
+      <StudioInputAccepter project={project} setProject={setProject} />
+      <StudioPipelineSimulator project={project} setProject={setProject} />
+      <div className="card p-5">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div>
+            <div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Research</div>
+            <div className="text-lg font-semibold">Claims & sources</div>
+          </div>
+          <button className="btn" onClick={addClaim}>{I.plus({size:14})} Add claim</button>
+        </div>
+        <div className="mt-3 grid md:grid-cols-2 gap-3">
+          {project.research.map(r => (
+            <div key={r.id} className="rounded-xl border border-[color:var(--line)] p-3">
+              <div className="text-sm text-white">{r.claim}</div>
+              <div className="text-[11px] text-[color:var(--muted)] mt-1">{r.source}</div>
+              <div className="flex items-center justify-between mt-2">
+                <span className="chip">Confidence {Math.round((r.confidence||0)*100)}%</span>
+                <button className="chip" onClick={()=>regenClaim(r.id)}>{I.refresh({size:12})} Regenerate</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StepScript({ project, setProject }){
+  const scriptText = project.scenes.map((s,i) => "Scene " + (i+1) + " — " + s.title + "\n" + s.voLine).join("\n\n");
+  const onChange = (e) => {
+    const blocks = e.target.value.split(/\n\n+/);
+    const next = project.scenes.map((s, i) => {
+      const blk = blocks[i] || "";
+      const lines = blk.split(/\n/);
+      const header = (lines[0]||"").replace(/^Scene\s*\d+\s*—\s*/i, "");
+      const body = lines.slice(1).join(" ").trim();
+      return { ...s, title: header || s.title, voLine: body || s.voLine };
+    });
+    setProject({ ...project, scenes: next });
+  };
+  const regenerateAll = () => {
+    const next = project.scenes.map(s => ({ ...s, voLine: s.voLine + " " + sceneRegenerateBlurbs("voLine") }));
+    setProject({ ...project, scenes: next });
+  };
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="card p-5">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div>
+            <div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Script</div>
+            <div className="text-lg font-semibold">Tight, spoken draft</div>
+          </div>
+          <button className="btn" onClick={regenerateAll}>{I.refresh({size:14})} Regenerate all</button>
+        </div>
+        <textarea
+          value={scriptText}
+          onChange={onChange}
+          rows={14}
+          className="mt-3 w-full bg-transparent border border-[color:var(--line)] rounded-xl p-3 text-sm focus:outline-none focus:border-white/20 font-mono"
+        />
+        <div className="text-[11px] text-[color:var(--muted)] mt-2">
+          Split scenes with a blank line. First line is the scene title; the rest is the VO.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function sceneFieldSetter(project, setProject){
+  return (sceneId, field, value) => {
+    setProject({ ...project, scenes: project.scenes.map(s => s.id===sceneId ? { ...s, [field]: value } : s) });
+  };
+}
+function sceneMover(project, setProject){
+  return (sceneId, delta) => {
+    const idx = project.scenes.findIndex(s => s.id === sceneId);
+    if(idx < 0) return;
+    const next = idx + delta;
+    if(next < 0 || next >= project.scenes.length) return;
+    const scenes = project.scenes.slice();
+    const [item] = scenes.splice(idx, 1);
+    scenes.splice(next, 0, item);
+    setProject({ ...project, scenes });
+  };
+}
+function sceneRemover(project, setProject){
+  return (sceneId) => {
+    if(project.scenes.length <= 1) return;
+    setProject({ ...project, scenes: project.scenes.filter(s => s.id !== sceneId) });
+  };
+}
+function sceneRegenSetter(project, setProject){
+  return (sceneId, field) => {
+    setProject({
+      ...project,
+      scenes: project.scenes.map(s => s.id===sceneId ? { ...s, [field]: (s[field] || "") + " " + sceneRegenerateBlurbs(field) } : s),
+    });
+  };
+}
+
+function StepStoryboard({ project, setProject }){
+  const setField = sceneFieldSetter(project, setProject);
+  const move = sceneMover(project, setProject);
+  const remove = sceneRemover(project, setProject);
+  const regen = sceneRegenSetter(project, setProject);
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="card p-5">
+        <div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Storyboard</div>
+        <div className="text-lg font-semibold">Frame the story</div>
+        <div className="text-[12px] text-[color:var(--muted)] mt-1">Seeded example. Edit any field, or regenerate per scene.</div>
+      </div>
+      <div className="grid gap-3">
+        {project.scenes.map((s, i) => (
+          <SceneCard key={s.id} scene={s} index={i} total={project.scenes.length}
+            onField={(f,v)=>setField(s.id, f, v)}
+            onRegen={(f)=>regen(s.id, f)}
+            onMove={(d)=>move(s.id, d)}
+            onRemove={()=>remove(s.id)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function StepAssets({ project, setProject }){
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="card p-5">
+        <div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Assets</div>
+        <div className="text-lg font-semibold">B-roll, stills, music</div>
+      </div>
+      <div className="grid md:grid-cols-2 gap-3">
+        {project.scenes.map((s, i) => (
+          <div key={s.id} className="card p-4">
+            <div className="flex items-center gap-2">
+              <span className="chip">Scene {i+1}</span>
+              <span className="font-semibold">{s.title}</span>
+            </div>
+            <div className="mt-3 h-28 rounded-xl bg-gradient-to-br from-indigo-500 via-fuchsia-500 to-cyan-500 opacity-90" aria-hidden />
+            <div className="flex items-center justify-between mt-3 gap-2 flex-wrap">
+              <div>
+                <div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Asset</div>
+                <div className="text-sm">{s.asset}</div>
+              </div>
+              <div className="flex items-center gap-1">
+                <span className="chip">Provenance OK</span>
+                <button className="chip" onClick={()=>sceneRegenSetter(project,setProject)(s.id, "asset")}>{I.refresh({size:12})} Swap</button>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function StepMotion({ project, setProject }){
+  const presets = ["slow push-in","parallax drift","kinetic type","time-lapse","dolly-out hero","whip pan","frame-on-frame","handheld"];
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="card p-5">
+        <div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Motion</div>
+        <div className="text-lg font-semibold">Cinematography & kinetic type</div>
+      </div>
+      <div className="grid md:grid-cols-2 gap-3">
+        {project.scenes.map((s, i) => (
+          <div key={s.id} className="card p-4">
+            <div className="flex items-center gap-2">
+              <span className="chip">Scene {i+1}</span>
+              <span className="font-semibold">{s.title}</span>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-1">
+              {presets.map(p => {
+                const active = s.motion === p;
+                return (
+                  <button key={p}
+                    onClick={()=>sceneFieldSetter(project,setProject)(s.id, "motion", p)}
+                    className={"px-2.5 py-1.5 rounded-full text-[12px] border " + (active ? "border-white/20 bg-white/10 text-white" : "border-[color:var(--line)] text-[color:var(--muted)] hover:text-white")}>
+                    {p}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="mt-3 text-[12px] text-[color:var(--muted)]">Current: <span className="text-white">{s.motion}</span></div>
+            <div className="flex justify-end mt-2">
+              <button className="chip" onClick={()=>sceneRegenSetter(project,setProject)(s.id, "motion")}>{I.refresh({size:12})} Regenerate</button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function StepVoice({ project, setProject }){
+  const mode = project.voiceMode || "avatar";
+  const setMode = (m) => setProject({ ...project, voiceMode: m });
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="card p-5">
+        <div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Voice & Avatar</div>
+        <div className="text-lg font-semibold">Who performs this?</div>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          {[
+            { k:"avatar", label:"Avatar performance" },
+            { k:"voice",  label:"Voiceover only" },
+            { k:"clone",  label:"My cloned voice" },
+          ].map(m => {
+            const active = mode === m.k;
+            return (
+              <button key={m.k}
+                onClick={()=>setMode(m.k)}
+                aria-pressed={active}
+                className={"px-3 py-1.5 rounded-xl border text-[12px] " + (active ? "border-white/20 bg-white/10 text-white" : "border-[color:var(--line)] text-[color:var(--muted)] hover:text-white")}>
+                {m.label}
+              </button>
+            );
+          })}
+        </div>
+        <div className="mt-4 grid md:grid-cols-3 gap-3">
+          {ARCHIVE_AVATARS.slice(0,4).map(a => {
+            const active = project.characterId === a.id;
+            return (
+              <div key={a.id} className={"rounded-xl border p-4 " + (active ? "border-white/20 bg-white/[0.05]" : "border-[color:var(--line)]")}>
+                <div className="w-12 h-12 rounded-full mb-2" style={{background:"linear-gradient(135deg,#6366f1,#22d3ee)"}} />
+                <div className="font-semibold">{a.name}</div>
+                <div className="text-[12px] text-[color:var(--muted)]">{a.persona}</div>
+                <button className="chip mt-3" onClick={()=>setProject({ ...project, characterId: a.id })}>
+                  {active ? "Selected" : "Choose"}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+        <div className="mt-4 text-[12px] text-[color:var(--muted)]">
+          Cloning lands in Stage 4. Selection here persists into the timeline and export.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StepTimeline({ project, setProject }){
+  const [dragId, setDragId] = useState(null);
+  const [overId, setOverId] = useState(null);
+  const move = sceneMover(project, setProject);
+  const remove = sceneRemover(project, setProject);
+  const setField = sceneFieldSetter(project, setProject);
+  const regen = sceneRegenSetter(project, setProject);
+  const onDragStart = (id) => (e) => {
+    setDragId(id);
+    try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", id); } catch(err){}
+  };
+  const onDragOver = (id) => (e) => {
+    e.preventDefault();
+    if(overId !== id) setOverId(id);
+  };
+  const onDrop = (targetId) => (e) => {
+    e.preventDefault();
+    const srcId = dragId;
+    setDragId(null); setOverId(null);
+    if(!srcId || srcId === targetId) return;
+    const scenes = project.scenes.slice();
+    const srcIdx = scenes.findIndex(s => s.id === srcId);
+    const tgtIdx = scenes.findIndex(s => s.id === targetId);
+    if(srcIdx < 0 || tgtIdx < 0) return;
+    const [item] = scenes.splice(srcIdx, 1);
+    scenes.splice(tgtIdx, 0, item);
+    setProject({ ...project, scenes });
+  };
+  const onDragEnd = () => { setDragId(null); setOverId(null); };
+  const totalDuration = project.scenes.reduce((a,s)=>a+(s.duration||0), 0);
+  const addScene = () => {
+    const nid = "s" + (project.scenes.length+1) + "_" + Math.random().toString(36).slice(2,6);
+    setProject({
+      ...project,
+      scenes: [...project.scenes, { id: nid, title:"New scene", voLine:"Write a line.", shot:"Describe the shot.", duration:4, motion:"slow push-in", asset:"b-roll: placeholder", captions:"Caption goes here." }],
+    });
+  };
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="card p-5">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div>
+            <div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Timeline</div>
+            <div className="text-lg font-semibold">Drag to reorder scenes</div>
+            <div className="text-[12px] text-[color:var(--muted)] mt-1">Total: {totalDuration}s · {project.scenes.length} scenes</div>
+          </div>
+          <button className="btn" onClick={addScene}>{I.plus({size:14})} Add scene</button>
+        </div>
+        <div className="mt-4 grid gap-2">
+          {project.scenes.map((s, i) => {
+            const isDragging = dragId === s.id;
+            const isOver = overId === s.id;
+            return (
+              <div key={s.id}
+                draggable
+                onDragStart={onDragStart(s.id)}
+                onDragOver={onDragOver(s.id)}
+                onDrop={onDrop(s.id)}
+                onDragEnd={onDragEnd}
+                className={"rounded-xl border p-3 flex items-center gap-3 transition-colors " +
+                  (isDragging ? "opacity-50 border-white/20 " : "") +
+                  (isOver && !isDragging ? "border-white/30 bg-white/[0.06] " : "border-[color:var(--line)] ")}>
+                <span className="text-[color:var(--muted)] cursor-grab select-none" aria-hidden>{I.grip({size:14})}</span>
+                <span className="chip">{String(i+1).padStart(2,"0")}</span>
+                <div className="flex-1 min-w-0">
+                  <input
+                    value={s.title}
+                    onChange={(e)=>setField(s.id, "title", e.target.value)}
+                    className="bg-transparent border border-transparent hover:border-[color:var(--line)] focus:border-white/20 rounded-md px-1 py-0.5 text-sm w-full focus:outline-none"
+                    aria-label="Scene title"
+                  />
+                  <div className="text-[11px] text-[color:var(--muted)] truncate">{s.voLine}</div>
+                </div>
+                <input
+                  type="number"
+                  min={1}
+                  max={30}
+                  value={s.duration}
+                  onChange={(e)=>{
+                    const v = Math.max(1, Math.min(30, parseInt(e.target.value||"0", 10)||0));
+                    setField(s.id, "duration", v);
+                  }}
+                  className="w-16 bg-transparent border border-[color:var(--line)] rounded-md px-2 py-1 text-[12px] focus:outline-none focus:border-white/20"
+                  aria-label="Duration seconds"
+                />
+                <span className="text-[11px] text-[color:var(--muted)]">s</span>
+                <div className="flex items-center gap-1">
+                  <button className="chip" onClick={()=>move(s.id, -1)} disabled={i===0} aria-label="Move up">{I.up({size:12})}</button>
+                  <button className="chip" onClick={()=>move(s.id, 1)} disabled={i===project.scenes.length-1} aria-label="Move down">{I.down({size:12})}</button>
+                  <button className="chip" onClick={()=>regen(s.id, "voLine")} aria-label="Regenerate line">{I.refresh({size:12})}</button>
+                  <button className="chip" onClick={()=>remove(s.id)} aria-label="Remove scene">{I.x({size:12})}</button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StepExport({ project, setProject }){
+  const setPreset = (id) => setProject({ ...project, preset: id, platforms: (STUDIO_EXPORT_PRESETS.find(p=>p.id===id)||{}).platforms || project.platforms });
+  const togglePlatform = (p) => {
+    const curr = project.platforms || [];
+    const next = curr.includes(p) ? curr.filter(x=>x!==p) : [...curr, p];
+    setProject({ ...project, platforms: next });
+  };
+  const totalDuration = project.scenes.reduce((a,s)=>a+(s.duration||0), 0);
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="card p-5">
+        <div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Export</div>
+        <div className="text-lg font-semibold">Aspect & platform presets</div>
+      </div>
+      <div className="grid md:grid-cols-3 gap-3">
+        {STUDIO_EXPORT_PRESETS.map(p => {
+          const active = project.preset === p.id;
+          return (
+            <button key={p.id}
+              onClick={()=>setPreset(p.id)}
+              aria-pressed={active}
+              className={"card p-5 text-left transition-colors " + (active ? "ring-brand" : "")}>
+              <div className="flex items-center justify-between">
+                <span className="chip">{p.ratio}</span>
+                <span className="text-[11px] text-[color:var(--muted)]">{p.platforms.join(" · ")}</span>
+              </div>
+              <div className="mt-3 flex items-center justify-center">
+                <div className="bg-white/5 border border-[color:var(--line)] rounded-xl"
+                  style={{
+                    width: p.id==="vertical" ? 72 : (p.id==="square" ? 108 : 160),
+                    height: p.id==="vertical" ? 128 : (p.id==="square" ? 108 : 90),
+                  }}
+                  aria-hidden />
+              </div>
+              <div className="mt-3 font-semibold">{p.label}</div>
+            </button>
+          );
+        })}
+      </div>
+      <div className="card p-5">
+        <div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Platforms</div>
+        <div className="mt-2 flex flex-wrap gap-2">
+          {["TikTok","Reels","Shorts","X","LinkedIn","YouTube"].map(p => {
+            const active = (project.platforms||[]).includes(p);
+            return (
+              <button key={p}
+                onClick={()=>togglePlatform(p)}
+                aria-pressed={active}
+                className={"px-3 py-1.5 rounded-xl border text-[12px] " + (active ? "border-white/20 bg-white/10 text-white" : "border-[color:var(--line)] text-[color:var(--muted)] hover:text-white")}>
+                {p}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      <div className="card p-5">
+        <div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Render summary</div>
+        <div className="grid md:grid-cols-4 gap-3 mt-2 text-sm">
+          <div><div className="text-[color:var(--muted)] text-[11px]">Project</div><div className="truncate">{project.name}</div></div>
+          <div><div className="text-[color:var(--muted)] text-[11px]">Scenes</div><div>{project.scenes.length}</div></div>
+          <div><div className="text-[color:var(--muted)] text-[11px]">Duration</div><div>{totalDuration}s</div></div>
+          <div><div className="text-[color:var(--muted)] text-[11px]">Aspect</div><div>{(STUDIO_EXPORT_PRESETS.find(p=>p.id===project.preset)||{}).ratio || "9:16"}</div></div>
+        </div>
+        <div className="mt-4 flex items-center gap-2">
+          <button className="btn btn-primary" onClick={(e)=>e.preventDefault()} aria-disabled="true">{I.play({size:14})} Render (stub)</button>
+          <span className="text-[11px] text-[color:var(--muted)]">Real rendering arrives in a later stage.</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StudioTab({ setTab, studioStep, setStudioStep }){
+  const [project, setProject] = useLocalState("studio.project", STUDIO_SEED);
+  useEffect(() => {
+    if(project && typeof project === "object" && Array.isArray(project.scenes) && project.scenes.length > 0) return;
+    setProject(STUDIO_SEED);
+  }, []);
+  const step = studioStep || "research";
+  const goto = (id) => setStudioStep(id);
+  const renderStep = () => {
+    switch(step){
+      case "research":   return <StepResearch    project={project} setProject={setProject} />;
+      case "script":     return <StepScript      project={project} setProject={setProject} />;
+      case "storyboard": return <StepStoryboard  project={project} setProject={setProject} />;
+      case "assets":     return <StepAssets      project={project} setProject={setProject} />;
+      case "motion":     return <StepMotion      project={project} setProject={setProject} />;
+      case "voice":      return <StepVoice       project={project} setProject={setProject} />;
+      case "timeline":   return <StepTimeline    project={project} setProject={setProject} />;
+      case "export":     return <StepExport      project={project} setProject={setProject} />;
+      default:           return <StepResearch    project={project} setProject={setProject} />;
+    }
+  };
+  const idx = Math.max(0, STUDIO_STEPS.findIndex(s => s.id === step));
+  const prev = STUDIO_STEPS[idx-1];
+  const next = STUDIO_STEPS[idx+1];
+  const resetProject = () => setProject(STUDIO_SEED);
+  return (
+    <div className="max-w-[1400px] mx-auto px-5 py-8">
+      <div className="flex items-center justify-between gap-3 flex-wrap mb-5">
+        <div>
+          <h1 className="text-3xl font-bold">Studio</h1>
+          <p className="text-[color:var(--muted)] mt-1">{STUDIO_STEPS[idx].blurb}</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button className="btn btn-ghost" onClick={resetProject}>{I.refresh({size:14})} Reset to example</button>
+        </div>
+      </div>
+      <div className="grid gap-3 mb-4">
+        <StudioStepNav step={step} setStep={goto} />
+        <StudioCharacterRow project={project} setProject={setProject} />
+        <StudioBrandKitSelect project={project} setProject={setProject} />
+      </div>
+      <div>{renderStep()}</div>
+      <div className="mt-6 flex items-center justify-between gap-2 flex-wrap">
+        <button className="btn" onClick={()=>prev && goto(prev.id)} disabled={!prev}>← {prev ? prev.label : "Start"}</button>
+        <div className="text-[11px] text-[color:var(--muted)]">Step {idx+1} of {STUDIO_STEPS.length}</div>
+        <button className="btn btn-primary" onClick={()=>next && goto(next.id)} disabled={!next}>{next ? next.label : "Done"} →</button>
+      </div>
     </div>
   );
 }
@@ -287,20 +1169,6 @@ function Placeholder({ title, subtitle, children }){
       </div>
       {children}
     </div>
-  );
-}
-function StudioTab({ setTab }){
-  return (
-    <Placeholder title="Studio" subtitle="Research → Script → Storyboard → Assets → Motion → Voice → Timeline → Export. Coming online in Stage 2.">
-      <div className="grid md:grid-cols-4 gap-3">
-        {ARCHIVE_PIPELINE.map((s,i) => (
-          <div key={s} className="card p-4">
-            <div className="text-[10px] text-[color:var(--muted)] uppercase tracking-widest">Stage {i+1}</div>
-            <div className="text-white font-semibold mt-1">{s}</div>
-          </div>
-        ))}
-      </div>
-    </Placeholder>
   );
 }
 function RepurposeTab(){
@@ -445,30 +1313,55 @@ function DocsTab(){
 /* ---------------- App root ---------------- */
 function App(){
   const [tab, setTab] = useLocalState("tab", "home");
+  const [studioStep, setStudioStepRaw] = useLocalState("studio.step", "research");
+
+  const syncFromHash = () => {
+    const { path, params } = parseHash();
+    if(path && TABS.find(t=>t.id===path)) setTab(path);
+    if(params.step && STUDIO_STEPS.find(s=>s.id===params.step)) setStudioStepRaw(params.step);
+  };
+  useEffect(()=>{ syncFromHash(); }, []);
   useEffect(()=>{
-    const hash = (location.hash||"").replace("#","");
-    if(hash && TABS.find(t=>t.id===hash)) setTab(hash);
+    const onHash = () => syncFromHash();
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
   }, []);
-  useEffect(()=>{ if(tab) history.replaceState(null, "", "#"+tab); }, [tab]);
+  useEffect(()=>{
+    if(!tab) return;
+    if(tab === "studio"){
+      setHash("studio", { step: studioStep });
+    } else {
+      setHash(tab, null);
+    }
+  }, [tab, studioStep]);
+
+  const setStudioStep = (id) => {
+    setStudioStepRaw(id);
+    if(tab !== "studio") setTab("studio");
+  };
+  const startProject = () => {
+    setStudioStepRaw("research");
+    setTab("studio");
+  };
 
   const View = useMemo(()=> {
     switch(tab){
-      case "home": return <HomeTab setTab={setTab}/>;
-      case "studio": return <StudioTab setTab={setTab}/>;
-      case "repurpose": return <RepurposeTab/>;
-      case "avatars": return <AvatarsTab/>;
-      case "brands": return <BrandsTab/>;
-      case "templates": return <TemplatesTab/>;
-      case "projects": return <ProjectsTab/>;
+      case "home":         return <HomeTab setTab={setTab} startProject={startProject} />;
+      case "studio":       return <StudioTab setTab={setTab} studioStep={studioStep} setStudioStep={setStudioStep} />;
+      case "repurpose":    return <RepurposeTab/>;
+      case "avatars":      return <AvatarsTab/>;
+      case "brands":       return <BrandsTab/>;
+      case "templates":    return <TemplatesTab/>;
+      case "projects":     return <ProjectsTab/>;
       case "architecture": return <ArchitectureTab/>;
-      case "docs": return <DocsTab/>;
-      default: return <HomeTab setTab={setTab}/>;
+      case "docs":         return <DocsTab/>;
+      default:             return <HomeTab setTab={setTab} startProject={startProject} />;
     }
-  }, [tab]);
+  }, [tab, studioStep]);
 
   return (
     <Boundary>
-      <TopBar tab={tab} setTab={setTab} />
+      <TopBar tab={tab} setTab={setTab} onNewProject={startProject} />
       <main id="main" role="main">{View}</main>
       <Footer />
     </Boundary>
