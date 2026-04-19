@@ -3023,27 +3023,163 @@ function ProjectDrawer({ open, j, onClose, onDuplicate, onDelete, onStatus, onAd
     </Drawer>
   );
 }
+const PIPELINE_STAGES = [
+  { id:"research", label:"Research", icon:"search", providers:["local-llm","openai","claude","perplexity"], defaultProvider:"openai", latency:2.1, cost:0.02, desc:"Gather sources, extract facts, cluster by topic." },
+  { id:"outline", label:"Outline", icon:"layers", providers:["local-llm","openai","claude"], defaultProvider:"claude", latency:1.4, cost:0.01, desc:"Beat-by-beat structure with hook, beats, CTA." },
+  { id:"script", label:"Script", icon:"edit", providers:["local-llm","openai","claude"], defaultProvider:"claude", latency:3.2, cost:0.04, desc:"Voice-matched copy with pacing marks and SSML hints." },
+  { id:"storyboard", label:"Storyboard", icon:"layers", providers:["local-draw","flux","stability"], defaultProvider:"flux", latency:8.0, cost:0.08, desc:"Shot descriptions + rough frames per beat." },
+  { id:"voice", label:"Voice", icon:"mic", providers:["local-tts","elevenlabs","openai"], defaultProvider:"elevenlabs", latency:4.5, cost:0.06, desc:"TTS render or voice clone per character." },
+  { id:"avatar", label:"Avatar", icon:"avatar", providers:["local-avatar","heygen","synthesia"], defaultProvider:"heygen", latency:22.0, cost:0.35, desc:"Lip-synced avatar video from voice + portrait." },
+  { id:"broll", label:"B-roll", icon:"play", providers:["archive","runway","kling"], defaultProvider:"runway", latency:30.0, cost:0.50, desc:"Generate or pull supporting clips per beat." },
+  { id:"captions", label:"Captions", icon:"comment", providers:["local-whisper","whisper","deepgram"], defaultProvider:"local-whisper", latency:1.1, cost:0.00, desc:"Word-timed transcription with styled renders." },
+  { id:"edit", label:"Edit", icon:"spark", providers:["local-ffmpeg"], defaultProvider:"local-ffmpeg", latency:12.0, cost:0.00, desc:"Cut, sync, transitions, pacing corrections." },
+  { id:"publish", label:"Publish", icon:"globe", providers:["manual","buffer","youtube-api"], defaultProvider:"manual", latency:2.0, cost:0.00, desc:"Schedule or post to selected platforms." }
+];
+
+const PROVIDER_META = {
+  "local-llm":   { label:"Local LLM (free)",   kind:"local", pricingNote:"runs on your machine" },
+  "openai":      { label:"OpenAI",             kind:"cloud", pricingNote:"per 1K tokens" },
+  "claude":      { label:"Claude",             kind:"cloud", pricingNote:"per 1K tokens" },
+  "perplexity":  { label:"Perplexity",         kind:"cloud", pricingNote:"per query" },
+  "local-draw":  { label:"Local draw (free)",  kind:"local", pricingNote:"placeholder frames" },
+  "flux":        { label:"Flux",               kind:"cloud", pricingNote:"per image" },
+  "stability":   { label:"Stability",          kind:"cloud", pricingNote:"per image" },
+  "local-tts":   { label:"Web Speech TTS (free)", kind:"local", pricingNote:"browser-native" },
+  "elevenlabs":  { label:"ElevenLabs",         kind:"cloud", pricingNote:"per 1K chars" },
+  "local-avatar":{ label:"Portrait loop (free)", kind:"local", pricingNote:"no lip-sync" },
+  "heygen":      { label:"HeyGen",             kind:"cloud", pricingNote:"per minute" },
+  "synthesia":   { label:"Synthesia",          kind:"cloud", pricingNote:"per minute" },
+  "archive":     { label:"Your archive (free)",kind:"local", pricingNote:"uses prior renders" },
+  "runway":      { label:"Runway Gen-3",       kind:"cloud", pricingNote:"per second" },
+  "kling":       { label:"Kling",              kind:"cloud", pricingNote:"per second" },
+  "local-whisper":{ label:"Whisper.cpp (free)",kind:"local", pricingNote:"runs locally" },
+  "whisper":     { label:"OpenAI Whisper",     kind:"cloud", pricingNote:"per minute" },
+  "deepgram":    { label:"Deepgram",           kind:"cloud", pricingNote:"per minute" },
+  "local-ffmpeg":{ label:"ffmpeg (free)",      kind:"local", pricingNote:"runs locally" },
+  "manual":      { label:"Manual (free)",      kind:"local", pricingNote:"you upload" },
+  "buffer":      { label:"Buffer",             kind:"cloud", pricingNote:"per seat" },
+  "youtube-api": { label:"YouTube Data API",   kind:"cloud", pricingNote:"quota-based" }
+};
+
 function ArchitectureTab(){
+  const [picks, setPicks] = React.useState(() => {
+    try { const raw = localStorage.getItem("zaidsaid.v2.arch.picks"); if (raw) return JSON.parse(raw); } catch(e){}
+    const init = {};
+    PIPELINE_STAGES.forEach(s => { init[s.id] = s.defaultProvider; });
+    return init;
+  });
+  const [active, setActive] = React.useState(PIPELINE_STAGES[0].id);
+  const [mode, setMode] = React.useState("balanced"); // free | balanced | premium
+
+  React.useEffect(() => {
+    try { localStorage.setItem("zaidsaid.v2.arch.picks", JSON.stringify(picks)); } catch(e){}
+  }, [picks]);
+
+  const applyMode = (m) => {
+    setMode(m);
+    const next = {};
+    PIPELINE_STAGES.forEach(s => {
+      if (m === "free") {
+        const local = s.providers.find(p => (PROVIDER_META[p]||{}).kind === "local");
+        next[s.id] = local || s.providers[0];
+      } else if (m === "premium") {
+        const cloud = s.providers.filter(p => (PROVIDER_META[p]||{}).kind === "cloud");
+        next[s.id] = cloud[cloud.length-1] || s.defaultProvider;
+      } else {
+        next[s.id] = s.defaultProvider;
+      }
+    });
+    setPicks(next);
+  };
+
+  const totalLatency = PIPELINE_STAGES.reduce((sum, s) => {
+    const isLocal = (PROVIDER_META[picks[s.id]]||{}).kind === "local";
+    return sum + (isLocal ? s.latency * 0.7 : s.latency);
+  }, 0);
+  const totalCost = PIPELINE_STAGES.reduce((sum, s) => {
+    const isLocal = (PROVIDER_META[picks[s.id]]||{}).kind === "local";
+    return sum + (isLocal ? 0 : s.cost);
+  }, 0);
+
+  const activeStage = PIPELINE_STAGES.find(s => s.id === active);
+
   return (
-    <Placeholder title="Architecture" subtitle="The pipeline, the providers, the latencies. Expanded in Stage 6.">
-      <div className="grid md:grid-cols-2 gap-4">
-        <div className="card p-5">
-          <div className="uppercase tracking-widest text-[11px] text-[color:var(--muted)] mb-2">Pipeline</div>
-          <div className="flex flex-wrap gap-2">{ARCHIVE_PIPELINE.map(s => <span key={s} className="chip">{s}</span>)}</div>
+    <div className="space-y-5">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <div className="text-xl font-semibold">Architecture</div>
+          <div className="text-xs text-[color:var(--muted)]">Every pipeline stage, every provider. Click a stage to swap providers. Saved under zaidsaid.v2.arch.picks.</div>
         </div>
-        <div className="card p-5">
-          <div className="uppercase tracking-widest text-[11px] text-[color:var(--muted)] mb-2">Providers</div>
-          <div className="text-sm">
-            {ARCHIVE_PROVIDERS.map(p => (
-              <div key={p.stage} className="flex items-center justify-between border-b border-[color:var(--line)] py-1.5 last:border-b-0">
-                <span>{p.stage}</span>
-                <span className="text-[color:var(--muted)]">{p.primary} <span className="opacity-60">({p.latency})</span></span>
-              </div>
-            ))}
-          </div>
+        <div className="flex gap-1 rounded-xl border border-white/10 p-1">
+          {[["free","Free-only"],["balanced","Balanced"],["premium","Premium"]].map(([id,label]) => (
+            <button key={id} onClick={()=>applyMode(id)} className={"px-3 py-1.5 rounded-lg text-xs " + (mode === id ? "bg-white/10" : "")}>{label}</button>
+          ))}
         </div>
       </div>
-    </Placeholder>
+
+      <div className="grid md:grid-cols-3 gap-3">
+        <div className="card p-4"><div className="text-[11px] uppercase tracking-wider text-[color:var(--muted)]">Est. end-to-end latency</div><div className="text-2xl font-semibold mt-1">{totalLatency.toFixed(1)}s</div><div className="text-[11px] text-[color:var(--muted)] mt-1">{PIPELINE_STAGES.length} stages · sequential estimate</div></div>
+        <div className="card p-4"><div className="text-[11px] uppercase tracking-wider text-[color:var(--muted)]">Est. cost per run</div><div className="text-2xl font-semibold mt-1">${totalCost.toFixed(2)}</div><div className="text-[11px] text-[color:var(--muted)] mt-1">local stages cost $0</div></div>
+        <div className="card p-4"><div className="text-[11px] uppercase tracking-wider text-[color:var(--muted)]">Local vs cloud</div><div className="text-2xl font-semibold mt-1">{PIPELINE_STAGES.filter(s => (PROVIDER_META[picks[s.id]]||{}).kind === "local").length} / {PIPELINE_STAGES.length}</div><div className="text-[11px] text-[color:var(--muted)] mt-1">local stages selected</div></div>
+      </div>
+
+      <div className="card p-4">
+        <div className="text-[11px] uppercase tracking-wider text-[color:var(--muted)] mb-3">Pipeline</div>
+        <div className="flex gap-2 overflow-x-auto pb-2">
+          {PIPELINE_STAGES.map((s, i) => {
+            const p = picks[s.id];
+            const meta = PROVIDER_META[p] || { label: p, kind:"cloud" };
+            const isActive = s.id === active;
+            const isLocal = meta.kind === "local";
+            return (
+              <React.Fragment key={s.id}>
+                <button onClick={()=>setActive(s.id)} className={"shrink-0 w-40 text-left p-3 rounded-xl border transition " + (isActive ? "border-indigo-400 bg-indigo-500/10" : "border-white/10 hover:border-white/30")}>
+                  <div className="flex items-center gap-2">
+                    <span className="w-6 h-6 rounded-md bg-white/10 flex items-center justify-center">{(I[s.icon] || I.spark)({size:12})}</span>
+                    <span className="text-xs font-semibold">{s.label}</span>
+                  </div>
+                  <div className="text-[10px] text-[color:var(--muted)] mt-2 truncate">{meta.label}</div>
+                  <div className="mt-2 flex items-center gap-1">
+                    <span className={"text-[9px] px-1.5 py-0.5 rounded-full border " + (isLocal ? "border-emerald-500/30 text-emerald-300" : "border-sky-500/30 text-sky-300")}>{isLocal ? "LOCAL" : "CLOUD"}</span>
+                    <span className="text-[10px] text-[color:var(--muted)]">{(isLocal ? s.latency * 0.7 : s.latency).toFixed(1)}s</span>
+                  </div>
+                </button>
+                {i < PIPELINE_STAGES.length - 1 && <span className="self-center opacity-40 shrink-0">{"→"}</span>}
+              </React.Fragment>
+            );
+          })}
+        </div>
+      </div>
+
+      {activeStage && (
+        <div className="card p-4">
+          <div className="flex items-center gap-2 mb-2">
+            <span className="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center">{(I[activeStage.icon] || I.spark)({size:16})}</span>
+            <div>
+              <div className="font-semibold">{activeStage.label}</div>
+              <div className="text-[11px] text-[color:var(--muted)]">{activeStage.desc}</div>
+            </div>
+          </div>
+          <div className="text-[11px] uppercase tracking-wider text-[color:var(--muted)] mt-3 mb-2">Swap provider</div>
+          <div className="grid md:grid-cols-2 gap-2">
+            {activeStage.providers.map(p => {
+              const meta = PROVIDER_META[p] || { label:p, kind:"cloud", pricingNote:"" };
+              const isPicked = picks[activeStage.id] === p;
+              return (
+                <button key={p} onClick={()=>setPicks(x => ({ ...x, [activeStage.id]: p }))} className={"text-left p-3 rounded-lg border " + (isPicked ? "border-indigo-400 bg-indigo-500/10" : "border-white/10 hover:border-white/20")}>
+                  <div className="flex items-center justify-between">
+                    <div className="text-sm font-semibold">{meta.label}</div>
+                    <span className={"text-[10px] px-2 py-0.5 rounded-full border " + (meta.kind === "local" ? "border-emerald-500/30 text-emerald-300" : "border-sky-500/30 text-sky-300")}>{meta.kind.toUpperCase()}</span>
+                  </div>
+                  <div className="text-[11px] text-[color:var(--muted)] mt-1">{meta.pricingNote}</div>
+                </button>
+              );
+            })}
+          </div>
+          <div className="mt-3 text-[11px] text-[color:var(--muted)]">Latency estimate: <span className="text-white">{activeStage.latency}s</span> · Unit cost: <span className="text-white">${activeStage.cost.toFixed(2)}</span></div>
+        </div>
+      )}
+    </div>
   );
 }
 function DocsTab(){
