@@ -176,7 +176,7 @@ function ProviderRow({ provider, path, enabled, onChangePath, onChangeEnabled })
             </div>
           </label>
           <div className="mt-2 flex items-center gap-2 flex-wrap">
-            <button className="btn" onClick={onTest} disabled={testing}>{testing ? "Testing…" : (I.check({size:12}), "Test")}</button>
+            <button className="btn" onClick={onTest} disabled={testing}>{testing ? "Testing…" : "Test"}</button>
             {result && (
               <span className={"chip " + (result.ok ? "text-emerald-200 !border-emerald-400/30 bg-emerald-500/10" : "text-rose-200 !border-rose-400/30 bg-rose-500/10")}>
                 {result.ok ? "OK" : "Fail"} {result.status||""}
@@ -2224,7 +2224,25 @@ function AvatarsTab(){
       <div className="mb-4">
         <Tag tone="info">Local/free mode. When you connect a voice-cloning provider in Settings, recorded samples will be used to synthesize natural speech.</Tag>
       </div>
-      {filtered.length === 0 ? (
+
+      <div className="mb-4">
+        <details className="card p-4">
+          <summary className="cursor-pointer flex items-center justify-between gap-2 flex-wrap list-none">
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Voice & avatar providers</span>
+              <Tag tone="brand">Proxy URLs only</Tag>
+            </div>
+            <span className="chip">{I.down({size:12})} Expand</span>
+          </summary>
+          <div className="mt-3 text-[12px] text-[color:var(--muted)]">Point each vendor at your server-side proxy. Raw API keys must stay on your server. Leave blank to keep using the built-in browser voice.</div>
+          <div className="mt-3 grid gap-3">
+            <ProvidersPanel filterCap="tts" />
+            <ProvidersPanel filterCap="voiceClone" />
+            <ProvidersPanel filterCap="avatarVideo" />
+          </div>
+        </details>
+      </div>
+            {filtered.length === 0 ? (
         <EmptyState title="No avatars match" subtitle="Try a different search or create a new avatar." action={<button className="btn btn-primary" onClick={onNew}>{I.plus({size:14})} New avatar</button>} />
       ) : (
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
