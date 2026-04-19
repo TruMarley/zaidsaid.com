@@ -1,53 +1,51 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Zaidsaid ▸ The operating system for AI video</title>
-<meta name="description" content="Zaidsaid is a 13-stage pluggable AI video pipeline. Any input, every platform." />
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0%25' stop-color='%236366F1'/%3E%3Cstop offset='100%25' stop-color='%2322D3EE'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpolygon points='16 3 29 27 3 27' fill='url(%23g)'/%3E%3C/svg%3E" />
-<script src="https://cdn.tailwindcss.com/"></script>
-<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-<script>
-  tailwind.config = {
-    theme: {
-      extend: {
-        colors: {
-          ink:    "#05060A",
-          panel:  "#0B0B14",
-          line:   "#1E1F2E",
-          dim:    "#7E8499",
-          indigo: "#6366F1",
-          cyan:   "#22D3EE",
-          pink:   "#EC4899",
-          amber:  "#F59E0B",
-          emerald:"#10B981"
-        },
-        fontFamily: {
-          display: ['"Inter"', "system-ui", "sans-serif"],
-          mono: ['"JetBrains Mono"', "ui-monospace", "monospace"]
-        }
-      }
-    }
-  };
-</script>
-<style>
-  html,body { background:#05060A; color:#F8FAFC; }
-  body { font-family: Inter, system-ui, sans-serif; }
-  .glow { box-shadow: 0 0 120px -20px rgba(99,102,241,0.45), 0 0 120px -40px rgba(34,211,238,0.35); }
-  .grid-bg {
-    background-image:
-      radial-gradient(ellipse 60% 50% at 50% 0%, rgba(99,102,241,0.18), transparent 60%),
-      radial-gradient(ellipse 40% 30% at 90% 10%, rgba(34,211,238,0.15), transparent 60%),
-      linear-gradient(#0B0B14, #05060A);
-  }
-  .tick { font-variant-numeric: tabular-nums; }
-</style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="referrer" content="strict-origin-when-cross-origin" />
+  <meta http-equiv="X-Content-Type-Options" content="nosniff" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://unpkg.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https:; connect-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none';" />
+  <title>Zaidsaid — The AI video platform for teams</title>
+  <meta name="description" content="Zaidsaid turns text, links, audio, articles, podcasts, and images into polished, branded, social-ready videos — research, script, storyboard, assets, motion, voice, avatar, edit, and publish in one workflow." />
+  <meta property="og:title" content="Zaidsaid — The AI video platform for teams" />
+  <meta property="og:description" content="One end-to-end workflow: research → script → storyboard → assets → motion → voice → edit → publish. Plus repurposing, avatars, voice cloning, and brand kits." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://zaidsaid.com/" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%236366f1'/%3E%3Cstop offset='1' stop-color='%2322d3ee'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect rx='14' width='64' height='64' fill='url(%23g)'/%3E%3Cpath d='M18 20h28l-18 24h18' stroke='white' stroke-width='5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    :root{--bg:#050814;--panel:#0b1022;--panel2:#0f1530;--ink:#e9ecff;--muted:#9aa3c7;--line:#1a2142;--brand:#6366f1;--brand2:#22d3ee;--accent:#ec4899;--ok:#10b981;--warn:#f59e0b;--bad:#ef4444}
+    html,body{background:var(--bg);color:var(--ink);font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Inter,sans-serif}
+    .glow{background:radial-gradient(1200px 600px at 10% -10%, rgba(99,102,241,.25), transparent 60%),radial-gradient(900px 500px at 90% 0%, rgba(34,211,238,.18), transparent 60%),radial-gradient(700px 400px at 50% 100%, rgba(236,72,153,.12), transparent 60%)}
+    .card{background:linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.01)); border:1px solid var(--line); border-radius:16px}
+    .chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;border:1px solid var(--line);background:rgba(255,255,255,.03);font-size:12px;color:var(--muted)}
+    .btn{display:inline-flex;align-items:center;gap:8px;padding:10px 14px;border-radius:12px;font-weight:600;border:1px solid var(--line);background:rgba(255,255,255,.03);color:var(--ink);cursor:pointer;transition:all .15s}
+    .btn:hover{background:rgba(255,255,255,.06)}
+    .btn-primary{background:linear-gradient(135deg,var(--brand),var(--brand2));border:0;color:white}
+    .btn-primary:hover{filter:brightness(1.1)}
+    .btn-ghost{background:transparent}
+    .tab-active{background:linear-gradient(135deg, rgba(99,102,241,.15), rgba(34,211,238,.1)); border-color:rgba(99,102,241,.4); color:white}
+    .grad-text{background:linear-gradient(90deg,#a5b4fc,#67e8f9,#f9a8d4);-webkit-background-clip:text;background-clip:text;color:transparent}
+    .scrollbar::-webkit-scrollbar{width:8px;height:8px}
+    .scrollbar::-webkit-scrollbar-thumb{background:#1a2142;border-radius:8px}
+    .aspect-9-16{aspect-ratio:9/16}.aspect-1-1{aspect-ratio:1/1}.aspect-16-9{aspect-ratio:16/9}
+    .ring-brand{box-shadow:0 0 0 1px rgba(99,102,241,.5), 0 10px 40px rgba(99,102,241,.15)}
+    a:focus-visible, button:focus-visible, [role=button]:focus-visible{outline:2px solid #22d3ee; outline-offset:2px; border-radius:8px}
+    .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+    @keyframes pulseDot{0%,100%{opacity:.35}50%{opacity:1}}
+    .dot{width:8px;height:8px;border-radius:999px;background:var(--ok);animation:pulseDot 1.6s infinite}
+    @keyframes shimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}
+    .shimmer{background:linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,.08) 50%, rgba(255,255,255,0) 100%); background-size:200% 100%; animation:shimmer 1.8s infinite}
+  </style>
 </head>
-<body class="grid-bg min-h-screen">
-<div id="root"></div>
-<script type="text/babel" data-presets="react" src="app.js"></script>
+<body class="glow">
+  <noscript><div style="padding:24px;color:#e9ecff">Zaidsaid requires JavaScript.</div></noscript>
+  <div id="root" aria-live="polite"></div>
+  <script type="text/babel" data-presets="env,react" src="./app.js"></script>
 </body>
 </html>
