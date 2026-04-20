@@ -337,9 +337,68 @@ function ProvidersPanel({ filterCap }){
           <ProviderRow key={p.id} provider={p} path={getPath(p.id)} enabled={getEnabled(p.id)} onChangePath={(v)=>setPath(p.id, v)} onChangeEnabled={(v)=>setEnabled(p.id, v)} />
         ))}
       </div>
+      <HealthPanel filterCap={filterCap} />
     </div>
   );
 }
+function HealthPanel({ filterCap }){
+  const [busy, setBusy] = React.useState(false);
+  const [results, setResults] = React.useState([]);
+  const [lastRun, setLastRun] = React.useState(0);
+  const collectProviders = () => {
+    let cfg = {}; try { cfg = safeGet('providers.cfg', {}) || {}; } catch(e){}
+    const list = [];
+    Object.keys(cfg).forEach(k => { const p = cfg[k]; if(p && typeof p === 'object'){ list.push({ name: k, url: p.url || '' }); } });
+    return list;
+  };
+  const run = async () => {
+    if(busy) return;
+    const provs = collectProviders();
+    if(!provs.length){ setResults([{name:'(none)', ok:false, ms:0, err:'No providers configured. Add one above.'}]); setLastRun(Date.now()); return; }
+    setBusy(true);
+    try {
+      const r = await pingProviders(provs);
+      setResults(r); setLastRun(Date.now());
+    } catch(e){
+      setResults([{name:'(error)', ok:false, ms:0, err:String(e && e.message || e)}]);
+      setLastRun(Date.now());
+    } finally { setBusy(false); }
+  };
+  const fmtAge = (t) => { if(!t) return ''; const s = Math.round((Date.now()-t)/1000); return s<60 ? (s + 's ago') : (Math.round(s/60) + 'm ago'); };
+  return (
+    <div className="card p-5 mt-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-[12px] uppercase tracking-wide text-[color:var(--muted)]">Live health</div>
+          <div className="text-lg font-semibold">Provider connectivity</div>
+          <div className="text-[12px] text-[color:var(--muted)] mt-1">Pings each configured proxy at <code>/ping</code>. Results stay in your browser.</div>
+        </div>
+        <div className="flex items-center gap-2">
+          {lastRun ? <div className="text-[11px] text-[color:var(--muted)]">checked {fmtAge(lastRun)}</div> : null}
+          <button className="btn" onClick={run} disabled={busy}>{busy ? 'Pinging…' : 'Ping all'}</button>
+        </div>
+      </div>
+      {results.length > 0 && (
+        <div className="mt-3 grid md:grid-cols-2 gap-2">
+          {results.map((r, i) => (
+            <div key={r.name + ':' + i} className="flex items-center justify-between rounded-xl border border-[color:var(--line)] p-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className={'h-2 w-2 rounded-full flex-shrink-0 ' + (r.ok ? 'bg-emerald-400' : 'bg-red-400')} />
+                <div className="truncate">
+                  <div className="text-sm font-medium truncate">{r.name}</div>
+                  <div className="text-[11px] text-[color:var(--muted)] truncate">{r.ok ? ('OK · ' + r.ms + 'ms') : ('Down · ' + (r.err || 'unknown'))}</div>
+                </div>
+              </div>
+              <div className="text-[11px] text-[color:var(--muted)] flex-shrink-0">{r.status || ''}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 
 /* ---------------- New IA ---------------- */
 const TABS = [
@@ -790,6 +849,133 @@ const researchLocal = (sourceText) => {
   if (picked.length === 0) { const trimmed = txt.slice(0, 200); return { claims: [{ claim: trimmed, source: "User-provided source text", confidence: 0.7 }] }; }
   return { claims: picked.map((s, i) => ({ claim: s, source: i === 0 ? "Primary source excerpt" : ("Supporting passage " + (i+1)), confidence: Math.max(0.55, 0.85 - i * 0.05) })) };
 };
+// ===== MVP Helpers (B-G): module-scope so all components can use them =====
+
+// Generic Anthropic call helper that mirrors callAnthropic but lives at module scope.
+const mvpCallClaude = async (proxyUrl, messages, opts) => {
+  const url = (proxyUrl || '').replace(/\/$/, '') + '/v1/messages';
+  const body = { model: (opts && opts.model) || 'claude-3-5-sonnet-latest', max_tokens: (opts && opts.max_tokens) || 1024, messages };
+  if (opts && opts.system) body.system = opts.system;
+  if (opts && opts.tools) body.tools = opts.tools;
+  if (opts && opts.tool_choice) body.tool_choice = opts.tool_choice;
+  const res = await fetch(url, { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(body) });
+  if(!res.ok){ const t = await res.text().catch(()=>'') ; throw new Error('Claude HTTP '+res.status+' '+t.slice(0,200)); }
+  return res.json();
+};
+
+// MVP-F: Real Repurpose Analyze via Claude
+const analyzeViaClaude = async (proxyUrl, sourceText, targetCount) => {
+  const tools = [{ name:'emit_clips', description:'Return short-form clips extracted from the source transcript or description.', input_schema:{ type:'object', properties:{ clips:{ type:'array', items:{ type:'object', properties:{ title:{type:'string'}, hook:{type:'string'}, caption:{type:'string'}, start:{type:'number'}, end:{type:'number'}, virality:{type:'number'}, preset:{type:'string', enum:['vertical','square','wide']} }, required:['title','hook','caption','start','end','virality','preset'] } } }, required:['clips'] } }];
+  const sys = 'You are a video repurposing analyst. Given long-form source content, identify the highest-virality short-form clips. Return ONLY via the emit_clips tool. Pick around the requested target count. Score virality 0-100. Use seconds for start/end. Pick preset based on platform fit.';
+  const userMsg = 'Target clip count: ' + (targetCount||5) + '\n\nSource:\n' + (sourceText||'').slice(0, 6000);
+  const j = await mvpCallClaude(proxyUrl, [{role:'user', content:userMsg}], { system:sys, tools, tool_choice:{type:'tool', name:'emit_clips'}, max_tokens:2048 });
+  const tu = (j.content||[]).find(b => b.type==='tool_use' && b.name==='emit_clips');
+  if(!tu || !tu.input || !Array.isArray(tu.input.clips)) throw new Error('No emit_clips tool_use in response');
+  return tu.input.clips.map((c,i) => ({ id:'c'+(i+1), title:String(c.title||'Untitled clip').slice(0,140), hook:String(c.hook||'').slice(0,200), caption:String(c.caption||'').slice(0,300), start:Number(c.start)||0, end:Number(c.end)||(Number(c.start)||0)+30, virality:Math.max(0,Math.min(100,Math.round(Number(c.virality)||60))), preset:['vertical','square','wide'].includes(c.preset)?c.preset:'vertical', status:'draft' }));
+};
+
+// MVP-F: Local fallback — extract sentences, rank by length+keywords, mock timecodes.
+const analyzeLocal = (sourceText, targetCount) => {
+  const text = String(sourceText||'').trim();
+  if(!text) return [];
+  const sents = text.split(/(?<=[.!?])\s+/).map(s=>s.trim()).filter(s=>s.length>30);
+  const HOOKS = /\b(why|how|secret|truth|nobody|everyone|the one|never|always|biggest|worst|best|stop|start|hidden|surprising)\b/i;
+  const scored = sents.map((s,i) => ({ s, i, score: Math.min(100, Math.round(50 + Math.min(20, s.length/8) + (HOOKS.test(s)?20:0) + (i<5?5:0))) }));
+  scored.sort((a,b)=>b.score-a.score);
+  const top = scored.slice(0, Math.max(1, Math.min(8, targetCount||5)));
+  return top.map((row,i) => { const t = row.s; const start = 60 + i*180; return { id:'c'+(i+1), title: t.slice(0,90), hook: t.split(/[,;:]/)[0].slice(0,140), caption: t.slice(0,200), start, end: start+30+(i%3)*5, virality: row.score, preset: i%3===0?'vertical':(i%3===1?'square':'wide'), status:'draft' }; });
+};
+
+// MVP-B: Polish a Studio script scene via Claude
+const polishSceneViaClaude = async (proxyUrl, scene, brief) => {
+  const tools = [{ name:'emit_scene', description:'Return a polished version of the scene.', input_schema:{ type:'object', properties:{ title:{type:'string'}, voLine:{type:'string'}, beat:{type:'string'} }, required:['title','voLine'] } }];
+  const sys = 'You polish individual video scenes. Tighten the VO line for spoken delivery (12-22 words), keep the title punchy (<=8 words). Return ONLY via emit_scene.';
+  const userMsg = 'Brief: ' + (brief||'').slice(0,400) + '\n\nScene title: ' + (scene.title||'') + '\nCurrent VO: ' + (scene.voLine||scene.line||'') + '\nBeat: ' + (scene.beat||'');
+  const j = await mvpCallClaude(proxyUrl, [{role:'user',content:userMsg}], { system:sys, tools, tool_choice:{type:'tool', name:'emit_scene'} });
+  const tu = (j.content||[]).find(b=>b.type==='tool_use' && b.name==='emit_scene');
+  if(!tu || !tu.input) throw new Error('No emit_scene tool_use');
+  return { title: String(tu.input.title||scene.title||'').slice(0,80), voLine: String(tu.input.voLine||'').slice(0,400), beat: String(tu.input.beat||scene.beat||'').slice(0,80) };
+};
+
+const polishSceneLocal = (scene) => {
+  const vo = String(scene.voLine || scene.line || scene.title || '').trim();
+  const words = vo.split(/\s+/);
+  const tightened = words.length > 22 ? words.slice(0,22).join(' ') + '.' : vo;
+  const title = String(scene.title||'').split(/\s+/).slice(0,8).join(' ');
+  return { title: title || 'Scene', voLine: tightened, beat: scene.beat||'' };
+};
+
+// MVP-C: Generate image via Stability
+const generateImageViaStability = async (proxyUrl, prompt, opts) => {
+  const url = (proxyUrl||'').replace(/\/$/,'') + '/v2beta/stable-image/generate/core';
+  const fd = new FormData();
+  fd.append('prompt', String(prompt||'cinematic establishing shot').slice(0,1500));
+  fd.append('output_format', 'png');
+  fd.append('aspect_ratio', (opts && opts.aspect_ratio) || '16:9');
+  const res = await fetch(url, { method:'POST', headers:{'accept':'image/*'}, body: fd });
+  if(!res.ok){ const t = await res.text().catch(()=>'') ; throw new Error('Stability HTTP '+res.status+' '+t.slice(0,200)); }
+  const blob = await res.blob();
+  return await new Promise((resolve,reject)=>{ const r=new FileReader(); r.onload=()=>resolve(r.result); r.onerror=reject; r.readAsDataURL(blob); });
+};
+
+// MVP-C: Local SVG fallback (deterministic from prompt)
+const generateImageLocal = (prompt, opts) => {
+  const w = (opts && opts.w) || 1280; const h = (opts && opts.h) || 720;
+  const seed = String(prompt||'').split('').reduce((a,c)=>((a<<5)-a + c.charCodeAt(0))|0, 0);
+  const hue1 = Math.abs(seed) % 360; const hue2 = (hue1 + 60) % 360;
+  const label = String(prompt||'Scene').slice(0,40).replace(/[<>&'\"]/g,'');
+  const svg = '<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'' + w + '\' height=\'' + h + '\' viewBox=\'0 0 ' + w + ' ' + h + '\'>' +
+    '<defs><linearGradient id=\'g\' x1=\'0\' y1=\'0\' x2=\'1\' y2=\'1\'><stop offset=\'0\' stop-color=\'hsl(' + hue1 + ',60%,28%)\'/><stop offset=\'1\' stop-color=\'hsl(' + hue2 + ',70%,18%)\'/></linearGradient></defs>' +
+    '<rect width=\'100%\' height=\'100%\' fill=\'url(#g)\'/>' +
+    '<text x=\'50%\' y=\'50%\' fill=\'rgba(255,255,255,0.85)\' font-family=\'system-ui,sans-serif\' font-size=\'42\' text-anchor=\'middle\' dominant-baseline=\'middle\'>' + label + '</text>' +
+    '</svg>';
+  return 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svg)));
+};
+
+// MVP-D: TTS via ElevenLabs
+const ttsViaElevenLabs = async (proxyUrl, text, voiceId) => {
+  const vid = voiceId || 'EXAVITQu4vr4xnSDxMaL';
+  const url = (proxyUrl||'').replace(/\/$/,'') + '/v1/text-to-speech/' + encodeURIComponent(vid);
+  const res = await fetch(url, { method:'POST', headers:{'content-type':'application/json','accept':'audio/mpeg'}, body: JSON.stringify({ text: String(text||'').slice(0,2000), model_id:'eleven_turbo_v2_5', voice_settings:{ stability:0.5, similarity_boost:0.75 } }) });
+  if(!res.ok){ const t = await res.text().catch(()=>'') ; throw new Error('ElevenLabs HTTP '+res.status+' '+t.slice(0,200)); }
+  const blob = await res.blob();
+  return await new Promise((resolve,reject)=>{ const r=new FileReader(); r.onload=()=>resolve(r.result); r.onerror=reject; r.readAsDataURL(blob); });
+};
+
+// MVP-D: Local TTS fallback via SpeechSynthesis (returns null — caller plays live)
+const ttsLocal = (text) => {
+  return new Promise((resolve, reject) => {
+    try {
+      if(!('speechSynthesis' in window)){ reject(new Error('SpeechSynthesis not available')); return; }
+      const u = new SpeechSynthesisUtterance(String(text||'').slice(0,2000));
+      u.rate = 1.0; u.pitch = 1.0;
+      u.onend = () => resolve('local-played');
+      u.onerror = (e) => reject(new Error('TTS error: ' + (e.error||'unknown')));
+      window.speechSynthesis.cancel();
+      window.speechSynthesis.speak(u);
+    } catch(e){ reject(e); }
+  });
+};
+
+// MVP-G: Multi-provider health ping (returns array of {name, ok, ms, err})
+const pingProviders = async (providers) => {
+  const results = [];
+  for (const p of providers) {
+    if(!p.url){ results.push({ name: p.name, ok:false, ms:0, err:'no proxy URL configured' }); continue; }
+    const t0 = performance.now();
+    try {
+      const u = (p.url||'').replace(/\/$/, '') + '/ping';
+      const res = await fetch(u, { method:'GET' });
+      const ms = Math.round(performance.now() - t0);
+      results.push({ name: p.name, ok: res.ok, ms, status: res.status, err: res.ok ? '' : ('HTTP ' + res.status) });
+    } catch(e){ const ms = Math.round(performance.now() - t0); results.push({ name: p.name, ok:false, ms, err: String(e && e.message || e).slice(0,140) }); }
+  }
+  return results;
+};
+
+// ===== End MVP Helpers =====
+
+
 
 
 function StudioPipelineSimulator({ project, setProject }){
@@ -831,7 +1017,7 @@ function StudioPipelineSimulator({ project, setProject }){
         <div>
           <div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Pipeline simulator</div>
           <div className="text-lg font-semibold">Watch Zaidsaid work the steps</div>
-          <div className="text-[12px] text-[color:var(--muted)] mt-1">This is a visualization. No external calls are made.</div>
+          <div className="text-[12px] text-[color:var(--muted)] mt-1">Demo simulator. Real generation lives in Studio (Script polish, Visuals, Voiceover, Render) and Repurpose (real Analyze).</div>
         </div>
         <div className="flex items-center gap-2">
           <button className="btn" onClick={start} disabled={running}>{running ? "Running…" : "Run simulation"}</button>
@@ -1033,6 +1219,39 @@ function StepScript({ project, setProject }){
     if (!tool || !tool.input || !tool.input.voLine) throw new Error("no tool_use");
     return String(tool.input.voLine).slice(0, 280);
   };
+    const [polishing, setPolishing] = React.useState(false);
+  const polishEachScene = async () => {
+    if(polishing) return;
+    const scenes = (project && project.scenes) || [];
+    if(!scenes.length){ toast.push('No scenes to polish.', 'error'); return; }
+    setPolishing(true);
+    let providers = {}; try { providers = safeGet('providers.cfg', {}) || {}; } catch(e){}
+    const path = providers && providers.anthropic && providers.anthropic.url;
+    const brief = (project && (project.brief || project.idea || project.title)) || '';
+    const next = [];
+    let usedClaude = 0, usedLocal = 0;
+    for(const s of scenes){
+      try {
+        if(path){
+          const out = await polishSceneViaClaude(path, s, brief);
+          next.push({ ...s, title: out.title || s.title, voLine: out.voLine, script: out.voLine, beat: out.beat || s.beat });
+          usedClaude++;
+        } else {
+          const out = polishSceneLocal(s);
+          next.push({ ...s, title: out.title || s.title, voLine: out.voLine, script: out.voLine, beat: out.beat || s.beat });
+          usedLocal++;
+        }
+      } catch(e){
+        const out = polishSceneLocal(s);
+        next.push({ ...s, title: out.title || s.title, voLine: out.voLine, script: out.voLine, beat: out.beat || s.beat });
+        usedLocal++;
+      }
+    }
+    setProject({ ...project, scenes: next });
+    toast.push('Polished ' + next.length + ' scenes (' + usedClaude + ' via Claude, ' + usedLocal + ' local).', 'success');
+    setPolishing(false);
+  };
+
   const rewriteAllScenesWithTone = async (tone) => {
     if (rewriting) return;
     setRewriting(true);
@@ -1066,6 +1285,7 @@ function StepScript({ project, setProject }){
           {["urgent","calm","funny","tighter","simpler","punchy"].map(t => (
             <button key={t} className="chip" disabled={rewriting} onClick={()=>rewriteAllScenesWithTone(t)} aria-busy={rewriting}>{t}</button>
           ))}
+          <button className="chip" disabled={polishing} onClick={polishEachScene} aria-busy={polishing}>{polishing ? 'polishing…' : 'polish each scene'}</button>
           {rewriting && <span className="text-[11px] text-[color:var(--muted)]">rewriting…</span>}
         </div>
 
@@ -1126,12 +1346,67 @@ function StepStoryboard({ project, setProject }){
   const move = sceneMover(project, setProject);
   const remove = sceneRemover(project, setProject);
   const regen = sceneRegenSetter(project, setProject);
-  return (
+  const [imgBusy, setImgBusy] = React.useState(false);
+  const [imgErr, setImgErr] = React.useState('');
+  const [imgInfo, setImgInfo] = React.useState('');
+  const generateAllImages = async () => {
+    if(imgBusy) return;
+    const scenes = (project && project.scenes) || [];
+    if(!scenes.length){ setImgErr('No scenes to render.'); return; }
+    setImgBusy(true); setImgErr(''); setImgInfo('');
+    let providers = {}; try { providers = safeGet('providers.cfg', {}) || {}; } catch(e){}
+    const path = providers && providers.stability && providers.stability.url;
+    const next = []; let okClaude=0, okLocal=0;
+    for(const s of scenes){
+      const prompt = (s.shot || s.title || s.voLine || 'cinematic establishing shot').slice(0,400);
+      try {
+        if(path){
+          const dataUrl = await generateImageViaStability(path, prompt);
+          next.push({ ...s, image: dataUrl, imageSource: 'stability' });
+          okClaude++;
+        } else {
+          const dataUrl = generateImageLocal(prompt);
+          next.push({ ...s, image: dataUrl, imageSource: 'local-svg' });
+          okLocal++;
+        }
+      } catch(e){
+        const dataUrl = generateImageLocal(prompt);
+        next.push({ ...s, image: dataUrl, imageSource: 'local-svg-fallback' });
+        okLocal++;
+      }
+    }
+    setProject({ ...project, scenes: next });
+    setImgInfo('Generated ' + next.length + ' images (' + okClaude + ' via Stability, ' + okLocal + ' local SVG).');
+    setImgBusy(false);
+  };
+    return (
     <div className="flex flex-col gap-4">
       <div className="card p-5">
         <div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Storyboard</div>
         <div className="text-lg font-semibold">Frame the story</div>
         <div className="text-[12px] text-[color:var(--muted)] mt-1">Seeded example. Edit any field, or regenerate per scene.</div>
+      </div>
+      <div className="card p-5">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-[12px] uppercase tracking-wide text-[color:var(--muted)]">Visuals</div>
+            <div className="text-lg font-semibold">Generate scene images</div>
+            <div className="text-[12px] text-[color:var(--muted)] mt-1">Stability AI when configured, deterministic SVG locally otherwise. Uses each scene&apos;s shot prompt.</div>
+          </div>
+          <button className="btn btn-primary" onClick={generateAllImages} disabled={imgBusy}>{imgBusy ? 'Rendering…' : 'Generate all images'}</button>
+        </div>
+        {imgErr && <div className="mt-2 text-[12px] text-red-400">{imgErr}</div>}
+        {imgInfo && <div className="mt-2 text-[12px] text-emerald-400">{imgInfo}</div>}
+        {(project.scenes||[]).some(s => s.image) && (
+          <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-2">
+            {(project.scenes||[]).map((s, i) => (
+              <div key={s.id||i} className="rounded-xl overflow-hidden border border-[color:var(--line)]">
+                {s.image ? <img src={s.image} alt={'Scene '+(i+1)} className="w-full h-24 object-cover" /> : <div className="w-full h-24 bg-[color:var(--line)] flex items-center justify-center text-[11px] text-[color:var(--muted)]">no image</div>}
+                <div className="px-2 py-1 text-[11px] text-[color:var(--muted)] truncate">{s.title || ('Scene '+(i+1))}</div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
       <div className="grid gap-3">
         {project.scenes.map((s, i) => (
@@ -1242,7 +1517,41 @@ function StepMotion({ project, setProject }){
 function StepVoice({ project, setProject }){
   const mode = project.voiceMode || "avatar";
   const setMode = (m) => setProject({ ...project, voiceMode: m });
-  return (
+  const [voiceBusy, setVoiceBusy] = React.useState(false);
+  const [voiceErr, setVoiceErr] = React.useState('');
+  const [voiceInfo, setVoiceInfo] = React.useState('');
+  const generateAllVoices = async () => {
+    if(voiceBusy) return;
+    const scenes = (project && project.scenes) || [];
+    if(!scenes.length){ setVoiceErr('No scenes to voice.'); return; }
+    setVoiceBusy(true); setVoiceErr(''); setVoiceInfo('');
+    let providers = {}; try { providers = safeGet('providers.cfg', {}) || {}; } catch(e){}
+    const path = providers && providers.elevenlabs && providers.elevenlabs.url;
+    const next = []; let okEl=0, okLocal=0, errs=0;
+    for(const s of scenes){
+      const text = (s.voLine || s.script || s.title || '').toString();
+      if(!text.trim()){ next.push(s); continue; }
+      try {
+        if(path){
+          const dataUrl = await ttsViaElevenLabs(path, text);
+          next.push({ ...s, audio: dataUrl, audioSource: 'elevenlabs' });
+          okEl++;
+        } else {
+          // local fallback plays in-browser; persist a marker only
+          next.push({ ...s, audio: null, audioSource: 'local-speech' });
+          okLocal++;
+        }
+      } catch(e){
+        next.push({ ...s, audio: null, audioSource: 'error', audioError: String(e && e.message || e).slice(0,140) });
+        errs++;
+      }
+    }
+    setProject({ ...project, scenes: next });
+    setVoiceInfo('Voices: ' + okEl + ' via ElevenLabs · ' + okLocal + ' marked for local playback · ' + errs + ' errors.');
+    setVoiceBusy(false);
+  };
+  const previewLocalForScene = (s) => { try { ttsLocal(s.voLine || s.script || s.title || ''); } catch(e){} };
+    return (
     <div className="flex flex-col gap-4">
       <div className="card p-5">
         <div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Voice & Avatar</div>
@@ -1282,6 +1591,31 @@ function StepVoice({ project, setProject }){
         <div className="mt-4 text-[12px] text-[color:var(--muted)]">
           Cloning lands in Stage 4. Selection here persists into the timeline and export.
         </div>
+      </div>
+      <div className="card p-5">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-[12px] uppercase tracking-wide text-[color:var(--muted)]">Voiceover</div>
+            <div className="text-lg font-semibold">Generate scene audio</div>
+            <div className="text-[12px] text-[color:var(--muted)] mt-1">ElevenLabs when configured (returns audio data), browser SpeechSynthesis as live-playback fallback.</div>
+          </div>
+          <button className="btn btn-primary" onClick={generateAllVoices} disabled={voiceBusy}>{voiceBusy ? 'Synthesizing…' : 'Generate all voices'}</button>
+        </div>
+        {voiceErr && <div className="mt-2 text-[12px] text-red-400">{voiceErr}</div>}
+        {voiceInfo && <div className="mt-2 text-[12px] text-emerald-400">{voiceInfo}</div>}
+        {(project.scenes||[]).some(s => s.audio || s.audioSource) && (
+          <div className="mt-3 grid gap-2">
+            {(project.scenes||[]).map((s, i) => (
+              <div key={s.id||i} className="flex items-center justify-between gap-3 rounded-xl border border-[color:var(--line)] p-2">
+                <div className="min-w-0">
+                  <div className="text-sm truncate">{(i+1)+'. '+(s.title||'Scene')}</div>
+                  <div className="text-[11px] text-[color:var(--muted)] truncate">{s.audioSource === 'elevenlabs' ? 'ElevenLabs audio' : (s.audioSource === 'local-speech' ? 'Local SpeechSynthesis' : (s.audioSource === 'error' ? ('Error: '+(s.audioError||'')) : 'No audio yet'))}</div>
+                </div>
+                {s.audio ? <audio controls src={s.audio} className="max-w-[260px]" /> : <button className="chip" onClick={()=>previewLocalForScene(s)}>{'preview locally'}</button>}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
       <div className="card p-5">
         <div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">VO Preview</div>
@@ -1418,11 +1752,97 @@ function StepExport({ project, setProject }){
     setProject({ ...project, platforms: next });
   };
   const totalDuration = project.scenes.reduce((a,s)=>a+(s.duration||0), 0);
-  return (
+  const [renderBusy, setRenderBusy] = React.useState(false);
+  const [renderErr, setRenderErr] = React.useState('');
+  const [renderUrl, setRenderUrl] = React.useState('');
+  const [renderProgress, setRenderProgress] = React.useState(0);
+  const renderRealVideo = async () => {
+    if(renderBusy) return;
+    const scenes = (project && project.scenes) || [];
+    if(!scenes.length){ setRenderErr('No scenes to render.'); return; }
+    if(typeof MediaRecorder === 'undefined' || !HTMLCanvasElement.prototype.captureStream){ setRenderErr('Your browser does not support MediaRecorder + canvas.captureStream.'); return; }
+    setRenderBusy(true); setRenderErr(''); setRenderUrl(''); setRenderProgress(0);
+    try {
+      const W = 1280, H = 720;
+      const canvas = document.createElement('canvas'); canvas.width = W; canvas.height = H;
+      const ctx = canvas.getContext('2d');
+      const stream = canvas.captureStream(30);
+      const mime = (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported('video/webm;codecs=vp9')) ? 'video/webm;codecs=vp9' : 'video/webm';
+      const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 4_000_000 });
+      const chunks = [];
+      rec.ondataavailable = (e) => { if(e.data && e.data.size) chunks.push(e.data); };
+      const stopped = new Promise((resolve) => { rec.onstop = () => resolve(); });
+      rec.start(250);
+      // Pre-load images
+      const imgs = await Promise.all(scenes.map(s => new Promise((res) => {
+        if(!s.image){ res(null); return; }
+        const im = new Image(); im.crossOrigin = 'anonymous';
+        im.onload = () => res(im); im.onerror = () => res(null);
+        im.src = s.image;
+      })));
+      const total = scenes.reduce((a,s) => a + Math.max(1, Number(s.duration)||3), 0);
+      let elapsed = 0;
+      for(let i=0; i<scenes.length; i++){
+        const s = scenes[i]; const dur = Math.max(1, Number(s.duration)||3); const frames = Math.round(dur * 30);
+        for(let f=0; f<frames; f++){
+          ctx.fillStyle = '#0a0a0a'; ctx.fillRect(0,0,W,H);
+          if(imgs[i]){
+            const r = Math.max(W/imgs[i].width, H/imgs[i].height);
+            const dw = imgs[i].width * r, dh = imgs[i].height * r;
+            ctx.drawImage(imgs[i], (W-dw)/2, (H-dh)/2, dw, dh);
+            ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(0, H-160, W, 160);
+          } else {
+            ctx.fillStyle = '#1a1a1a'; ctx.fillRect(40,40,W-80,H-80);
+          }
+          ctx.fillStyle = '#fff'; ctx.font = 'bold 42px system-ui'; ctx.textAlign='left';
+          const title = (s.title||('Scene '+(i+1))).slice(0,60);
+          ctx.fillText(title, 60, H-100);
+          ctx.font = '24px system-ui'; ctx.fillStyle = 'rgba(255,255,255,0.85)';
+          const vo = (s.voLine||'').slice(0,90);
+          ctx.fillText(vo, 60, H-50);
+          await new Promise(r => setTimeout(r, 1000/30));
+        }
+        elapsed += dur;
+        setRenderProgress(Math.min(99, Math.round((elapsed/total)*100)));
+      }
+      rec.stop();
+      await stopped;
+      const blob = new Blob(chunks, { type: 'video/webm' });
+      const url = URL.createObjectURL(blob);
+      setRenderUrl(url);
+      setRenderProgress(100);
+    } catch(e){
+      console.warn('[zs] render error', e);
+      setRenderErr('Render failed: ' + (e && e.message || e));
+    } finally { setRenderBusy(false); }
+  };
+    return (
     <div className="flex flex-col gap-4">
       <div className="card p-5">
         <div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Export</div>
         <div className="text-lg font-semibold">Aspect & platform presets</div>
+      </div>
+      <div className="card p-5">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-[12px] uppercase tracking-wide text-[color:var(--muted)]">Render</div>
+            <div className="text-lg font-semibold">Real video export (canvas + MediaRecorder)</div>
+            <div className="text-[12px] text-[color:var(--muted)] mt-1">Burns each scene image with title and VO into a 720p WebM. Uses captureStream — Chromium and Firefox supported.</div>
+          </div>
+          <button className="btn btn-primary" onClick={renderRealVideo} disabled={renderBusy}>{renderBusy ? ('Rendering ' + renderProgress + '%') : 'Render WebM'}</button>
+        </div>
+        {renderErr && <div className="mt-2 text-[12px] text-red-400">{renderErr}</div>}
+        {renderBusy && (
+          <div className="mt-3 h-2 rounded-full bg-white/5 overflow-hidden">
+            <div className="h-2 bg-emerald-400 transition-all" style={{ width: renderProgress + '%' }} />
+          </div>
+        )}
+        {renderUrl && !renderBusy && (
+          <div className="mt-3 grid gap-2">
+            <video src={renderUrl} controls className="w-full max-h-[360px] rounded-xl border border-[color:var(--line)]" />
+            <a href={renderUrl} download={(project.name||'zaidsaid')+'.webm'} className="chip self-start">Download .webm</a>
+          </div>
+        )}
       </div>
       <div className="grid md:grid-cols-3 gap-3">
         {STUDIO_EXPORT_PRESETS.map(p => {
@@ -1798,7 +2218,7 @@ function RepurposeAnalyzer({ project, setProject, onComplete }){
         <div>
           <div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Analyzer</div>
           <div className="text-lg font-semibold">Find the moments worth clipping</div>
-          <div className="text-[12px] text-[color:var(--muted)] mt-1">This is a visualization. No external calls are made.</div>
+          <div className="text-[12px] text-[color:var(--muted)] mt-1">Demo simulator. Real generation lives in Studio (Script polish, Visuals, Voiceover, Render) and Repurpose (real Analyze).</div>
         </div>
         <div className="flex items-center gap-2">
           <button className="btn" onClick={start} disabled={running}>{running ? "Analyzing…" : "Analyze"}</button>
@@ -1838,6 +2258,59 @@ function RepurposeAnalyzer({ project, setProject, onComplete }){
     </div>
   );
 }
+function RepurposeRealAnalyze({ project, setProject }){
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState('');
+  const [info, setInfo] = React.useState('');
+  const [src, setSrc] = React.useState('');
+  const run = async () => {
+    if(busy) return;
+    const text = (src || project.transcriptText || project.source || '').trim();
+    if(!text){ setErr('Paste a transcript, description, or URL summary first.'); return; }
+    setBusy(true); setErr(''); setInfo('');
+    let providers = {}; try { providers = safeGet('providers.cfg', {}) || {}; } catch(e){}
+    const anth = providers && providers.anthropic;
+    const path = anth && anth.url ? anth.url : '';
+    const target = Number(project.targetCount)||5;
+    try {
+      let clips;
+      if(path){
+        console.log('[zs] real-analyze: calling Claude');
+        clips = await analyzeViaClaude(path, text, target);
+        setInfo('Analyzed via Claude — ' + clips.length + ' clips.');
+      } else {
+        console.log('[zs] real-analyze: using local fallback');
+        clips = analyzeLocal(text, target);
+        setInfo('Analyzed locally (no Anthropic proxy configured) — ' + clips.length + ' clips.');
+      }
+      if(!clips || !clips.length){ setErr('No clips returned. Try richer source text.'); return; }
+      setProject({ ...project, clips, durationSec: project.durationSec || (clips[clips.length-1].end + 60) });
+    } catch(e){
+      console.warn('[zs] real-analyze error', e);
+      try { const fb = analyzeLocal(text, target); setProject({ ...project, clips: fb }); setErr('Claude call failed (' + (e && e.message || e) + '). Fell back to local analyze.'); }
+      catch(e2){ setErr('Analyze failed: ' + (e2 && e2.message || e2)); }
+    } finally { setBusy(false); }
+  };
+  return (
+    <div className="card p-5 mt-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-[12px] uppercase tracking-wide text-[color:var(--muted)]">Real analyze</div>
+          <div className="text-lg font-semibold">Generate clips from your source</div>
+          <div className="text-[12px] text-[color:var(--muted)] mt-1">Sends transcript or description to Claude (or local heuristic) and writes real clips into the project.</div>
+        </div>
+        <button className="btn btn-primary" onClick={run} disabled={busy}>{busy ? 'Analyzing…' : 'Run real analyze'}</button>
+      </div>
+      <div className="mt-3">
+        <textarea className="input w-full" rows={4} placeholder="Paste source transcript or description (or use the project transcript above)" value={src} onChange={e=>setSrc(e.target.value)} />
+      </div>
+      {err && <div className="mt-2 text-[12px] text-red-400">{err}</div>}
+      {info && <div className="mt-2 text-[12px] text-emerald-400">{info}</div>}
+    </div>
+  );
+}
+
+
 
 function RepurposeTranscriptStrip({ project }){
   const dur = Math.max(1, project.durationSec || 1);
@@ -2198,6 +2671,7 @@ const removeClip = (clipId) => {
       <div className="grid gap-4">
         <RepurposeIntake project={project} setProject={setProject} />
         <RepurposeAnalyzer project={project} setProject={setProject} />
+        <RepurposeRealAnalyze project={project} setProject={setProject} />
         <RepurposeTranscriptStrip project={project} />
 
         <div className="card p-5">
