@@ -1017,7 +1017,7 @@ function StudioPipelineSimulator({ project, setProject }){
         <div>
           <div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Pipeline simulator</div>
           <div className="text-lg font-semibold">Watch Zaidsaid work the steps</div>
-          <div className="text-[12px] text-[color:var(--muted)] mt-1">This is a visualization. No external calls are made.</div>
+          <div className="text-[12px] text-[color:var(--muted)] mt-1">Demo simulator. Real generation lives in Studio (Script polish, Visuals, Voiceover, Render) and Repurpose (real Analyze).</div>
         </div>
         <div className="flex items-center gap-2">
           <button className="btn" onClick={start} disabled={running}>{running ? "Running…" : "Run simulation"}</button>
@@ -2218,7 +2218,7 @@ function RepurposeAnalyzer({ project, setProject, onComplete }){
         <div>
           <div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Analyzer</div>
           <div className="text-lg font-semibold">Find the moments worth clipping</div>
-          <div className="text-[12px] text-[color:var(--muted)] mt-1">This is a visualization. No external calls are made.</div>
+          <div className="text-[12px] text-[color:var(--muted)] mt-1">Demo simulator. Real generation lives in Studio (Script polish, Visuals, Voiceover, Render) and Repurpose (real Analyze).</div>
         </div>
         <div className="flex items-center gap-2">
           <button className="btn" onClick={start} disabled={running}>{running ? "Analyzing…" : "Analyze"}</button>
