@@ -1346,12 +1346,67 @@ function StepStoryboard({ project, setProject }){
   const move = sceneMover(project, setProject);
   const remove = sceneRemover(project, setProject);
   const regen = sceneRegenSetter(project, setProject);
-  return (
+  const [imgBusy, setImgBusy] = React.useState(false);
+  const [imgErr, setImgErr] = React.useState('');
+  const [imgInfo, setImgInfo] = React.useState('');
+  const generateAllImages = async () => {
+    if(imgBusy) return;
+    const scenes = (project && project.scenes) || [];
+    if(!scenes.length){ setImgErr('No scenes to render.'); return; }
+    setImgBusy(true); setImgErr(''); setImgInfo('');
+    let providers = {}; try { providers = safeGet('providers.cfg', {}) || {}; } catch(e){}
+    const path = providers && providers.stability && providers.stability.url;
+    const next = []; let okClaude=0, okLocal=0;
+    for(const s of scenes){
+      const prompt = (s.shot || s.title || s.voLine || 'cinematic establishing shot').slice(0,400);
+      try {
+        if(path){
+          const dataUrl = await generateImageViaStability(path, prompt);
+          next.push({ ...s, image: dataUrl, imageSource: 'stability' });
+          okClaude++;
+        } else {
+          const dataUrl = generateImageLocal(prompt);
+          next.push({ ...s, image: dataUrl, imageSource: 'local-svg' });
+          okLocal++;
+        }
+      } catch(e){
+        const dataUrl = generateImageLocal(prompt);
+        next.push({ ...s, image: dataUrl, imageSource: 'local-svg-fallback' });
+        okLocal++;
+      }
+    }
+    setProject({ ...project, scenes: next });
+    setImgInfo('Generated ' + next.length + ' images (' + okClaude + ' via Stability, ' + okLocal + ' local SVG).');
+    setImgBusy(false);
+  };
+    return (
     <div className="flex flex-col gap-4">
       <div className="card p-5">
         <div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Storyboard</div>
         <div className="text-lg font-semibold">Frame the story</div>
         <div className="text-[12px] text-[color:var(--muted)] mt-1">Seeded example. Edit any field, or regenerate per scene.</div>
+      </div>
+      <div className="card p-5">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-[12px] uppercase tracking-wide text-[color:var(--muted)]">Visuals</div>
+            <div className="text-lg font-semibold">Generate scene images</div>
+            <div className="text-[12px] text-[color:var(--muted)] mt-1">Stability AI when configured, deterministic SVG locally otherwise. Uses each scene&apos;s shot prompt.</div>
+          </div>
+          <button className="btn btn-primary" onClick={generateAllImages} disabled={imgBusy}>{imgBusy ? 'Rendering…' : 'Generate all images'}</button>
+        </div>
+        {imgErr && <div className="mt-2 text-[12px] text-red-400">{imgErr}</div>}
+        {imgInfo && <div className="mt-2 text-[12px] text-emerald-400">{imgInfo}</div>}
+        {(project.scenes||[]).some(s => s.image) && (
+          <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-2">
+            {(project.scenes||[]).map((s, i) => (
+              <div key={s.id||i} className="rounded-xl overflow-hidden border border-[color:var(--line)]">
+                {s.image ? <img src={s.image} alt={'Scene '+(i+1)} className="w-full h-24 object-cover" /> : <div className="w-full h-24 bg-[color:var(--line)] flex items-center justify-center text-[11px] text-[color:var(--muted)]">no image</div>}
+                <div className="px-2 py-1 text-[11px] text-[color:var(--muted)] truncate">{s.title || ('Scene '+(i+1))}</div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
       <div className="grid gap-3">
         {project.scenes.map((s, i) => (
