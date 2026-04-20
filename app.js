@@ -801,7 +801,56 @@ function StepScript({ project, setProject }){
   const regenerateAll = () => {
     const next = project.scenes.map(s => ({ ...s, voLine: s.voLine + " " + sceneRegenerateBlurbs("voLine") }));
     setProject({ ...project, scenes: next });
+  };  const toast = useToast();
+  const [rewriting, setRewriting] = useState(false);
+  const getProxyForScript = () => {
+    let picks = {}; try { picks = JSON.parse(localStorage.getItem("zaidsaid.v2.arch.picks") || "{}"); } catch(_){}
+    const providerId = picks["script"] || (typeof PIPELINE_STAGES !== "undefined" ? (PIPELINE_STAGES.find(x => x.id === "script") || {}).provider : null);
+    const p = (typeof PROVIDERS !== "undefined") ? (PROVIDERS.find(x => x.id === providerId) || null) : null;
+    return (p && p.proxyUrl) ? p.proxyUrl : "";
   };
+  const localRewrite = (text, tone) => {
+    const t = (text || "").trim();
+    if (!t) return t;
+    const map = {
+      urgent: (s) => s.replace(/\.(\s|$)/g, "!$1").replace(/^/, "Right now — "),
+      calm: (s) => s.replace(/!+/g, ".").replace(/^/, "Here is what matters: "),
+      funny: (s) => s.replace(/\.(\s|$)/g, " — and yes, really.$1"),
+      tighter: (s) => { const w = s.split(/\s+/); return w.slice(0, Math.max(6, Math.floor(w.length * 0.6))).join(" ") + (w.length > 6 ? "." : ""); },
+      simpler: (s) => s.replace(/\b([A-Z][a-z]{7,})\b/g, (m) => m.slice(0,6).toLowerCase()),
+      punchy: (s) => { const w = s.split(/\s+/); return w.map((x,i)=> i === 0 ? x.toUpperCase() : x).join(" "); }
+    };
+    const fn = map[tone] || ((x)=>x);
+    return fn(t).slice(0, 280);
+  };
+  const callAnthropicRewrite = async (proxyUrl, voLine, tone, sceneTitle) => {
+    const url = proxyUrl.replace(/\/$/, "") + "/v1/messages";
+    const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ model: "claude-3-5-sonnet-latest", max_tokens: 512, tool_choice: { type: "tool", name: "rewrite_vo" }, tools: [{ name: "rewrite_vo", description: "Rewrite a voiceover line in the requested tone.", input_schema: { type: "object", properties: { voLine: { type: "string", description: "Rewritten voiceover line, 1-2 sentences, same meaning." } }, required: ["voLine"] } }], messages: [{ role: "user", content: "Scene title: " + (sceneTitle || "") + "\nCurrent VO: " + voLine + "\nRewrite this VO in a '" + tone + "' tone. Same meaning, keep it under 30 words." }] }) });
+    if (!res.ok) throw new Error("proxy " + res.status);
+    const data = await res.json();
+    const tool = (data.content || []).find(c => c.type === "tool_use");
+    if (!tool || !tool.input || !tool.input.voLine) throw new Error("no tool_use");
+    return String(tool.input.voLine).slice(0, 280);
+  };
+  const rewriteAllScenesWithTone = async (tone) => {
+    if (rewriting) return;
+    setRewriting(true);
+    const proxy = getProxyForScript();
+    try {
+      const next = [];
+      for (const s of project.scenes) {
+        const src = s.voLine || s.script || "";
+        let out = src;
+        try { out = proxy ? await callAnthropicRewrite(proxy, src, tone, s.title) : localRewrite(src, tone); }
+        catch (e) { out = localRewrite(src, tone); }
+        next.push({ ...s, voLine: out, script: out });
+      }
+      setProject({ ...project, scenes: next });
+      toast.push("Rewrote " + next.length + " scenes (" + tone + ")" + (proxy ? "" : " — local fallback"), "success");
+    } catch (e) { toast.push("Rewrite failed: " + (e && e.message || e), "error"); }
+    finally { setRewriting(false); }
+  };
+
   return (
     <div className="flex flex-col gap-4">
       <div className="card p-5">
@@ -811,7 +860,14 @@ function StepScript({ project, setProject }){
             <div className="text-lg font-semibold">Tight, spoken draft</div>
           </div>
           <button className="btn" onClick={regenerateAll}>{I.refresh({size:14})} Regenerate all</button>
+        </div>        <div className="mt-3 flex items-center gap-2 flex-wrap">
+          <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Rewrite with tone</span>
+          {["urgent","calm","funny","tighter","simpler","punchy"].map(t => (
+            <button key={t} className="chip" disabled={rewriting} onClick={()=>rewriteAllScenesWithTone(t)} aria-busy={rewriting}>{t}</button>
+          ))}
+          {rewriting && <span className="text-[11px] text-[color:var(--muted)]">rewriting…</span>}
         </div>
+
         <textarea
           value={scriptText}
           onChange={onChange}
