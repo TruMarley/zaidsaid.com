@@ -337,9 +337,68 @@ function ProvidersPanel({ filterCap }){
           <ProviderRow key={p.id} provider={p} path={getPath(p.id)} enabled={getEnabled(p.id)} onChangePath={(v)=>setPath(p.id, v)} onChangeEnabled={(v)=>setEnabled(p.id, v)} />
         ))}
       </div>
+      <HealthPanel filterCap={filterCap} />
     </div>
   );
 }
+function HealthPanel({ filterCap }){
+  const [busy, setBusy] = React.useState(false);
+  const [results, setResults] = React.useState([]);
+  const [lastRun, setLastRun] = React.useState(0);
+  const collectProviders = () => {
+    let cfg = {}; try { cfg = safeGet('providers.cfg', {}) || {}; } catch(e){}
+    const list = [];
+    Object.keys(cfg).forEach(k => { const p = cfg[k]; if(p && typeof p === 'object'){ list.push({ name: k, url: p.url || '' }); } });
+    return list;
+  };
+  const run = async () => {
+    if(busy) return;
+    const provs = collectProviders();
+    if(!provs.length){ setResults([{name:'(none)', ok:false, ms:0, err:'No providers configured. Add one above.'}]); setLastRun(Date.now()); return; }
+    setBusy(true);
+    try {
+      const r = await pingProviders(provs);
+      setResults(r); setLastRun(Date.now());
+    } catch(e){
+      setResults([{name:'(error)', ok:false, ms:0, err:String(e && e.message || e)}]);
+      setLastRun(Date.now());
+    } finally { setBusy(false); }
+  };
+  const fmtAge = (t) => { if(!t) return ''; const s = Math.round((Date.now()-t)/1000); return s<60 ? (s + 's ago') : (Math.round(s/60) + 'm ago'); };
+  return (
+    <div className="card p-5 mt-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-[12px] uppercase tracking-wide text-[color:var(--muted)]">Live health</div>
+          <div className="text-lg font-semibold">Provider connectivity</div>
+          <div className="text-[12px] text-[color:var(--muted)] mt-1">Pings each configured proxy at <code>/ping</code>. Results stay in your browser.</div>
+        </div>
+        <div className="flex items-center gap-2">
+          {lastRun ? <div className="text-[11px] text-[color:var(--muted)]">checked {fmtAge(lastRun)}</div> : null}
+          <button className="btn" onClick={run} disabled={busy}>{busy ? 'Pinging…' : 'Ping all'}</button>
+        </div>
+      </div>
+      {results.length > 0 && (
+        <div className="mt-3 grid md:grid-cols-2 gap-2">
+          {results.map((r, i) => (
+            <div key={r.name + ':' + i} className="flex items-center justify-between rounded-xl border border-[color:var(--line)] p-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className={'h-2 w-2 rounded-full flex-shrink-0 ' + (r.ok ? 'bg-emerald-400' : 'bg-red-400')} />
+                <div className="truncate">
+                  <div className="text-sm font-medium truncate">{r.name}</div>
+                  <div className="text-[11px] text-[color:var(--muted)] truncate">{r.ok ? ('OK · ' + r.ms + 'ms') : ('Down · ' + (r.err || 'unknown'))}</div>
+                </div>
+              </div>
+              <div className="text-[11px] text-[color:var(--muted)] flex-shrink-0">{r.status || ''}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 
 /* ---------------- New IA ---------------- */
 const TABS = [
