@@ -12,7 +12,7 @@ This folder contains ready-to-deploy proxy shims that let the public zaidsaid.co
 
 ## Files
 
-- `cloudflare-worker.js` — multi-vendor Cloudflare Worker template (ElevenLabs, HeyGen, OpenAI, Runway)
+- `cloudflare-worker.js` — multi-vendor Cloudflare Worker template (ElevenLabs, HeyGen, OpenAI, Runway, Anthropic/Claude, Grok/xAI, Synthesia, Kling, Stability, Suno, Udio, Perplexity)
 - `vercel-edge.js` — same, as a Vercel Edge Function
 - `node-express.js` — Node + Express version for self-hosting
 
@@ -27,6 +27,15 @@ wrangler secret put HEYGEN_KEY
 wrangler secret put OPENAI_KEY
 wrangler secret put RUNWAY_KEY
 wrangler secret put ANTHROPIC_KEY
+wrangler secret put XAI_KEY
+# optional extras (skip if not deploying these vendors):
+wrangler secret put SYNTHESIA_KEY
+wrangler secret put KLING_KEY
+wrangler secret put STABILITY_KEY
+wrangler secret put SUNO_KEY
+wrangler secret put UDIO_KEY
+wrangler secret put PERPLEXITY_KEY
+cd proxy/   # if deploying from the repo root; wrangler.toml lives in proxy/
 wrangler deploy
 ```
 
