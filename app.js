@@ -905,7 +905,7 @@ function SceneCard({ scene, onField, onRegen, onMove, onRemove, index, total }){
         </label>
         <label className="block">
           <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Shot</span>
-          {scene.shot&&<img src={`https://image.pollinations.ai/prompt/${encodeURIComponent(scene.shot)}?width=1280&height=720&nologo=true&model=flux`} alt="storyboard" className="w-full rounded-lg mt-1 mb-1" style={{aspectRatio:'16/9',objectFit:'cover'}}/>}
+          {scene.shot&&<img src={`https://zaidsaid-proxy.zaidsaid.workers.dev/pollinations/prompt/${encodeURIComponent(scene.shot)}?width=1280&height=720&nologo=true&model=flux`} alt="storyboard" className="w-full rounded-lg mt-1 mb-1" style={{aspectRatio:'16/9',objectFit:'cover'}}/>}
           <textarea
             value={scene.shot}
             onChange={(e)=>onField("shot", e.target.value)}
@@ -1183,7 +1183,7 @@ function StepMotion({ project, setProject }){
   const canvasRef = React.useRef(null);
   const rafRef = React.useRef(null);
   const [playing, setPlaying] = React.useState(false);
-  const imgs = React.useMemo(() => (project.scenes||[]).filter(s=>s.shot).map(s=>"https://image.pollinations.ai/prompt/"+encodeURIComponent(s.shot)+"?width=1280&height=720&nologo=true&model=flux"), [project.storyboard]);
+  const imgs = React.useMemo(() => (project.scenes||[]).filter(s=>s.shot).map(s=>"https://zaidsaid-proxy.zaidsaid.workers.dev/pollinations/prompt/"+encodeURIComponent(s.shot)+"?width=1280&height=720&nologo=true&model=flux"), [project.storyboard]);
   const stopKenBurns = React.useCallback(() => { if (rafRef.current) cancelAnimationFrame(rafRef.current); setPlaying(false); }, []);
   const playKenBurns = React.useCallback(() => {
     const canvas = canvasRef.current;
@@ -1192,7 +1192,7 @@ function StepMotion({ project, setProject }){
     const W = canvas.width, H = canvas.height;
     let imgIdx = 0, frame = 0;
     const FPIMG = 90;
-    const images = imgs.map(src => { const im = new Image(); im.src=src; return im; });
+    const images = imgs.map(src => { const im = new Image(); im.crossOrigin="anonymous"; im.src=src; return im; });
     setPlaying(true);
     const tick = () => {
       const img = images[imgIdx % images.length];
@@ -1481,7 +1481,7 @@ function StepExport({ project, setProject }){
           {project.cta && (<div className="rounded-xl border border-[color:var(--line)] p-3 md:col-span-2"><div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Call to action</div><div className="mt-1">{project.cta}</div></div>)}
         </div><div className="mt-4 flex items-center gap-2">
           <button className="btn btn-primary" onClick={async()=>{
-  const shots = (project.scenes||[]).filter(s=>s.shot).map(s=>({imageUrl:"https://image.pollinations.ai/prompt/"+encodeURIComponent(s.shot)+"?width=1280&height=720&nologo=true&model=flux"}));
+  const shots = (project.scenes||[]).filter(s=>s.shot).map(s=>({imageUrl:"https://zaidsaid-proxy.zaidsaid.workers.dev/pollinations/prompt/"+encodeURIComponent(s.shot)+"?width=1280&height=720&nologo=true&model=flux"}));
   if (!shots.length) { toast && toast("No storyboard images — run Storyboard stage first","error"); return; }
   const offscreen = document.createElement("canvas");
   offscreen.width = 1280; offscreen.height = 720;
