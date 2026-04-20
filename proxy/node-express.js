@@ -4,7 +4,7 @@
  * Install:
  *   npm init -y
  *   npm i express undici dotenv
- *   cp .env.example .env   # fill in ELEVEN_KEY, HEYGEN_KEY, OPENAI_KEY, RUNWAY_KEY
+ *   cp .env.example .env   # fill in ELEVEN_KEY, HEYGEN_KEY, OPENAI_KEY, RUNWAY_KEY, ANTHROPIC_KEY
  *
  * Run:
  *   node node-express.js
@@ -41,6 +41,10 @@ const VENDORS = {
   runway: {
     base: "https://api.runwayml.com",
     authHeader: () => ({ "Authorization": "Bearer " + process.env.RUNWAY_KEY })
+  },
+  anthropic: {
+    base: "https://api.anthropic.com",
+    authHeader: () => ({ "x-api-key": process.env.ANTHROPIC_KEY, "anthropic-version": "2023-06-01" })
   }
 };
 
