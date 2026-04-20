@@ -1133,6 +1133,28 @@ function StepVoice({ project, setProject }){
           Cloning lands in Stage 4. Selection here persists into the timeline and export.
         </div>
       </div>
+      <div className="card p-5">
+        <div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">VO Preview</div>
+        <div className="text-lg font-semibold">Hear each scene aloud</div>
+        <div className="mt-3 flex flex-col gap-2">
+          {(project.scenes||[]).map((s, i) => (
+            <div key={s.id} className="rounded-xl border border-[color:var(--line)] p-3 flex items-start gap-3">
+              <span className="chip shrink-0">{String(i+1).padStart(2,"0")}</span>
+              <div className="flex-1 min-w-0">
+                <div className="text-[11px] text-[color:var(--muted)]">{s.title}</div>
+                <div className="text-sm mt-0.5">{s.voLine || <span className="opacity-40">No VO line yet</span>}</div>
+              </div>
+              <button className="chip shrink-0" onClick={()=>speakText(s.voLine,{lang:"en-US"})} disabled={!s.voLine}>
+                ▶ Preview
+              </button>
+            </div>
+          ))}
+        </div>
+        <div className="mt-3 flex items-center gap-2">
+          <button className="chip" onClick={()=>stopSpeech()}>■ Stop</button>
+          <span className="text-[11px] text-[color:var(--muted)]">Browser Web Speech API — free, no key needed</span>
+        </div>
+      </div>
     </div>
   );
 }
