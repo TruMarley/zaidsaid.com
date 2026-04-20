@@ -1184,7 +1184,7 @@ function StepMotion({ project, setProject }){
   const canvasRef = React.useRef(null);
   const rafRef = React.useRef(null);
   const [playing, setPlaying] = React.useState(false);
-  const imgs = React.useMemo(() => (project.scenes||[]).filter(s=>s.shot).map(s=>"https://zaidsaid-proxy.zaidsaid.workers.dev/pollinations/prompt/"+encodeURIComponent(s.shot)+"?width=640&height=360&nologo=true&model=turbo"), [project.storyboard]);
+  const imgs = React.useMemo(() => (project.scenes||[]).filter(s=>s.shot).map(s=>"https://zaidsaid-proxy.zaidsaid.workers.dev/pollinations/prompt/"+encodeURIComponent(s.shot.replace(/[:%+]/g," ").replace(/\s+/g," ").trim())+"?width=640&height=360&nologo=true&model=turbo"), [project.storyboard]);
   const stopKenBurns = React.useCallback(() => { if (rafRef.current) cancelAnimationFrame(rafRef.current); setPlaying(false); }, []);
   const playKenBurns = React.useCallback(() => {
     const canvas = canvasRef.current;
@@ -1197,7 +1197,7 @@ function StepMotion({ project, setProject }){
     setPlaying(true);
     const tick = () => {
       const img = images[imgIdx % images.length];
-      if (!img.complete) { rafRef.current = requestAnimationFrame(tick); return; }
+      if (!img.complete) { rafRef.current = requestAnimationFrame(tick); return; } if (img.naturalWidth === 0) { imgIdx++; frame = 0; if (imgIdx >= images.length) { stopKenBurns(); return; } rafRef.current = requestAnimationFrame(tick); return; }
       const p = frame / FPIMG;
       const scale = 1 + p * 0.07;
       const ox = (W * (scale-1)) * (imgIdx % 2 === 0 ? -0.5 : 0.5);
