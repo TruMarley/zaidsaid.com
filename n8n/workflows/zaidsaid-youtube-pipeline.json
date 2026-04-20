@@ -1,0 +1,232 @@
+{
+  "name": "Zaidsaid — YouTube to Video Brief Pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "zaidsaid/pipeline",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook: Start Pipeline",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        300
+      ],
+      "webhookId": "zaidsaid-pipeline"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse input: { url, platform, duration, language }\nconst body = $input.first().json;\nconst url = body.url || body.youtube_url || '';\nconst platform = body.platform || 'TikTok';\nconst duration = parseInt(body.duration) || 60;\nconst language = body.language || 'English';\n\n// Extract YouTube video ID\nconst match = url.match(/(?:youtube\\.com\\/watch\\?v=|youtu\\.be\\/|shorts\\/|embed\\/)([-\\w]+)/);\nif (!match) throw new Error('Invalid YouTube URL: ' + url);\nconst videoId = match[1];\n\nreturn [{ json: { videoId, url, platform, duration, language } }];"
+      },
+      "id": "parse-input",
+      "name": "Parse & Validate Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://noembed.com/embed?url={{ encodeURIComponent($json.url) }}",
+        "options": {}
+      },
+      "id": "fetch-metadata",
+      "name": "Fetch YouTube Metadata (noembed)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://www.youtube.com/watch?v={{ $('Parse & Validate Input').item.json.videoId }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "fetch-description",
+      "name": "Fetch YouTube Page",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        680,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const meta = $('Fetch YouTube Metadata (noembed)').item.json;\nconst parsedInput = $('Parse & Validate Input').item.json;\nconst pageHtml = $('Fetch YouTube Page').item.json;\n\nlet description = '';\nif (typeof pageHtml === 'string') {\n  const descMatch = pageHtml.match(/\"shortDescription\":\"([^\"]{0,2000})\"/);\n  if (descMatch) {\n    description = descMatch[1].replace(/\\\\n/g, '\\n').replace(/\\\\u0026/g, '&').slice(0, 1500);\n  }\n}\n\nconst sourceText = [\n  'Video Title: ' + (meta.title || 'Unknown'),\n  'Channel: ' + (meta.author_name || 'Unknown'),\n  'URL: ' + parsedInput.url,\n  description ? ('\\nDescription:\\n' + description) : ''\n].filter(Boolean).join('\\n');\n\nreturn [{ json: { ...parsedInput, title: meta.title || '', channel: meta.author_name || '', thumbnail: meta.thumbnail_url || '', description, sourceText } }];"
+      },
+      "id": "build-source",
+      "name": "Build Source Text",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        900,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ZAIDSAID_PROXY_URL }}/anthropic/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"claude-3-5-sonnet-latest\",\n  \"max_tokens\": 1500,\n  \"tools\": [{\n    \"name\": \"video_brief\",\n    \"description\": \"Return a creative brief and beat-by-beat outline for a short-form video.\",\n    \"input_schema\": {\n      \"type\": \"object\",\n      \"properties\": {\n        \"logline\": { \"type\": \"string\" },\n        \"audience\": { \"type\": \"string\" },\n        \"angle\": { \"type\": \"string\" },\n        \"hook\": { \"type\": \"string\" },\n        \"cta\": { \"type\": \"string\" },\n        \"beats\": {\n          \"type\": \"array\",\n          \"items\": {\n            \"type\": \"object\",\n            \"properties\": {\n              \"title\": { \"type\": \"string\" },\n              \"script\": { \"type\": \"string\" },\n              \"shot\": { \"type\": \"string\", \"description\": \"Cinematic shot description for visual generation\" }\n            },\n            \"required\": [\"title\", \"script\", \"shot\"]\n          }\n        }\n      },\n      \"required\": [\"logline\", \"hook\", \"beats\"]\n    }\n  }],\n  \"tool_choice\": { \"type\": \"tool\", \"name\": \"video_brief\" },\n  \"messages\": [{\n    \"role\": \"user\",\n    \"content\": \"PLATFORM: {{ $json.platform }}\\nDURATION: {{ $json.duration }}s\\nLANGUAGE: {{ $json.language }}\\n\\nSOURCE:\\n{{ $json.sourceText }}\"\n  }]\n}",
+        "options": {}
+      },
+      "id": "generate-brief",
+      "name": "Generate Brief (Claude)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1120,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\nconst blocks = response.content || [];\nconst toolBlock = blocks.find(b => b.type === 'tool_use' && b.name === 'video_brief');\nif (!toolBlock || !toolBlock.input) throw new Error('Claude did not return video_brief tool output');\n\nconst brief = toolBlock.input;\nconst input = $('Build Source Text').item.json;\nconst perScene = Math.max(3, Math.round(input.duration / Math.max(1, (brief.beats||[]).length)));\n\nconst scenes = (brief.beats || []).map((b, i) => ({\n  id: 's' + (i + 1),\n  title: (b.title || ('Beat ' + (i+1))).slice(0, 80),\n  voLine: (b.script || '').slice(0, 600),\n  script: (b.script || '').slice(0, 600),\n  shot: b.shot || (b.title + ': ' + (b.script || '').split(/[.!?]/)[0].trim()),\n  motion: 'slow push-in',\n  asset: 'b-roll',\n  captions: (b.script || '').slice(0, 80),\n  duration: perScene,\n  imageUrl: 'https://image.pollinations.ai/prompt/' + encodeURIComponent(b.shot || b.title) + '?width=1280&height=720&nologo=true&model=flux'\n}));\n\nreturn [{ json: { project: { name: input.title, source: input.sourceText, youtubeUrl: input.url, thumbnail: input.thumbnail, platform: input.platform, platforms: [input.platform], language: input.language, durationHint: input.duration, logline: brief.logline || '', hook: brief.hook || '', audience: brief.audience || '', angle: brief.angle || '', cta: brief.cta || '', scenes, preset: input.platform === 'YouTube' ? 'horizontal' : 'vertical' } } }];"
+      },
+      "id": "build-project",
+      "name": "Build Zaidsaid Project",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1340,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "respond",
+      "name": "Respond with Project",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1560,
+        380
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook: Start Pipeline": {
+      "main": [
+        [
+          {
+            "node": "Parse & Validate Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse & Validate Input": {
+      "main": [
+        [
+          {
+            "node": "Fetch YouTube Metadata (noembed)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fetch YouTube Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch YouTube Metadata (noembed)": {
+      "main": [
+        [
+          {
+            "node": "Build Source Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch YouTube Page": {
+      "main": [
+        [
+          {
+            "node": "Build Source Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Source Text": {
+      "main": [
+        [
+          {
+            "node": "Generate Brief (Claude)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Brief (Claude)": {
+      "main": [
+        [
+          {
+            "node": "Build Zaidsaid Project",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Zaidsaid Project": {
+      "main": [
+        [
+          {
+            "node": "Respond with Project",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": {
+    "templateId": "zaidsaid-youtube-pipeline"
+  }
+}
