@@ -1160,6 +1160,39 @@ function StepScript({ project, setProject }){
     if (!tool || !tool.input || !tool.input.voLine) throw new Error("no tool_use");
     return String(tool.input.voLine).slice(0, 280);
   };
+    const [polishing, setPolishing] = React.useState(false);
+  const polishEachScene = async () => {
+    if(polishing) return;
+    const scenes = (project && project.scenes) || [];
+    if(!scenes.length){ toast.push('No scenes to polish.', 'error'); return; }
+    setPolishing(true);
+    let providers = {}; try { providers = safeGet('providers.cfg', {}) || {}; } catch(e){}
+    const path = providers && providers.anthropic && providers.anthropic.url;
+    const brief = (project && (project.brief || project.idea || project.title)) || '';
+    const next = [];
+    let usedClaude = 0, usedLocal = 0;
+    for(const s of scenes){
+      try {
+        if(path){
+          const out = await polishSceneViaClaude(path, s, brief);
+          next.push({ ...s, title: out.title || s.title, voLine: out.voLine, script: out.voLine, beat: out.beat || s.beat });
+          usedClaude++;
+        } else {
+          const out = polishSceneLocal(s);
+          next.push({ ...s, title: out.title || s.title, voLine: out.voLine, script: out.voLine, beat: out.beat || s.beat });
+          usedLocal++;
+        }
+      } catch(e){
+        const out = polishSceneLocal(s);
+        next.push({ ...s, title: out.title || s.title, voLine: out.voLine, script: out.voLine, beat: out.beat || s.beat });
+        usedLocal++;
+      }
+    }
+    setProject({ ...project, scenes: next });
+    toast.push('Polished ' + next.length + ' scenes (' + usedClaude + ' via Claude, ' + usedLocal + ' local).', 'success');
+    setPolishing(false);
+  };
+
   const rewriteAllScenesWithTone = async (tone) => {
     if (rewriting) return;
     setRewriting(true);
@@ -1193,6 +1226,7 @@ function StepScript({ project, setProject }){
           {["urgent","calm","funny","tighter","simpler","punchy"].map(t => (
             <button key={t} className="chip" disabled={rewriting} onClick={()=>rewriteAllScenesWithTone(t)} aria-busy={rewriting}>{t}</button>
           ))}
+          <button className="chip" disabled={polishing} onClick={polishEachScene} aria-busy={polishing}>{polishing ? 'polishing…' : 'polish each scene'}</button>
           {rewriting && <span className="text-[11px] text-[color:var(--muted)]">rewriting…</span>}
         </div>
 
