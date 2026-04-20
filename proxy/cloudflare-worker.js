@@ -44,8 +44,6 @@ const VENDORS = {
   synthesia: { base: "https://api.synthesia.io", authHeader: (env) => ({ "Authorization": env.SYNTHESIA_KEY }) },
   kling: { base: "https://api.klingai.com", authHeader: (env) => ({ "Authorization": "Bearer " + env.KLING_KEY }) },
   stability: { base: "https://api.stability.ai", authHeader: (env) => ({ "Authorization": "Bearer " + env.STABILITY_KEY }) },
-  suno: { base: "https://studio-api.suno.ai", authHeader: (env) => ({ "Authorization": "Bearer " + env.SUNO_KEY }) },
-  udio: { base: "https://api.udio.com", authHeader: (env) => ({ "Authorization": "Bearer " + env.UDIO_KEY }) },
   perplexity: { base: "https://api.perplexity.ai", authHeader: (env) => ({ "Authorization": "Bearer " + env.PERPLEXITY_KEY }) }
 };
 
