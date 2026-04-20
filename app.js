@@ -193,6 +193,30 @@ async function pingOpenAIToolUse(proxyUrl){
 }
 
 
+async function pingGrokToolUse(proxyUrl){
+  const start = Date.now();
+  try {
+    const url = (proxyUrl || "").replace(/\/$/, "") + "/v1/chat/completions";
+    const r = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "grok-2-latest",
+        max_tokens: 64,
+        tools: [{ type: "function", function: { name: "noop", description: "Reply with ok:true", parameters: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] } } }],
+        tool_choice: { type: "function", function: { name: "noop" } },
+        messages: [{ role: "user", content: "Call the noop function with ok:true." }]
+      })
+    });
+    const txt = await r.text().catch(()=> "");
+    const ms = Date.now() - start;
+    let toolOk = false;
+    try { const j = JSON.parse(txt); toolOk = !!(j && j.choices && j.choices[0] && j.choices[0].message && Array.isArray(j.choices[0].message.tool_calls) && j.choices[0].message.tool_calls.length); } catch(e){}
+    return { ok: r.ok && toolOk, status: r.status, body: (toolOk ? "tool_calls received · " : "") + ms + "ms · " + txt.slice(0, 140) };
+  } catch(e){ return { ok: false, status: 0, body: (e && e.message) || "Network error" }; }
+}
+
+
 function ProviderRow({ provider, path, enabled, onChangePath, onChangeEnabled }){
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState(null);
@@ -202,6 +226,9 @@ function ProviderRow({ provider, path, enabled, onChangePath, onChangeEnabled })
   const [ooTesting, setOoTesting] = useState(false);
   const [ooResult, setOoResult] = useState(null);
   const isOpenAI = provider.id === "openai";
+  const [ggTesting, setGgTesting] = useState(false);
+  const [ggResult, setGgResult] = useState(null);
+  const isGrok = provider.id === "grok";
   const isLocal = provider.id === "local";
   const onTest = async () => {
     if(isLocal){ setResult({ ok: true, status: 200, body: "Local / browser-native capabilities are always available." }); return; }
@@ -219,6 +246,11 @@ function ProviderRow({ provider, path, enabled, onChangePath, onChangeEnabled })
     setOoTesting(true); setOoResult(null);
     const r = await pingOpenAIToolUse(path);
     setOoResult(r); setOoTesting(false);
+  };
+  const onGrokToolUseTest = async () => {
+    setGgTesting(true); setGgResult(null);
+    const r = await pingGrokToolUse(path);
+    setGgResult(r); setGgTesting(false);
   };
   return (
     <div className="card p-4">
@@ -265,7 +297,15 @@ function ProviderRow({ provider, path, enabled, onChangePath, onChangeEnabled })
               <span className={"chip " + (ooResult.ok ? "text-emerald-200 !border-emerald-400/30 bg-emerald-500/10" : "text-rose-200 !border-rose-400/30 bg-rose-500/10")}>
                 {ooResult.ok ? "tool_calls OK" : "Fail"} {ooResult.status||""} <span className="text-[color:var(--muted)] truncate max-w-[280px]">{ooResult.body}</span>
               </span>
+            )}            {isGrok && (
+              <button className="btn" onClick={onGrokToolUseTest} disabled={ggTesting || !path}>{ggTesting ? "Tool-use…" : "Test tool-use"}</button>
             )}
+            {isGrok && ggResult && (
+              <span className={"chip " + (ggResult.ok ? "text-emerald-200 !border-emerald-400/30 bg-emerald-500/10" : "text-rose-200 !border-rose-400/30 bg-rose-500/10")}>
+                {ggResult.ok ? "tool_calls OK" : "Fail"} {ggResult.status||""} <span className="text-[color:var(--muted)] truncate max-w-[280px]">{ggResult.body}</span>
+              </span>
+            )}
+
           </div>
           <div className="mt-2 text-[11px] text-[color:var(--muted)]">
             Paste the public URL of your server-side proxy for {provider.name}. Keys stay on your server; this app only calls your proxy.
