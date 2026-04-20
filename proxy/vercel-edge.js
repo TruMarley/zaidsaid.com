@@ -3,7 +3,7 @@
  *
  * Place this file at: /api/proxy/[...path].js  in your Vercel project.
  * Then set the Edge runtime and add env secrets in the Vercel dashboard:
- *   ELEVEN_KEY, HEYGEN_KEY, OPENAI_KEY, RUNWAY_KEY
+ *   ELEVEN_KEY, HEYGEN_KEY, OPENAI_KEY, RUNWAY_KEY, ANTHROPIC_KEY
  *
  * In Zaidsaid (Settings → Providers) set each vendor's Proxy URL to:
  *   https://YOUR-VERCEL-APP.vercel.app/api/proxy/<vendor>
@@ -35,6 +35,10 @@ const VENDORS = {
   runway: {
     base: "https://api.runwayml.com",
     authHeader: () => ({ "Authorization": "Bearer " + process.env.RUNWAY_KEY })
+  },
+  anthropic: {
+    base: "https://api.anthropic.com",
+    authHeader: () => ({ "x-api-key": process.env.ANTHROPIC_KEY, "anthropic-version": "2023-06-01" })
   }
 };
 
