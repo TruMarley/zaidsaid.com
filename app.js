@@ -941,33 +941,47 @@ function SceneCard({ scene, onField, onRegen, onMove, onRemove, index, total }){
   );
 }
 
-function StepResearch({ project, setProject, setStudioStep }){ const toast = useToast(); const regenClaim = (id) => { const variations = [ "Tighter framing of the same evidence.", "Cross-referenced a second source.", "Narrowed the scope to keep it on-topic.", "Restated as a hook-friendly claim.", ]; setProject({ ...project, research: project.research.map(r => r.id===id ? { ...r, claim: (r.claim + " — " + variations[Math.floor(Math.random()*variations.length)]).slice(0,180), confidence: Math.min(0.99, (r.confidence||0.8) + 0.01) } : r), }); }; const [researchBusy, setResearchBusy] = React.useState(false);
-  const [researchSource, setResearchSource] = React.useState("");
+function StepResearch({ project, setProject, setStudioStep }){ const toast = useToast(); const regenClaim = (id) => { const variations = [ "Tighter framing of the same evidence.", "Cross-referenced a second source.", "Narrowed the scope to keep it on-topic.", "Restated as a hook-friendly claim.", ]; setProject({ ...project, research: project.research.map(r => r.id===id ? { ...r, claim: (r.claim + " — " + variations[Math.floor(Math.random()*variations.length)]).slice(0,180), confidence: Math.min(0.99, (r.confidence||0.8) + 0.01) } : r), }); }; const [researchBusy, setResearchBusy] = useState(false);
+  const [researchSource, setResearchSource] = useState("");
+  const [researchError, setResearchError] = useState("");
   const runResearch = async () => {
-    if (researchBusy) return;
-    const text = (project.source || "").trim();
-    if (!text) { toast && toast.push && toast.push("Paste or fetch source text first", "warn"); return; }
-    setResearchBusy(true); setResearchSource("");
-    const providers = safeGet("providers.cfg", {}) || {};
-    const anth = providers.anthropic;
-    const path = anth && anth.enabled && anth.path ? anth.path : "";
+    console.log("[zs] runResearch invoked");
+    if (researchBusy) { console.log("[zs] researchBusy=true, early return"); return; }
+    const text = String((project && project.source) || "").trim();
+    console.log("[zs] source text length:", text.length);
+    if (!text) { setResearchError("Paste or fetch source text first"); return; }
+    setResearchBusy(true); setResearchSource(""); setResearchError("");
+    let providers = {}; try { providers = safeGet("providers.cfg", {}) || {}; } catch(e) { console.warn("[zs] providers.cfg read failed", e); }
+    const anth = providers && providers.anthropic;
+    const path = anth && anth.enabled && anth.path ? String(anth.path).trim() : "";
+    console.log("[zs] anthropic path configured:", !!path);
     try {
+      let notes = null;
       if (path) {
-        const notes = await researchViaClaude(path, text);
-        const claims = (notes.claims || []).map((c, i) => ({ id: "r" + (i+1) + "_" + Math.random().toString(36).slice(2,6), claim: String(c.claim || "").slice(0, 240), source: String(c.source || "Source pending").slice(0, 140), confidence: Math.max(0.5, Math.min(0.99, Number(c.confidence) || 0.75)) }));
-        setProject({ ...project, research: claims });
+        console.log("[zs] calling researchViaClaude");
+        notes = await researchViaClaude(path, text);
         setResearchSource("claude");
-        toast && toast.push && toast.push("Research synthesized via Claude · " + claims.length + " claims", "success");
       } else {
-        const notes = researchLocal(text);
-        const claims = notes.claims.map((c, i) => ({ id: "r" + (i+1) + "_" + Math.random().toString(36).slice(2,6), claim: c.claim, source: c.source, confidence: c.confidence }));
-        setProject({ ...project, research: claims });
+        console.log("[zs] calling researchLocal");
+        notes = researchLocal(text);
         setResearchSource("local");
-        toast && toast.push && toast.push("Research synthesized locally · " + claims.length + " claims (no Anthropic proxy configured)", "info");
       }
+      const rawClaims = (notes && notes.claims) || [];
+      console.log("[zs] notes returned, claim count:", rawClaims.length);
+      const claims = rawClaims.map((c, i) => ({
+        id: "r" + (i+1) + "_" + Math.random().toString(36).slice(2,6),
+        claim: String((c && c.claim) || "").slice(0, 240),
+        source: String((c && c.source) || "Source pending").slice(0, 140),
+        confidence: Math.max(0.5, Math.min(0.99, Number(c && c.confidence) || 0.75))
+      }));
+      console.log("[zs] setting project.research with", claims.length, "claims");
+      setProject({ ...project, research: claims });
     } catch (err) {
-      toast && toast.push && toast.push("Research failed: " + (err.message || String(err)), "error");
-    } finally { setResearchBusy(false); }
+      console.error("[zs] runResearch error:", err);
+      setResearchError(String(err && err.message || err));
+    } finally {
+      setResearchBusy(false);
+    }
   };
   const addClaim = () => { const nid = "r" + (project.research.length + 1) + "_" + Math.random().toString(36).slice(2,6); setProject({ ...project, research: [...project.research, { id: nid, claim:"New claim — edit me.", source:"Pending source", confidence: 0.7 }], }); }; const advanceToScript = () => { if (setStudioStep) setStudioStep("script"); }; const updateBrief = (field, value) => { setProject({ ...project, [field]: value }); }; const copyBrief = () => { const parts = [ project.logline && ("Logline: " + project.logline), project.hook && ("Hook: " + project.hook), project.audience && ("Audience: " + project.audience), project.angle && ("Angle: " + project.angle), project.cta && ("CTA: " + project.cta), ].filter(Boolean).join("\n"); if (!parts){ toast.push("Nothing to copy yet","warn"); return; } try { navigator.clipboard.writeText(parts); toast.push("Brief copied to clipboard","success"); } catch(_){ toast.push("Copy failed — select manually","error"); } }; return ( <div className="flex flex-col gap-4"> <StudioInputAccepter project={project} setProject={setProject} onAdvance={advanceToScript} toast={toast} /> <StudioPipelineSimulator project={project} setProject={setProject} /> <div className="card p-5"> <div className="flex items-center justify-between gap-2 flex-wrap"> <div> <div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Creative brief</div> <div className="text-lg font-semibold">Logline, hook & angle</div> </div> <div className="flex items-center gap-2"> <button className="btn" onClick={copyBrief}>{I.copy({size:14})} Copy</button> </div> </div> <div className="mt-3 grid md:grid-cols-2 gap-3"> <label className="flex flex-col gap-1"> <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Logline</span> <textarea className="w-full bg-transparent border border-[color:var(--line)] rounded-xl px-3 py-2 text-sm" rows={2} value={project.logline||""} onChange={(e)=>updateBrief("logline", e.target.value)} placeholder="A one-sentence promise of the video." /> </label> <label className="flex flex-col gap-1"> <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Hook</span> <textarea className="w-full bg-transparent border border-[color:var(--line)] rounded-xl px-3 py-2 text-sm" rows={2} value={project.hook||""} onChange={(e)=>updateBrief("hook", e.target.value)} placeholder="First three seconds pattern interrupt." /> </label> <label className="flex flex-col gap-1"> <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Audience</span> <textarea className="w-full bg-transparent border border-[color:var(--line)] rounded-xl px-3 py-2 text-sm" rows={2} value={project.audience||""} onChange={(e)=>updateBrief("audience", e.target.value)} placeholder="Who this is for." /> </label> <label className="flex flex-col gap-1"> <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Angle</span> <textarea className="w-full bg-transparent border border-[color:var(--line)] rounded-xl px-3 py-2 text-sm" rows={2} value={project.angle||""} onChange={(e)=>updateBrief("angle", e.target.value)} placeholder="Why this POV, right now." /> </label> <label className="flex flex-col gap-1 md:col-span-2"> <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Call to action</span> <input className="w-full bg-transparent border border-[color:var(--line)] rounded-xl px-3 py-2 text-sm" value={project.cta||""} onChange={(e)=>updateBrief("cta", e.target.value)} placeholder="What the viewer should do next." /> </label> </div> </div> <div className="card p-5"> <div className="flex items-center justify-between gap-2 flex-wrap"> <div> <div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Research</div> <div className="text-lg font-semibold">Claims & sources</div> </div> <button className="btn" onClick={runResearch} disabled={researchBusy || !(project.source||"").trim()}>{researchBusy ? "Researching…" : "Research with Claude"}</button> {researchSource && (<span className={"chip " + (researchSource === "claude" ? "text-emerald-200 !border-emerald-400/30 bg-emerald-500/10" : "text-sky-200 !border-sky-400/30 bg-sky-500/10")}>{researchSource === "claude" ? "Claude" : "Local"}</span>)} <button className="btn" onClick={addClaim}>{I.plus({size:14})} Add claim</button> </div> <div className="mt-3 grid md:grid-cols-2 gap-3"> {project.research.map(r => ( <div key={r.id} className="rounded-xl border border-[color:var(--line)] p-3"> <div className="text-sm text-white">{r.claim}</div> <div className="text-[11px] text-[color:var(--muted)] mt-1">{r.source}</div> <div className="flex items-center justify-between mt-2"> <span className="chip">Confidence {Math.round((r.confidence||0)*100)}%</span> <button className="chip" onClick={()=>regenClaim(r.id)}>{I.refresh({size:12})} Regenerate</button> </div> </div> ))} </div> </div> </div> );}
 
