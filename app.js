@@ -346,9 +346,9 @@ function HealthPanel({ filterCap }){
   const [results, setResults] = React.useState([]);
   const [lastRun, setLastRun] = React.useState(0);
   const collectProviders = () => {
-    let cfg = {}; try { cfg = safeGet('providers.cfg', {}) || {}; } catch(e){}
+    let cfg = {}; try { cfg = safeGet('providers', {}) || {}; } catch(e){}
     const list = [];
-    Object.keys(cfg).forEach(k => { const p = cfg[k]; if(p && typeof p === 'object'){ list.push({ name: k, url: p.url || '' }); } });
+    Object.keys(cfg).forEach(k => { const p = cfg[k]; if(p && typeof p === 'object'){ list.push({ name: k, url: p.proxyUrl || '' }); } });
     return list;
   };
   const run = async () => {
@@ -961,10 +961,10 @@ const ttsLocal = (text) => {
 const pingProviders = async (providers) => {
   const results = [];
   for (const p of providers) {
-    if(!p.url){ results.push({ name: p.name, ok:false, ms:0, err:'no proxy URL configured' }); continue; }
+    if(!p.proxyUrl){ results.push({ name: p.name, ok:false, ms:0, err:'no proxy URL configured' }); continue; }
     const t0 = performance.now();
     try {
-      const u = (p.url||'').replace(/\/$/, '') + '/ping';
+      const u = (p.proxyUrl||'').replace(/\/$/, '') + '/ping';
       const res = await fetch(u, { method:'GET' });
       const ms = Math.round(performance.now() - t0);
       results.push({ name: p.name, ok: res.ok, ms, status: res.status, err: res.ok ? '' : ('HTTP ' + res.status) });
@@ -1225,8 +1225,8 @@ function StepScript({ project, setProject }){
     const scenes = (project && project.scenes) || [];
     if(!scenes.length){ toast.push('No scenes to polish.', 'error'); return; }
     setPolishing(true);
-    let providers = {}; try { providers = safeGet('providers.cfg', {}) || {}; } catch(e){}
-    const path = providers && providers.anthropic && providers.anthropic.url;
+    let providers = {}; try { providers = safeGet('providers', {}) || {}; } catch(e){}
+    const path = providers && providers.anthropic && providers.anthropic.proxyUrl;
     const brief = (project && (project.brief || project.idea || project.title)) || '';
     const next = [];
     let usedClaude = 0, usedLocal = 0;
@@ -1354,8 +1354,8 @@ function StepStoryboard({ project, setProject }){
     const scenes = (project && project.scenes) || [];
     if(!scenes.length){ setImgErr('No scenes to render.'); return; }
     setImgBusy(true); setImgErr(''); setImgInfo('');
-    let providers = {}; try { providers = safeGet('providers.cfg', {}) || {}; } catch(e){}
-    const path = providers && providers.stability && providers.stability.url;
+    let providers = {}; try { providers = safeGet('providers', {}) || {}; } catch(e){}
+    const path = providers && providers.stability && providers.stability.proxyUrl;
     const next = []; let okClaude=0, okLocal=0;
     for(const s of scenes){
       const prompt = (s.shot || s.title || s.voLine || 'cinematic establishing shot').slice(0,400);
@@ -1525,8 +1525,8 @@ function StepVoice({ project, setProject }){
     const scenes = (project && project.scenes) || [];
     if(!scenes.length){ setVoiceErr('No scenes to voice.'); return; }
     setVoiceBusy(true); setVoiceErr(''); setVoiceInfo('');
-    let providers = {}; try { providers = safeGet('providers.cfg', {}) || {}; } catch(e){}
-    const path = providers && providers.elevenlabs && providers.elevenlabs.url;
+    let providers = {}; try { providers = safeGet('providers', {}) || {}; } catch(e){}
+    const path = providers && providers.elevenlabs && providers.elevenlabs.proxyUrl;
     const next = []; let okEl=0, okLocal=0, errs=0;
     for(const s of scenes){
       const text = (s.voLine || s.script || s.title || '').toString();
@@ -2268,7 +2268,7 @@ function RepurposeRealAnalyze({ project, setProject }){
     const text = (src || project.transcriptText || project.source || '').trim();
     if(!text){ setErr('Paste a transcript, description, or URL summary first.'); return; }
     setBusy(true); setErr(''); setInfo('');
-    let providers = {}; try { providers = safeGet('providers.cfg', {}) || {}; } catch(e){}
+    let providers = {}; try { providers = safeGet('providers', {}) || {}; } catch(e){}
     const anth = providers && providers.anthropic;
     const path = anth && anth.url ? anth.url : '';
     const target = Number(project.targetCount)||5;
