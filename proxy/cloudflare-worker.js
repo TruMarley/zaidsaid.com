@@ -8,6 +8,7 @@
  *   wrangler secret put OPENAI_KEY
  *   wrangler secret put RUNWAY_KEY
  *   wrangler secret put ANTHROPIC_KEY
+ * wrangler secret put XAI_KEY
  *
  * Then in Zaidsaid (Settings → Providers), set each vendor's Proxy URL to
  * your deployed worker, e.g. https://my-zaidsaid-proxy.workers.dev/elevenlabs
@@ -38,7 +39,8 @@ const VENDORS = {
   anthropic: {
     base: "https://api.anthropic.com",
     authHeader: (env) => ({ "x-api-key": env.ANTHROPIC_KEY, "anthropic-version": "2023-06-01" })
-  }
+  },
+  grok: { base: "https://api.x.ai", authHeader: (env) => ({ "Authorization": "Bearer " + env.XAI_KEY }) }
 };
 
 function corsHeaders(req) {
