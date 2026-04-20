@@ -1092,7 +1092,7 @@ function SceneCard({ scene, onField, onRegen, onMove, onRemove, index, total }){
         </label>
         <label className="block">
           <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Shot</span>
-          {scene.shot&&<img src={`https://zaidsaid-proxy.zaidsaid.workers.dev/pollinations/prompt/${encodeURIComponent(scene.shot)}?width=640&height=360&nologo=true&model=flux`} alt="storyboard" className="w-full rounded-lg mt-1 mb-1" style={{aspectRatio:'16/9',objectFit:'cover'}}/>}
+          {scene.shot&&<img src={`https://zaidsaid-proxy.zaidsaid.workers.dev/pollinations/prompt/${encodeURIComponent(scene.shot)}?width=640&height=360&nologo=true&model=turbo`} alt="storyboard" className="w-full rounded-lg mt-1 mb-1" style={{aspectRatio:'16/9',objectFit:'cover'}}/>}
           <textarea
             value={scene.shot}
             onChange={(e)=>onField("shot", e.target.value)}
@@ -1459,7 +1459,7 @@ function StepMotion({ project, setProject }){
   const canvasRef = React.useRef(null);
   const rafRef = React.useRef(null);
   const [playing, setPlaying] = React.useState(false);
-  const imgs = React.useMemo(() => (project.scenes||[]).filter(s=>s.shot).map(s=>"https://zaidsaid-proxy.zaidsaid.workers.dev/pollinations/prompt/"+encodeURIComponent(s.shot)+"?width=640&height=360&nologo=true&model=flux"), [project.storyboard]);
+  const imgs = React.useMemo(() => (project.scenes||[]).filter(s=>s.shot).map(s=>"https://zaidsaid-proxy.zaidsaid.workers.dev/pollinations/prompt/"+encodeURIComponent(s.shot.replace(/[:%+]/g," ").replace(/\s+/g," ").trim())+"?width=640&height=360&nologo=true&model=turbo"), [project.storyboard]);
   const stopKenBurns = React.useCallback(() => { if (rafRef.current) cancelAnimationFrame(rafRef.current); setPlaying(false); }, []);
   const playKenBurns = React.useCallback(() => {
     const canvas = canvasRef.current;
@@ -1472,7 +1472,7 @@ function StepMotion({ project, setProject }){
     setPlaying(true);
     const tick = () => {
       const img = images[imgIdx % images.length];
-      if (!img.complete) { rafRef.current = requestAnimationFrame(tick); return; }
+      if (!img.complete) { rafRef.current = requestAnimationFrame(tick); return; } if (img.naturalWidth === 0) { imgIdx++; frame = 0; if (imgIdx >= images.length) { stopKenBurns(); return; } rafRef.current = requestAnimationFrame(tick); return; }
       const p = frame / FPIMG;
       const scale = 1 + p * 0.07;
       const ox = (W * (scale-1)) * (imgIdx % 2 === 0 ? -0.5 : 0.5);
@@ -1902,7 +1902,7 @@ function StepExport({ project, setProject }){
           {project.cta && (<div className="rounded-xl border border-[color:var(--line)] p-3 md:col-span-2"><div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Call to action</div><div className="mt-1">{project.cta}</div></div>)}
         </div><div className="mt-4 flex items-center gap-2">
           <button className="btn btn-primary" onClick={async()=>{
-  const shots = (project.scenes||[]).filter(s=>s.shot).map(s=>({imageUrl:"https://zaidsaid-proxy.zaidsaid.workers.dev/pollinations/prompt/"+encodeURIComponent(s.shot)+"?width=640&height=360&nologo=true&model=flux"}));
+  const shots = (project.scenes||[]).filter(s=>s.shot).map(s=>({imageUrl:"https://zaidsaid-proxy.zaidsaid.workers.dev/pollinations/prompt/"+encodeURIComponent(s.shot)+"?width=640&height=360&nologo=true&model=turbo"}));
   if (!shots.length) { toast && toast("No storyboard images — run Storyboard stage first","error"); return; }
   const offscreen = document.createElement("canvas");
   offscreen.width = 1280; offscreen.height = 720;
