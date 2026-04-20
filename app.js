@@ -801,7 +801,7 @@ function StepScript({ project, setProject }){
   const regenerateAll = () => {
     const next = project.scenes.map(s => ({ ...s, voLine: s.voLine + " " + sceneRegenerateBlurbs("voLine") }));
     setProject({ ...project, scenes: next });
-  };  const toast = useToast();
+  };  const _rawToast = useToast(); const toast = (_rawToast && typeof _rawToast.push === "function") ? _rawToast : { push: () => {} };
   const [rewriting, setRewriting] = useState(false);
   const getProxyForScript = () => {
     let picks = {}; try { picks = JSON.parse(localStorage.getItem("zaidsaid.v2.arch.picks") || "{}"); } catch(_){}
