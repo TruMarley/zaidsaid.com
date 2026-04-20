@@ -348,7 +348,7 @@ function HealthPanel({ filterCap }){
   const collectProviders = () => {
     let cfg = {}; try { cfg = safeGet('providers', {}) || {}; } catch(e){}
     const list = [];
-    Object.keys(cfg).forEach(k => { const p = cfg[k]; if(p && typeof p === 'object'){ list.push({ name: k, url: p.proxyUrl || '' }); } });
+    Object.keys(cfg).forEach(k => { const p = cfg[k]; if(p && typeof p === 'object'){ list.push({ name: k, proxyUrl: p.proxyUrl || '' }); } });
     return list;
   };
   const run = async () => {
