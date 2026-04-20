@@ -631,71 +631,7 @@ function StudioBrandKitSelect({ project, setProject }){
   );
 }
 
-function StudioInputAccepter({ project, setProject }){
-  return (
-    <div className="card p-5">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div>
-          <div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Source</div>
-          <div className="text-lg font-semibold">What are we turning into a video?</div>
-        </div>
-        <div className="flex flex-wrap items-center gap-1">
-          {STUDIO_INPUT_KINDS.map(k => {
-            const active = project.kind === k.k;
-            return (
-              <button key={k.k}
-                onClick={()=>setProject({ ...project, kind: k.k })}
-                aria-pressed={active}
-                className={"px-2.5 py-1.5 rounded-xl text-[12px] border " + (active ? "border-white/20 bg-white/10 text-white" : "border-[color:var(--line)] text-[color:var(--muted)] hover:text-white")}>
-                {k.label}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-      <div className="mt-4 grid md:grid-cols-3 gap-3">
-        <label className="md:col-span-2 block">
-          <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Prompt or paste</span>
-          <textarea
-            value={project.source || ""}
-            onChange={(e)=>setProject({ ...project, source: e.target.value })}
-            placeholder="Paste text, a URL, or describe the video you want."
-            rows={6}
-            className="mt-1 w-full bg-transparent border border-[color:var(--line)] rounded-xl p-3 text-sm focus:outline-none focus:border-white/20"
-          />
-        </label>
-        <div>
-          <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Upload (UI only)</span>
-          <div className="mt-1 border border-dashed border-[color:var(--line)] rounded-xl p-6 text-center text-[12px] text-[color:var(--muted)]">
-            <div className="text-white/80 font-semibold">Drop a file</div>
-            <div className="mt-1">Audio · PDF · Image · Podcast</div>
-            <div className="mt-3 opacity-70">Uploads wire up in a later stage.</div>
-            <button type="button" className="btn mt-3" aria-disabled="true" onClick={(e)=>e.preventDefault()}>
-              Choose file
-            </button>
-          </div>
-          <div className="text-[11px] text-[color:var(--muted)] mt-2">
-            Currently selected: <span className="text-white">{(STUDIO_INPUT_KINDS.find(x=>x.k===project.kind)||{}).label || "Text"}</span>
-          </div>
-        </div>
-      </div>
-      <div className="mt-3 flex items-center gap-2 flex-wrap">
-        <input
-          value={project.name || ""}
-          onChange={(e)=>setProject({ ...project, name: e.target.value })}
-          placeholder="Project name"
-          className="bg-transparent border border-[color:var(--line)] rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-white/20 flex-1 min-w-[240px]"
-        />
-        <select
-          value={project.language || "English"}
-          onChange={(e)=>setProject({ ...project, language: e.target.value })}
-          className="bg-transparent border border-[color:var(--line)] rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-white/20">
-          {ARCHIVE_LANGS.map(l => <option key={l} value={l} style={{background:"#0b0b10"}}>{l}</option>)}
-        </select>
-      </div>
-    </div>
-  );
-}
+function StudioInputAccepter({ project, setProject, onAdvance, toast }){ const [busy, setBusy] = React.useState(false); const [err, setErr] = React.useState(""); const [diag, setDiag] = React.useState(""); const getProviderForResearch = () => { let archId = "research"; let picks = {}; try { picks = JSON.parse(localStorage.getItem("zaidsaid.v2.arch.picks") || "{}"); } catch(e){} const providerId = picks[archId] || (typeof PIPELINE_STAGES !== "undefined" ? (PIPELINE_STAGES.find(x => x.id === archId) || {}).defaultProvider : "anthropic") || "anthropic"; let providers = {}; try { providers = JSON.parse(localStorage.getItem("zaidsaid.v2.providers") || "{}"); } catch(e){} const rec = providers[providerId] || {}; return { providerId, proxyUrl: (rec.proxyUrl || "").trim(), enabled: !!rec.enabled }; }; const localFallback = (text) => { const paragraphs = String(text || "").split(/\n\s*\n/).map(s => s.trim()).filter(Boolean); const sentences = String(text || "").split(/(?<=[\.!?])\s+/).map(s => s.trim()).filter(s => s.length > 6); const source = paragraphs.length >= 3 ? paragraphs : (sentences.length >= 3 ? sentences : [String(text||"").trim()]); const beatLabels = ["Hook", "Setup", "Proof", "Twist", "Callback", "Payoff", "CTA"]; const n = Math.max(3, Math.min(6, source.length)); const chunk = Math.max(1, Math.floor(source.length / n)); const beats = []; for (let i = 0; i < n; i++) { const slice = source.slice(i*chunk, (i===n-1) ? source.length : (i+1)*chunk).join(" ").trim(); beats.push({ title: beatLabels[i] || ("Beat " + (i+1)), script: slice.slice(0, 320) }); } const firstWords = String(text||"").trim().split(/\s+/).slice(0, 18).join(" "); return { logline: firstWords + (firstWords.length ? "…" : ""), audience: "General viewers curious about the topic", angle: "Explain it in plain language with one memorable takeaway.", hook: beats[0] ? beats[0].script.slice(0, 120) : "Open with a concrete, surprising claim.", cta: "Follow for the next one.", beats }; }; const callAnthropic = async (proxyUrl, sourceText) => { const url = proxyUrl.replace(/\/$/, "") + "/v1/messages"; const platform = (project.platforms && project.platforms[0]) || "TikTok"; const duration = project.durationHint || 60; const language = project.language || "English"; const brandHint = project.brandKitId ? ("Brand kit id: " + project.brandKitId) : ""; const system = "You are a senior short-form video producer. Turn the user's source text into a tight creative brief and a beat-by-beat outline. Use the provided tool and return strict JSON only via tool_use."; const userMsg = "PLATFORM: " + platform + "\nTARGET DURATION: " + duration + "s\nLANGUAGE: " + language + "\n" + brandHint + "\n\nSOURCE:\n" + sourceText; const tool = { name: "video_brief", description: "Return a creative brief and a beat-by-beat outline for a short-form video.", input_schema: { type: "object", properties: { logline: { type: "string", description: "One-sentence summary of the video, max 140 chars." }, audience: { type: "string", description: "Who this is for." }, angle: { type: "string", description: "The specific angle or take." }, hook: { type: "string", description: "Opening 3-5 seconds, specific and concrete." }, cta: { type: "string", description: "Closing call-to-action." }, beats: { type: "array", description: "Ordered list of scenes/beats.", items: { type: "object", properties: { title: { type: "string" }, script: { type: "string", description: "1-3 sentences of on-screen narration." } }, required: ["title","script"] } } }, required: ["logline","hook","beats"] } }; const body = { model: "claude-3-5-sonnet-latest", max_tokens: 1200, system, tools: [tool], tool_choice: { type: "tool", name: "video_brief" }, messages: [ { role: "user", content: userMsg } ] }; const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json", "anthropic-version": "2023-06-01" }, body: JSON.stringify(body) }); const ct = res.headers.get("content-type") || ""; const raw = ct.includes("json") ? await res.json().catch(()=>null) : await res.text().catch(()=>""); if (!res.ok) { const msg = (raw && raw.error && raw.error.message) || (typeof raw === "string" ? raw.slice(0,200) : ("HTTP " + res.status)); throw new Error(msg); } const blocks = Array.isArray(raw && raw.content) ? raw.content : []; const toolBlock = blocks.find(b => b && b.type === "tool_use" && b.name === "video_brief"); if (!toolBlock || !toolBlock.input) throw new Error("Model did not return tool_use output"); return toolBlock.input; }; const applyBrief = (brief) => { const beats = Array.isArray(brief && brief.beats) ? brief.beats : []; const total = Math.max(15, project.durationHint || 60); const per = Math.max(3, Math.round(total / Math.max(1, beats.length))); const scenes = beats.map((b, i) => ({ id: "s" + (i+1), title: (b.title || ("Beat " + (i+1))).slice(0, 80), script: (b.script || "").slice(0, 800), duration: per, aroll: (project.scenes && project.scenes[i] && project.scenes[i].aroll) || "avatar", broll: (project.scenes && project.scenes[i] && project.scenes[i].broll) || [] })); setProject({ ...project, logline: brief.logline || project.logline || "", hook: brief.hook || project.hook || "", cta: brief.cta || project.cta || "", audience: brief.audience || project.audience || "", angle: brief.angle || project.angle || "", scenes: scenes.length ? scenes : (project.scenes || []) }); }; const runBrief = async () => { const text = (project.source || "").trim(); if (!text) { setErr("Paste a prompt, story, or source text first."); return; } setErr(""); setDiag(""); setBusy(true); const { providerId, proxyUrl, enabled } = getProviderForResearch(); try { if (providerId === "anthropic" && proxyUrl && enabled) { setDiag("Calling " + providerId + " via proxy…"); const brief = await callAnthropic(proxyUrl, text); applyBrief(brief); toast && toast("Brief generated via Claude · " + (brief.beats||[]).length + " beats", "success"); } else { setDiag(providerId === "anthropic" ? "No proxy URL configured — using local outline." : "Provider '" + providerId + "' not wired yet in Studio — using local outline."); const brief = localFallback(text); applyBrief(brief); toast && toast("Brief generated locally · " + brief.beats.length + " beats", "info"); } setBusy(false); onAdvance && setTimeout(() => onAdvance(), 350); } catch (e) { setBusy(false); const msg = (e && e.message) || String(e); setErr(msg); try { const brief = localFallback(text); applyBrief(brief); toast && toast("Cloud call failed — used local outline (" + brief.beats.length + " beats)", "warn"); onAdvance && setTimeout(() => onAdvance(), 450); } catch(_){} } }; const sourceLen = (project.source || "").trim().length; const { providerId, proxyUrl, enabled } = getProviderForResearch(); const willUseCloud = providerId === "anthropic" && proxyUrl && enabled; return ( <div className="card p-5"> <div className="flex items-center justify-between gap-3 flex-wrap"> <div> <div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Source</div> <div className="text-lg font-semibold">What are we turning into a video?</div> </div> <div className="flex flex-wrap items-center gap-1"> {STUDIO_INPUT_KINDS.map(k => { const active = project.kind === k.k; return ( <button key={k.k} onClick={()=>setProject({ ...project, kind: k.k })} aria-pressed={active} className={"px-2.5 py-1.5 rounded-xl text-[12px] border " + (active ? "border-white/20 bg-white/10 text-white" : "border-[color:var(--line)] text-[color:var(--muted)] hover:text-white")}> {k.label} </button> ); })} </div> </div> <div className="mt-4 grid md:grid-cols-3 gap-3"> <label className="md:col-span-2 block"> <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Prompt or paste</span> <textarea value={project.source || ""} onChange={(e)=>setProject({ ...project, source: e.target.value })} placeholder="Paste text, a URL, or describe the video you want." rows={6} className="mt-1 w-full bg-transparent border border-[color:var(--line)] rounded-xl p-3 text-sm focus:outline-none focus:border-white/20" /> </label> <div> <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Upload (UI only)</span> <div className="mt-1 border border-dashed border-[color:var(--line)] rounded-xl p-6 text-center text-[12px] text-[color:var(--muted)]"> <div className="text-white/80 font-semibold">Drop a file</div> <div className="mt-1">Audio · PDF · Image · Podcast</div> <div className="mt-3 opacity-70">Uploads wire up in a later stage.</div> <button type="button" className="btn mt-3" aria-disabled="true" onClick={(e)=>e.preventDefault()}> Choose file </button> </div> <div className="text-[11px] text-[color:var(--muted)] mt-2"> Currently selected: <span className="text-white">{(STUDIO_INPUT_KINDS.find(x=>x.k===project.kind)||{}).label || "Text"}</span> </div> </div> </div> <div className="mt-3 flex items-center gap-2 flex-wrap"> <input value={project.name || ""} onChange={(e)=>setProject({ ...project, name: e.target.value })} placeholder="Project name" className="bg-transparent border border-[color:var(--line)] rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-white/20 flex-1 min-w-[240px]" /> <select value={project.language || "English"} onChange={(e)=>setProject({ ...project, language: e.target.value })} className="bg-transparent border border-[color:var(--line)] rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-white/20"> {ARCHIVE_LANGS.map(l => <option key={l} value={l} style={{background:"#0b0b10"}}>{l}</option>)} </select> </div> <div className="mt-4 rounded-xl border border-[color:var(--line)] bg-white/[0.02] p-3 md:p-4 flex items-start md:items-center justify-between gap-3 flex-wrap"> <div className="flex items-start gap-3 min-w-0"> <span className="w-8 h-8 shrink-0 rounded-lg bg-white/10 flex items-center justify-center">{I.spark({size:14})}</span> <div className="min-w-0"> <div className="text-sm font-semibold">Generate brief & outline</div> <div className="text-[12px] text-[color:var(--muted)]"> {willUseCloud ? ("Uses Claude via your configured proxy (" + providerId + "). Returns a structured brief and populates your scenes.") : ("Runs a local outline from your prompt. Configure an Anthropic proxy in Settings to use Claude.")} </div> <div className="text-[11px] mt-1 text-[color:var(--muted)]"> Source length: <span className={sourceLen ? "text-white" : "text-rose-300"}>{sourceLen}</span> chars · Provider: <span className="text-white">{providerId}{willUseCloud ? "" : " (local fallback)"}</span> </div> </div> </div> <div className="flex items-center gap-2"> <button type="button" onClick={runBrief} disabled={busy || !sourceLen} className={"btn " + (busy || !sourceLen ? "opacity-60 cursor-not-allowed" : "btn-primary")}> {I.spark({size:14})} {busy ? "Working…" : "Generate brief & outline"} </button> <button type="button" onClick={()=> onAdvance && onAdvance()} className="btn btn-ghost text-xs"> Skip — edit manually </button> </div> </div> {(diag || err) && ( <div className="mt-3 text-[12px] flex flex-col gap-1"> {diag && !err && <div className="text-[color:var(--muted)]">{diag}</div>} {err && <div className="text-rose-300">Error: {err}</div>} </div> )} </div> );}
 
 function StudioPipelineSimulator({ project, setProject }){
   const [running, setRunning] = useState(false);
@@ -846,54 +782,7 @@ function SceneCard({ scene, onField, onRegen, onMove, onRemove, index, total }){
   );
 }
 
-function StepResearch({ project, setProject }){
-  const regenClaim = (id) => {
-    const variations = [
-      "Tighter framing of the same evidence.",
-      "Cross-referenced a second source.",
-      "Narrowed the scope to keep it on-topic.",
-      "Restated as a hook-friendly claim.",
-    ];
-    setProject({
-      ...project,
-      research: project.research.map(r => r.id===id ? { ...r, claim: (r.claim + " — " + variations[Math.floor(Math.random()*variations.length)]).slice(0,180), confidence: Math.min(0.99, (r.confidence||0.8) + 0.01) } : r),
-    });
-  };
-  const addClaim = () => {
-    const nid = "r" + (project.research.length + 1) + "_" + Math.random().toString(36).slice(2,6);
-    setProject({
-      ...project,
-      research: [...project.research, { id: nid, claim:"New claim — edit me.", source:"Pending source", confidence: 0.7 }],
-    });
-  };
-  return (
-    <div className="flex flex-col gap-4">
-      <StudioInputAccepter project={project} setProject={setProject} />
-      <StudioPipelineSimulator project={project} setProject={setProject} />
-      <div className="card p-5">
-        <div className="flex items-center justify-between gap-2 flex-wrap">
-          <div>
-            <div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Research</div>
-            <div className="text-lg font-semibold">Claims & sources</div>
-          </div>
-          <button className="btn" onClick={addClaim}>{I.plus({size:14})} Add claim</button>
-        </div>
-        <div className="mt-3 grid md:grid-cols-2 gap-3">
-          {project.research.map(r => (
-            <div key={r.id} className="rounded-xl border border-[color:var(--line)] p-3">
-              <div className="text-sm text-white">{r.claim}</div>
-              <div className="text-[11px] text-[color:var(--muted)] mt-1">{r.source}</div>
-              <div className="flex items-center justify-between mt-2">
-                <span className="chip">Confidence {Math.round((r.confidence||0)*100)}%</span>
-                <button className="chip" onClick={()=>regenClaim(r.id)}>{I.refresh({size:12})} Regenerate</button>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
+function StepResearch({ project, setProject, setStudioStep }){ const toast = useToast(); const regenClaim = (id) => { const variations = [ "Tighter framing of the same evidence.", "Cross-referenced a second source.", "Narrowed the scope to keep it on-topic.", "Restated as a hook-friendly claim.", ]; setProject({ ...project, research: project.research.map(r => r.id===id ? { ...r, claim: (r.claim + " — " + variations[Math.floor(Math.random()*variations.length)]).slice(0,180), confidence: Math.min(0.99, (r.confidence||0.8) + 0.01) } : r), }); }; const addClaim = () => { const nid = "r" + (project.research.length + 1) + "_" + Math.random().toString(36).slice(2,6); setProject({ ...project, research: [...project.research, { id: nid, claim:"New claim — edit me.", source:"Pending source", confidence: 0.7 }], }); }; const advanceToScript = () => { if (setStudioStep) setStudioStep("script"); }; return ( <div className="flex flex-col gap-4"> <StudioInputAccepter project={project} setProject={setProject} onAdvance={advanceToScript} toast={toast} /> <StudioPipelineSimulator project={project} setProject={setProject} /> <div className="card p-5"> <div className="flex items-center justify-between gap-2 flex-wrap"> <div> <div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Research</div> <div className="text-lg font-semibold">Claims & sources</div> </div> <button className="btn" onClick={addClaim}>{I.plus({size:14})} Add claim</button> </div> <div className="mt-3 grid md:grid-cols-2 gap-3"> {project.research.map(r => ( <div key={r.id} className="rounded-xl border border-[color:var(--line)] p-3"> <div className="text-sm text-white">{r.claim}</div> <div className="text-[11px] text-[color:var(--muted)] mt-1">{r.source}</div> <div className="flex items-center justify-between mt-2"> <span className="chip">Confidence {Math.round((r.confidence||0)*100)}%</span> <button className="chip" onClick={()=>regenClaim(r.id)}>{I.refresh({size:12})} Regenerate</button> </div> </div> ))} </div> </div> </div> );}
 
 function StepScript({ project, setProject }){
   const scriptText = project.scenes.map((s,i) => "Scene " + (i+1) + " — " + s.title + "\n" + s.voLine).join("\n\n");
@@ -1325,7 +1214,7 @@ function StudioTab({ setTab, studioStep, setStudioStep }){
   const goto = (id) => setStudioStep(id);
   const renderStep = () => {
     switch(step){
-      case "research":   return <StepResearch    project={project} setProject={setProject} />;
+      case "research": return <StepResearch project={project} setProject={setProject} setStudioStep={setStudioStep} />;
       case "script":     return <StepScript      project={project} setProject={setProject} />;
       case "storyboard": return <StepStoryboard  project={project} setProject={setProject} />;
       case "assets":     return <StepAssets      project={project} setProject={setProject} />;
