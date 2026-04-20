@@ -3,7 +3,7 @@
  *
  * Place this file at: /api/proxy/[...path].js  in your Vercel project.
  * Then set the Edge runtime and add env secrets in the Vercel dashboard:
- *   ELEVEN_KEY, HEYGEN_KEY, OPENAI_KEY, RUNWAY_KEY, ANTHROPIC_KEY
+ *   ELEVEN_KEY, HEYGEN_KEY, OPENAI_KEY, RUNWAY_KEY, ANTHROPIC_KEY, XAI_KEY
  *
  * In Zaidsaid (Settings → Providers) set each vendor's Proxy URL to:
  *   https://YOUR-VERCEL-APP.vercel.app/api/proxy/<vendor>
@@ -39,7 +39,8 @@ const VENDORS = {
   anthropic: {
     base: "https://api.anthropic.com",
     authHeader: () => ({ "x-api-key": process.env.ANTHROPIC_KEY, "anthropic-version": "2023-06-01" })
-  }
+  },
+  grok: { base: "https://api.x.ai", authHeader: () => ({ "Authorization": "Bearer " + process.env.XAI_KEY }) }
 };
 
 function corsHeaders(req) {
