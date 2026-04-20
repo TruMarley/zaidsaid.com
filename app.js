@@ -169,6 +169,29 @@ async function pingAnthropicToolUse(proxyUrl){
     return { ok: r.ok && toolOk, status: r.status, body: (toolOk ? "tool_use received · " : "") + ms + "ms · " + txt.slice(0, 140) };
   } catch(e){ return { ok: false, status: 0, body: (e && e.message) || "Network error" }; }
 }
+async function pingOpenAIToolUse(proxyUrl){
+  const start = Date.now();
+  try {
+    const url = (proxyUrl || "").replace(/\/$/, "") + "/v1/chat/completions";
+    const r = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        max_tokens: 64,
+        tools: [{ type: "function", function: { name: "noop", description: "Reply with ok:true", parameters: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] } } }],
+        tool_choice: { type: "function", function: { name: "noop" } },
+        messages: [{ role: "user", content: "Call the noop function with ok:true." }]
+      })
+    });
+    const txt = await r.text().catch(()=> "");
+    const ms = Date.now() - start;
+    let toolOk = false;
+    try { const j = JSON.parse(txt); toolOk = !!(j && j.choices && j.choices[0] && j.choices[0].message && Array.isArray(j.choices[0].message.tool_calls) && j.choices[0].message.tool_calls.length); } catch(e){}
+    return { ok: r.ok && toolOk, status: r.status, body: (toolOk ? "tool_calls received · " : "") + ms + "ms · " + txt.slice(0, 140) };
+  } catch(e){ return { ok: false, status: 0, body: (e && e.message) || "Network error" }; }
+}
+
 
 function ProviderRow({ provider, path, enabled, onChangePath, onChangeEnabled }){
   const [testing, setTesting] = useState(false);
@@ -176,6 +199,9 @@ function ProviderRow({ provider, path, enabled, onChangePath, onChangeEnabled })
   const [tuTesting, setTuTesting] = useState(false);
   const [tuResult, setTuResult] = useState(null);
   const isAnthropic = provider.id === "anthropic";
+  const [ooTesting, setOoTesting] = useState(false);
+  const [ooResult, setOoResult] = useState(null);
+  const isOpenAI = provider.id === "openai";
   const isLocal = provider.id === "local";
   const onTest = async () => {
     if(isLocal){ setResult({ ok: true, status: 200, body: "Local / browser-native capabilities are always available." }); return; }
@@ -188,6 +214,11 @@ function ProviderRow({ provider, path, enabled, onChangePath, onChangeEnabled })
     setTuTesting(true); setTuResult(null);
     const r = await pingAnthropicToolUse(path);
     setTuResult(r); setTuTesting(false);
+  };
+  const onOpenAIToolUseTest = async () => {
+    setOoTesting(true); setOoResult(null);
+    const r = await pingOpenAIToolUse(path);
+    setOoResult(r); setOoTesting(false);
   };
   return (
     <div className="card p-4">
@@ -225,6 +256,14 @@ function ProviderRow({ provider, path, enabled, onChangePath, onChangeEnabled })
             {isAnthropic && tuResult && (
               <span className={"chip " + (tuResult.ok ? "text-emerald-200 !border-emerald-400/30 bg-emerald-500/10" : "text-rose-200 !border-rose-400/30 bg-rose-500/10")}>
                 {tuResult.ok ? "tool_use OK" : "Fail"} {tuResult.status||""} <span className="text-[color:var(--muted)] truncate max-w-[280px]">{tuResult.body}</span>
+              </span>
+            )}
+            {isOpenAI && (
+              <button className="btn" onClick={onOpenAIToolUseTest} disabled={ooTesting || !path}>{ooTesting ? "Tool-use…" : "Test tool-use"}</button>
+            )}
+            {isOpenAI && ooResult && (
+              <span className={"chip " + (ooResult.ok ? "text-emerald-200 !border-emerald-400/30 bg-emerald-500/10" : "text-rose-200 !border-rose-400/30 bg-rose-500/10")}>
+                {ooResult.ok ? "tool_calls OK" : "Fail"} {ooResult.status||""} <span className="text-[color:var(--muted)] truncate max-w-[280px]">{ooResult.body}</span>
               </span>
             )}
           </div>
