@@ -40,11 +40,7 @@ const VENDORS = {
     base: "https://api.anthropic.com",
     authHeader: (env) => ({ "x-api-key": env.ANTHROPIC_KEY, "anthropic-version": "2023-06-01" })
   },
-  grok: { base: "https://api.x.ai", authHeader: (env) => ({ "Authorization": "Bearer " + env.XAI_KEY }) },
-  synthesia: { base: "https://api.synthesia.io", authHeader: (env) => ({ "Authorization": env.SYNTHESIA_KEY }) },
-  kling: { base: "https://api.klingai.com", authHeader: (env) => ({ "Authorization": "Bearer " + env.KLING_KEY }) },
-  stability: { base: "https://api.stability.ai", authHeader: (env) => ({ "Authorization": "Bearer " + env.STABILITY_KEY }) },
-  perplexity: { base: "https://api.perplexity.ai", authHeader: (env) => ({ "Authorization": "Bearer " + env.PERPLEXITY_KEY }) }
+  grok: { base: "https://api.x.ai", authHeader: (env) => ({ "Authorization": "Bearer " + env.XAI_KEY }) }
 };
 
 function corsHeaders(req) {
@@ -53,7 +49,7 @@ function corsHeaders(req) {
   return {
     "Access-Control-Allow-Origin": allow,
     "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, x-api-key, anthropic-version",
     "Access-Control-Max-Age": "86400"
   };
 }
@@ -69,7 +65,7 @@ export default {
     }
 
     // Health check — used by Zaidsaid's "Test" button
-    if (url.pathname === "/ping" || url.pathname.endsWith("/ping")) {
+    if (url.pathname === "/ping") {
       return new Response(JSON.stringify({ ok: true, ts: Date.now() }), {
         headers: { ...cors, "Content-Type": "application/json" }
       });
@@ -96,7 +92,21 @@ export default {
     }
 
     const target = v.base + "/" + parts.join("/") + url.search;
-    const auth = v.authHeader(env);
+    const envAuth = v.authHeader(env);
+    // Fall back to client-provided key if the env secret is missing
+    const clientXApiKey = req.headers.get("x-api-key");
+    const clientAuth = req.headers.get("authorization");
+    const auth = {};
+    for (const [k, val] of Object.entries(envAuth)) {
+      if (val && val !== "undefined") {
+        auth[k] = val;
+      } else if (k === "x-api-key" && clientXApiKey) {
+        auth[k] = clientXApiKey;
+        auth["anthropic-version"] = req.headers.get("anthropic-version") || "2023-06-01";
+      } else if ((k === "Authorization" || k === "authorization") && clientAuth) {
+        auth[k] = clientAuth;
+      }
+    }
     const forwardHeaders = { ...auth };
     const incomingCT = req.headers.get("content-type");
     if (incomingCT) forwardHeaders["Content-Type"] = incomingCT;
