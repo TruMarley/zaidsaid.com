@@ -1752,11 +1752,97 @@ function StepExport({ project, setProject }){
     setProject({ ...project, platforms: next });
   };
   const totalDuration = project.scenes.reduce((a,s)=>a+(s.duration||0), 0);
-  return (
+  const [renderBusy, setRenderBusy] = React.useState(false);
+  const [renderErr, setRenderErr] = React.useState('');
+  const [renderUrl, setRenderUrl] = React.useState('');
+  const [renderProgress, setRenderProgress] = React.useState(0);
+  const renderRealVideo = async () => {
+    if(renderBusy) return;
+    const scenes = (project && project.scenes) || [];
+    if(!scenes.length){ setRenderErr('No scenes to render.'); return; }
+    if(typeof MediaRecorder === 'undefined' || !HTMLCanvasElement.prototype.captureStream){ setRenderErr('Your browser does not support MediaRecorder + canvas.captureStream.'); return; }
+    setRenderBusy(true); setRenderErr(''); setRenderUrl(''); setRenderProgress(0);
+    try {
+      const W = 1280, H = 720;
+      const canvas = document.createElement('canvas'); canvas.width = W; canvas.height = H;
+      const ctx = canvas.getContext('2d');
+      const stream = canvas.captureStream(30);
+      const mime = (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported('video/webm;codecs=vp9')) ? 'video/webm;codecs=vp9' : 'video/webm';
+      const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 4_000_000 });
+      const chunks = [];
+      rec.ondataavailable = (e) => { if(e.data && e.data.size) chunks.push(e.data); };
+      const stopped = new Promise((resolve) => { rec.onstop = () => resolve(); });
+      rec.start(250);
+      // Pre-load images
+      const imgs = await Promise.all(scenes.map(s => new Promise((res) => {
+        if(!s.image){ res(null); return; }
+        const im = new Image(); im.crossOrigin = 'anonymous';
+        im.onload = () => res(im); im.onerror = () => res(null);
+        im.src = s.image;
+      })));
+      const total = scenes.reduce((a,s) => a + Math.max(1, Number(s.duration)||3), 0);
+      let elapsed = 0;
+      for(let i=0; i<scenes.length; i++){
+        const s = scenes[i]; const dur = Math.max(1, Number(s.duration)||3); const frames = Math.round(dur * 30);
+        for(let f=0; f<frames; f++){
+          ctx.fillStyle = '#0a0a0a'; ctx.fillRect(0,0,W,H);
+          if(imgs[i]){
+            const r = Math.max(W/imgs[i].width, H/imgs[i].height);
+            const dw = imgs[i].width * r, dh = imgs[i].height * r;
+            ctx.drawImage(imgs[i], (W-dw)/2, (H-dh)/2, dw, dh);
+            ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(0, H-160, W, 160);
+          } else {
+            ctx.fillStyle = '#1a1a1a'; ctx.fillRect(40,40,W-80,H-80);
+          }
+          ctx.fillStyle = '#fff'; ctx.font = 'bold 42px system-ui'; ctx.textAlign='left';
+          const title = (s.title||('Scene '+(i+1))).slice(0,60);
+          ctx.fillText(title, 60, H-100);
+          ctx.font = '24px system-ui'; ctx.fillStyle = 'rgba(255,255,255,0.85)';
+          const vo = (s.voLine||'').slice(0,90);
+          ctx.fillText(vo, 60, H-50);
+          await new Promise(r => setTimeout(r, 1000/30));
+        }
+        elapsed += dur;
+        setRenderProgress(Math.min(99, Math.round((elapsed/total)*100)));
+      }
+      rec.stop();
+      await stopped;
+      const blob = new Blob(chunks, { type: 'video/webm' });
+      const url = URL.createObjectURL(blob);
+      setRenderUrl(url);
+      setRenderProgress(100);
+    } catch(e){
+      console.warn('[zs] render error', e);
+      setRenderErr('Render failed: ' + (e && e.message || e));
+    } finally { setRenderBusy(false); }
+  };
+    return (
     <div className="flex flex-col gap-4">
       <div className="card p-5">
         <div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Export</div>
         <div className="text-lg font-semibold">Aspect & platform presets</div>
+      </div>
+      <div className="card p-5">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-[12px] uppercase tracking-wide text-[color:var(--muted)]">Render</div>
+            <div className="text-lg font-semibold">Real video export (canvas + MediaRecorder)</div>
+            <div className="text-[12px] text-[color:var(--muted)] mt-1">Burns each scene image with title and VO into a 720p WebM. Uses captureStream — Chromium and Firefox supported.</div>
+          </div>
+          <button className="btn btn-primary" onClick={renderRealVideo} disabled={renderBusy}>{renderBusy ? ('Rendering ' + renderProgress + '%') : 'Render WebM'}</button>
+        </div>
+        {renderErr && <div className="mt-2 text-[12px] text-red-400">{renderErr}</div>}
+        {renderBusy && (
+          <div className="mt-3 h-2 rounded-full bg-white/5 overflow-hidden">
+            <div className="h-2 bg-emerald-400 transition-all" style={{ width: renderProgress + '%' }} />
+          </div>
+        )}
+        {renderUrl && !renderBusy && (
+          <div className="mt-3 grid gap-2">
+            <video src={renderUrl} controls className="w-full max-h-[360px] rounded-xl border border-[color:var(--line)]" />
+            <a href={renderUrl} download={(project.name||'zaidsaid')+'.webm'} className="chip self-start">Download .webm</a>
+          </div>
+        )}
       </div>
       <div className="grid md:grid-cols-3 gap-3">
         {STUDIO_EXPORT_PRESETS.map(p => {
