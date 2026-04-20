@@ -40,7 +40,8 @@ const VENDORS = {
     base: "https://api.anthropic.com",
     authHeader: (env) => ({ "x-api-key": env.ANTHROPIC_KEY, "anthropic-version": "2023-06-01" })
   },
-  grok: { base: "https://api.x.ai", authHeader: (env) => ({ "Authorization": "Bearer " + env.XAI_KEY }) }
+  grok: { base: "https://api.x.ai", authHeader: (env) => ({ "Authorization": "Bearer " + env.XAI_KEY }) },
+  pollinations: { base: "https://image.pollinations.ai", authHeader: () => ({}) }
 };
 
 function corsHeaders(req) {
