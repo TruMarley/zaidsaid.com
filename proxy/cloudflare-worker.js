@@ -7,6 +7,7 @@
  *   wrangler secret put HEYGEN_KEY
  *   wrangler secret put OPENAI_KEY
  *   wrangler secret put RUNWAY_KEY
+ *   wrangler secret put ANTHROPIC_KEY
  *
  * Then in Zaidsaid (Settings → Providers), set each vendor's Proxy URL to
  * your deployed worker, e.g. https://my-zaidsaid-proxy.workers.dev/elevenlabs
@@ -33,6 +34,10 @@ const VENDORS = {
   runway: {
     base: "https://api.runwayml.com",
     authHeader: (env) => ({ "Authorization": "Bearer " + env.RUNWAY_KEY })
+  },
+  anthropic: {
+    base: "https://api.anthropic.com",
+    authHeader: (env) => ({ "x-api-key": env.ANTHROPIC_KEY, "anthropic-version": "2023-06-01" })
   }
 };
 
