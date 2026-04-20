@@ -1881,7 +1881,12 @@ function RepurposeClipCard({ clip, onField, onRegen, onRemove }){
             })}
           </div>
         )}
-        <div>
+{clip.platformCaptions && typeof clip.platformCaptions === "object" && (
+          <div className="mt-2">
+            <button className="btn btn-outline text-xs" onClick={()=>{ try{ navigator.clipboard.writeText(JSON.stringify(clip.platformCaptions, null, 2)); } catch(e){} }}>Copy clip captions as JSON</button>
+          </div>
+        )}
+                <div>
           <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Preset</span>
           <div className="mt-1 flex flex-wrap gap-1">
             {REPURPOSE_PRESETS.map(p => {
@@ -2032,6 +2037,30 @@ function RepurposeTab(){
     setCaptionsSource(mode);
     setCaptionsBusy(false);
   };
+  const downloadCaptionsJson = () => {
+    if(!project.clips || project.clips.length === 0){ return; }
+    const payload = {
+      projectId: project.id || null,
+      projectTitle: project.title || "",
+      generatedAt: new Date().toISOString(),
+      source: captionsSource || null,
+      clips: project.clips.map(c => ({
+        id: c.id,
+        title: c.title || "",
+        platformCaptions: c.platformCaptions || null
+      }))
+    };
+    try {
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      const slug = (project.title || "zaidsaid-captions").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "zaidsaid-captions";
+      a.download = slug + ".json";
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => { try{ URL.revokeObjectURL(a.href); a.remove(); } catch(e){} }, 250);
+    } catch(e) { console.warn("caption export failed:", e); }
+  };
 const removeClip = (clipId) => {
     setProject({ ...project, clips: project.clips.filter(c => c.id !== clipId) });
     setSelected(selected.filter(id => id !== clipId));
@@ -2086,7 +2115,8 @@ const removeClip = (clipId) => {
         </div>
         <div className="flex items-center gap-2">
                     <button className="btn" onClick={generateAllCaptions} disabled={captionsBusy || !project.clips || project.clips.length===0}>{captionsBusy ? "Generating…" : "Generate captions"}</button>
-          {captionsSource && (
+          <button className="btn btn-outline" onClick={downloadCaptionsJson} disabled={!project.clips || project.clips.length===0 || !project.clips.some(c=>c.platformCaptions)}>Download captions.json</button>
+                    {captionsSource && (
             <span className={"chip " + (captionsSource === "claude" ? "text-emerald-200 !border-emerald-400/30 bg-emerald-500/10" : "text-sky-200 !border-sky-400/30 bg-sky-500/10")}>{captionsSource === "claude" ? "Claude" : "Local"}</span>
           )}
 <button className="btn btn-ghost" onClick={resetSeed}>{I.refresh({size:14})} Reset to example</button>
