@@ -1902,7 +1902,7 @@ function ToastProvider({ children }){
     setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 3200);
   }, []);
   return (
-    <ToastCtx.Provider value={push}>
+    <ToastCtx.Provider value={Object.assign(push,{push})}>
       {children}
       <div className="fixed bottom-5 right-5 z-50 flex flex-col gap-2 pointer-events-none">
         {toasts.map(t => (
@@ -1916,7 +1916,7 @@ function ToastProvider({ children }){
     </ToastCtx.Provider>
   );
 }
-const useToast = () => useContext(ToastCtx) || (()=>{});
+const useToast = () => useContext(ToastCtx) || Object.assign(()=>{},{push:()=>{}});
 
 // Stage 4/5 helper: a standalone Toast component used by tab-local setToast() callers.
 // Auto-dismisses in 1.8s. Accepts { kind, msg, onClose }.
@@ -3495,6 +3495,7 @@ function SettingsTab(){
             <div>
               <h3 className="text-lg font-semibold">All providers</h3>
               <p className="text-sm text-[color:var(--muted)]">Configure proxy URLs once here. Used by every tab. Keys never leave your proxy.</p>
+              <div className="text-xs mt-1"><a href="https://github.com/TruMarley/zaidsaid.com/blob/main/proxy/README.md" target="_blank" rel="noopener" className="chip">Proxy deployment guide</a></div>
             </div>
             {typeof ProvidersPanel === "function" ? (
               <>
