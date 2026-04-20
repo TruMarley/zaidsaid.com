@@ -1517,7 +1517,41 @@ function StepMotion({ project, setProject }){
 function StepVoice({ project, setProject }){
   const mode = project.voiceMode || "avatar";
   const setMode = (m) => setProject({ ...project, voiceMode: m });
-  return (
+  const [voiceBusy, setVoiceBusy] = React.useState(false);
+  const [voiceErr, setVoiceErr] = React.useState('');
+  const [voiceInfo, setVoiceInfo] = React.useState('');
+  const generateAllVoices = async () => {
+    if(voiceBusy) return;
+    const scenes = (project && project.scenes) || [];
+    if(!scenes.length){ setVoiceErr('No scenes to voice.'); return; }
+    setVoiceBusy(true); setVoiceErr(''); setVoiceInfo('');
+    let providers = {}; try { providers = safeGet('providers.cfg', {}) || {}; } catch(e){}
+    const path = providers && providers.elevenlabs && providers.elevenlabs.url;
+    const next = []; let okEl=0, okLocal=0, errs=0;
+    for(const s of scenes){
+      const text = (s.voLine || s.script || s.title || '').toString();
+      if(!text.trim()){ next.push(s); continue; }
+      try {
+        if(path){
+          const dataUrl = await ttsViaElevenLabs(path, text);
+          next.push({ ...s, audio: dataUrl, audioSource: 'elevenlabs' });
+          okEl++;
+        } else {
+          // local fallback plays in-browser; persist a marker only
+          next.push({ ...s, audio: null, audioSource: 'local-speech' });
+          okLocal++;
+        }
+      } catch(e){
+        next.push({ ...s, audio: null, audioSource: 'error', audioError: String(e && e.message || e).slice(0,140) });
+        errs++;
+      }
+    }
+    setProject({ ...project, scenes: next });
+    setVoiceInfo('Voices: ' + okEl + ' via ElevenLabs · ' + okLocal + ' marked for local playback · ' + errs + ' errors.');
+    setVoiceBusy(false);
+  };
+  const previewLocalForScene = (s) => { try { ttsLocal(s.voLine || s.script || s.title || ''); } catch(e){} };
+    return (
     <div className="flex flex-col gap-4">
       <div className="card p-5">
         <div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Voice & Avatar</div>
@@ -1557,6 +1591,31 @@ function StepVoice({ project, setProject }){
         <div className="mt-4 text-[12px] text-[color:var(--muted)]">
           Cloning lands in Stage 4. Selection here persists into the timeline and export.
         </div>
+      </div>
+      <div className="card p-5">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-[12px] uppercase tracking-wide text-[color:var(--muted)]">Voiceover</div>
+            <div className="text-lg font-semibold">Generate scene audio</div>
+            <div className="text-[12px] text-[color:var(--muted)] mt-1">ElevenLabs when configured (returns audio data), browser SpeechSynthesis as live-playback fallback.</div>
+          </div>
+          <button className="btn btn-primary" onClick={generateAllVoices} disabled={voiceBusy}>{voiceBusy ? 'Synthesizing…' : 'Generate all voices'}</button>
+        </div>
+        {voiceErr && <div className="mt-2 text-[12px] text-red-400">{voiceErr}</div>}
+        {voiceInfo && <div className="mt-2 text-[12px] text-emerald-400">{voiceInfo}</div>}
+        {(project.scenes||[]).some(s => s.audio || s.audioSource) && (
+          <div className="mt-3 grid gap-2">
+            {(project.scenes||[]).map((s, i) => (
+              <div key={s.id||i} className="flex items-center justify-between gap-3 rounded-xl border border-[color:var(--line)] p-2">
+                <div className="min-w-0">
+                  <div className="text-sm truncate">{(i+1)+'. '+(s.title||'Scene')}</div>
+                  <div className="text-[11px] text-[color:var(--muted)] truncate">{s.audioSource === 'elevenlabs' ? 'ElevenLabs audio' : (s.audioSource === 'local-speech' ? 'Local SpeechSynthesis' : (s.audioSource === 'error' ? ('Error: '+(s.audioError||'')) : 'No audio yet'))}</div>
+                </div>
+                {s.audio ? <audio controls src={s.audio} className="max-w-[260px]" /> : <button className="chip" onClick={()=>previewLocalForScene(s)}>{'preview locally'}</button>}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
       <div className="card p-5">
         <div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">VO Preview</div>
