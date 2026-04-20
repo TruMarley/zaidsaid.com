@@ -787,6 +787,7 @@ function SceneCard({ scene, onField, onRegen, onMove, onRemove, index, total }){
         </label>
         <label className="block">
           <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Shot</span>
+          {scene.shot&&<img src={`https://image.pollinations.ai/prompt/${encodeURIComponent(scene.shot)}?width=1280&height=720&nologo=true&model=flux`} alt="storyboard" className="w-full rounded-lg mt-1 mb-1" style={{aspectRatio:'16/9',objectFit:'cover'}}/>}
           <textarea
             value={scene.shot}
             onChange={(e)=>onField("shot", e.target.value)}
