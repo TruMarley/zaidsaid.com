@@ -1782,6 +1782,24 @@ function RepurposeClipCard({ clip, onField, onRegen, onRemove }){
             <button className="chip" onClick={()=>onRegen("caption")}>{I.refresh({size:12})} Regenerate</button>
           </div>
         </label>
+        {clip.platformCaptions && typeof clip.platformCaptions === "object" && (
+          <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2">
+            {["twitter","linkedin","instagram","tiktok"].map(pf => {
+              const cap = clip.platformCaptions[pf];
+              if(!cap) return null;
+              const label = pf === "twitter" ? "X / Twitter" : pf === "linkedin" ? "LinkedIn" : pf === "instagram" ? "Instagram" : "TikTok";
+              return (
+                <div key={pf} className="rounded-lg border border-[color:var(--line)] p-2 text-[12px]">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[11px] font-medium text-[color:var(--muted)]">{label}</span>
+                    <button className="chip" onClick={()=>{ try{ navigator.clipboard.writeText(cap); } catch(e){} }}>Copy</button>
+                  </div>
+                  <div className="whitespace-pre-wrap break-words text-[color:var(--ink)]">{cap}</div>
+                </div>
+              );
+            })}
+          </div>
+        )}
         <div>
           <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Preset</span>
           <div className="mt-1 flex flex-wrap gap-1">
@@ -1865,6 +1883,33 @@ function clipRegenerate(field, clip){
   return null;
 }
 
+async function generateCaptionsViaClaude(proxyUrl, clip, project){
+  const url = (proxyUrl||"").replace(/\/$/, "") + "/v1/messages";
+  const brand = (project && project.brand) || "";
+  const tool = { name: "emit_captions", description: "Return platform-native captions for X/Twitter, LinkedIn, Instagram, and TikTok for a single short-form clip.", input_schema: { type: "object", properties: { twitter: { type: "string", description: "X/Twitter caption, max 280 chars, 1-2 hashtags." }, linkedin: { type: "string", description: "LinkedIn caption, 2-4 short paragraphs, professional." }, instagram: { type: "string", description: "Instagram caption, hook + 3-8 hashtags at the end." }, tiktok: { type: "string", description: "TikTok caption, punchy, 1-3 emojis, 2-5 hashtags." } }, required: ["twitter","linkedin","instagram","tiktok"] } };
+  const systemMsg = "You are a short-form video captioner. Produce platform-native captions for one clip. Use the provided tool and return tool_use only.";
+  const userMsg = "BRAND: " + brand + "\n\nCLIP TITLE: " + (clip.title||"") + "\n\nCLIP CAPTION DRAFT:\n" + (clip.caption||"");
+  const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model: "claude-3-5-haiku-latest", max_tokens: 1024, system: systemMsg, tools: [tool], tool_choice: { type: "tool", name: "emit_captions" }, messages: [{ role: "user", content: userMsg }] }) });
+  if(!r.ok) throw new Error("HTTP " + r.status);
+  const j = await r.json();
+  const block = Array.isArray(j.content) ? j.content.find(c => c && c.type === "tool_use" && c.name === "emit_captions") : null;
+  if(!block || !block.input) throw new Error("no tool_use");
+  return block.input;
+}
+function generateCaptionsLocal(clip, project){
+  const title = (clip.title||"").trim();
+  const base = (clip.caption||title||"Watch this clip.").trim();
+  const brand = (project && project.brand) || "";
+  const tagPool = ["shortform","creator","ai","video","viral","explainer"];
+  const tagsLong = tagPool.map(x=>"#"+x).join(" ");
+  const tagsShort = tagPool.slice(0,2).map(x=>"#"+x).join(" ");
+  const twitter = (base.length > 260 ? base.slice(0,257) + "…" : base) + " " + tagsShort;
+  const linkedin = (title ? title + "\n\n" : "") + base + (brand ? "\n\n— " + brand : "") + "\n\n" + tagsLong;
+  const instagram = base + "\n\n.\n.\n.\n" + tagsLong;
+  const tiktok = "🎬 " + base + " " + tagsShort;
+  return { twitter: twitter.slice(0,280), linkedin: linkedin.slice(0,3000), instagram: instagram.slice(0,2200), tiktok: tiktok.slice(0,2200) };
+}
+
 function RepurposeTab(){
   const [project, setProject] = useLocalState("repurpose.project", REPURPOSE_SEED);
   useEffect(() => {
@@ -1885,7 +1930,28 @@ function RepurposeTab(){
     if(v === null) return;
     clipField(clipId, field, v);
   };
-  const removeClip = (clipId) => {
+    const [captionsBusy, setCaptionsBusy] = useState(false);
+  const [captionsSource, setCaptionsSource] = useState("");
+  const generateAllCaptions = async () => {
+    if(captionsBusy) return;
+    setCaptionsBusy(true); setCaptionsSource("");
+    const providers = safeGet("providers.cfg", {}) || {};
+    const anth = providers.anthropic; const path = anth && anth.enabled && anth.path ? anth.path : "";
+    let mode = "local";
+    const updated = [];
+    for(const clip of project.clips){
+      let caps = null;
+      if(path){
+        try { caps = await generateCaptionsViaClaude(path, clip, project); mode = "claude"; } catch(e){ caps = null; }
+      }
+      if(!caps) caps = generateCaptionsLocal(clip, project);
+      updated.push({ ...clip, platformCaptions: caps });
+    }
+    setProject({ ...project, clips: updated });
+    setCaptionsSource(mode);
+    setCaptionsBusy(false);
+  };
+const removeClip = (clipId) => {
     setProject({ ...project, clips: project.clips.filter(c => c.id !== clipId) });
     setSelected(selected.filter(id => id !== clipId));
   };
@@ -1938,7 +2004,11 @@ function RepurposeTab(){
           <p className="text-[color:var(--muted)] mt-1">Long-form in. Ranked, branded, platform-native shorts out.</p>
         </div>
         <div className="flex items-center gap-2">
-          <button className="btn btn-ghost" onClick={resetSeed}>{I.refresh({size:14})} Reset to example</button>
+                    <button className="btn" onClick={generateAllCaptions} disabled={captionsBusy || !project.clips || project.clips.length===0}>{captionsBusy ? "Generating…" : "Generate captions"}</button>
+          {captionsSource && (
+            <span className={"chip " + (captionsSource === "claude" ? "text-emerald-200 !border-emerald-400/30 bg-emerald-500/10" : "text-sky-200 !border-sky-400/30 bg-sky-500/10")}>{captionsSource === "claude" ? "Claude" : "Local"}</span>
+          )}
+<button className="btn btn-ghost" onClick={resetSeed}>{I.refresh({size:14})} Reset to example</button>
         </div>
       </div>
 
