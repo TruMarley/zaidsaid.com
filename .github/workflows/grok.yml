@@ -1,0 +1,62 @@
+name: Grok Research
+
+on:
+  issue_comment:
+    types: [created]
+  issues:
+    types: [opened]
+
+jobs:
+  grok:
+    if: |
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@grok')) ||
+      (github.event_name == 'issues' && contains(github.event.issue.body, '@grok'))
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Research with Grok
+        uses: actions/github-script@v7
+        env:
+          XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+        with:
+          script: |
+            const isComment = context.eventName === 'issue_comment';
+            const raw = isComment
+              ? context.payload.comment.body
+              : context.payload.issue.body;
+            const prompt = raw.replace(/@grok\s*/gi, '').trim();
+            if (!prompt) return;
+
+            const res = await fetch('https://api.x.ai/v1/chat/completions', {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${process.env.XAI_API_KEY}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                model: 'grok-3-mini',
+                messages: [
+                  {
+                    role: 'system',
+                    content: 'You are a research assistant for Zaidsaid, an AI video pipeline platform. Provide structured research briefs with key findings, free/low-cost tool recommendations, and concrete next steps. Be specific and actionable.'
+                  },
+                  { role: 'user', content: prompt }
+                ],
+                max_tokens: 2000
+              })
+            });
+
+            const data = await res.json();
+            const answer = data.choices?.[0]?.message?.content;
+            if (!answer) {
+              core.setFailed('Grok returned no content: ' + JSON.stringify(data));
+              return;
+            }
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.issue.number,
+              body: `**Grok Research Brief**\n\n${answer}`
+            });
