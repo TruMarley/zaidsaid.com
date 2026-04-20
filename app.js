@@ -1192,7 +1192,7 @@ function StepMotion({ project, setProject }){
     const W = canvas.width, H = canvas.height;
     let imgIdx = 0, frame = 0;
     const FPIMG = 90;
-    const images = imgs.map(src => { const im = new Image(); im.crossOrigin="anonymous"; im.src=src; return im; });
+    const images = imgs.map(src => { const im = new Image(); im.src=src; return im; });
     setPlaying(true);
     const tick = () => {
       const img = images[imgIdx % images.length];
