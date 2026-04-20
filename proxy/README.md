@@ -25,6 +25,8 @@ wrangler init my-zaidsaid-proxy
 wrangler secret put ELEVEN_KEY
 wrangler secret put HEYGEN_KEY
 wrangler secret put OPENAI_KEY
+wrangler secret put RUNWAY_KEY
+wrangler secret put ANTHROPIC_KEY
 wrangler deploy
 ```
 
@@ -40,3 +42,7 @@ Copy the deployed URL (e.g. `https://my-zaidsaid-proxy.workers.dev`) into Zaidsa
 ## Free / local mode
 
 Every capability has a "Local / Free" option that doesn't need a proxy at all — Web Speech TTS, MediaRecorder for voice capture, browser-native rendering. You can use the full app with zero cloud spend.
+
+## Claude (Anthropic) tip
+
+When you deploy one of these templates with `ANTHROPIC_KEY` set, paste the full vendor-scoped URL into **Settings → Providers → Claude (Anthropic)** in Zaidsaid, e.g. `https://my-zaidsaid-proxy.workers.dev/anthropic`. Studio's "Generate brief & outline" button will then call Claude via `/v1/messages` with a `tool_use` schema and populate your scenes.
