@@ -4,7 +4,7 @@
  * Install:
  *   npm init -y
  *   npm i express undici dotenv
- *   cp .env.example .env   # fill in ELEVEN_KEY, HEYGEN_KEY, OPENAI_KEY, RUNWAY_KEY, ANTHROPIC_KEY
+ *   cp .env.example .env   # fill in ELEVEN_KEY, HEYGEN_KEY, OPENAI_KEY, RUNWAY_KEY, ANTHROPIC_KEY, XAI_KEY
  *
  * Run:
  *   node node-express.js
@@ -45,7 +45,8 @@ const VENDORS = {
   anthropic: {
     base: "https://api.anthropic.com",
     authHeader: () => ({ "x-api-key": process.env.ANTHROPIC_KEY, "anthropic-version": "2023-06-01" })
-  }
+  },
+  grok: { base: "https://api.x.ai", authHeader: { "Authorization": "Bearer " + process.env.XAI_KEY } }
 };
 
 // CORS middleware
