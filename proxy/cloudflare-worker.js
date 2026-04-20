@@ -40,7 +40,13 @@ const VENDORS = {
     base: "https://api.anthropic.com",
     authHeader: (env) => ({ "x-api-key": env.ANTHROPIC_KEY, "anthropic-version": "2023-06-01" })
   },
-  grok: { base: "https://api.x.ai", authHeader: (env) => ({ "Authorization": "Bearer " + env.XAI_KEY }) }
+  grok: { base: "https://api.x.ai", authHeader: (env) => ({ "Authorization": "Bearer " + env.XAI_KEY }) },
+  synthesia: { base: "https://api.synthesia.io", authHeader: (env) => ({ "Authorization": env.SYNTHESIA_KEY }) },
+  kling: { base: "https://api.klingai.com", authHeader: (env) => ({ "Authorization": "Bearer " + env.KLING_KEY }) },
+  stability: { base: "https://api.stability.ai", authHeader: (env) => ({ "Authorization": "Bearer " + env.STABILITY_KEY }) },
+  suno: { base: "https://studio-api.suno.ai", authHeader: (env) => ({ "Authorization": "Bearer " + env.SUNO_KEY }) },
+  udio: { base: "https://api.udio.com", authHeader: (env) => ({ "Authorization": "Bearer " + env.UDIO_KEY }) },
+  perplexity: { base: "https://api.perplexity.ai", authHeader: (env) => ({ "Authorization": "Bearer " + env.PERPLEXITY_KEY }) }
 };
 
 function corsHeaders(req) {
@@ -65,7 +71,7 @@ export default {
     }
 
     // Health check — used by Zaidsaid's "Test" button
-    if (url.pathname === "/ping") {
+    if (url.pathname === "/ping" || url.pathname.endsWith("/ping")) {
       return new Response(JSON.stringify({ ok: true, ts: Date.now() }), {
         headers: { ...cors, "Content-Type": "application/json" }
       });
