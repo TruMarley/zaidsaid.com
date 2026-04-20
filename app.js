@@ -1965,6 +1965,59 @@ function RepurposeAnalyzer({ project, setProject, onComplete }){
     </div>
   );
 }
+function RepurposeRealAnalyze({ project, setProject }){
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState('');
+  const [info, setInfo] = React.useState('');
+  const [src, setSrc] = React.useState('');
+  const run = async () => {
+    if(busy) return;
+    const text = (src || project.transcriptText || project.source || '').trim();
+    if(!text){ setErr('Paste a transcript, description, or URL summary first.'); return; }
+    setBusy(true); setErr(''); setInfo('');
+    let providers = {}; try { providers = safeGet('providers.cfg', {}) || {}; } catch(e){}
+    const anth = providers && providers.anthropic;
+    const path = anth && anth.url ? anth.url : '';
+    const target = Number(project.targetCount)||5;
+    try {
+      let clips;
+      if(path){
+        console.log('[zs] real-analyze: calling Claude');
+        clips = await analyzeViaClaude(path, text, target);
+        setInfo('Analyzed via Claude — ' + clips.length + ' clips.');
+      } else {
+        console.log('[zs] real-analyze: using local fallback');
+        clips = analyzeLocal(text, target);
+        setInfo('Analyzed locally (no Anthropic proxy configured) — ' + clips.length + ' clips.');
+      }
+      if(!clips || !clips.length){ setErr('No clips returned. Try richer source text.'); return; }
+      setProject({ ...project, clips, durationSec: project.durationSec || (clips[clips.length-1].end + 60) });
+    } catch(e){
+      console.warn('[zs] real-analyze error', e);
+      try { const fb = analyzeLocal(text, target); setProject({ ...project, clips: fb }); setErr('Claude call failed (' + (e && e.message || e) + '). Fell back to local analyze.'); }
+      catch(e2){ setErr('Analyze failed: ' + (e2 && e2.message || e2)); }
+    } finally { setBusy(false); }
+  };
+  return (
+    <div className="card p-5 mt-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-[12px] uppercase tracking-wide text-[color:var(--muted)]">Real analyze</div>
+          <div className="text-lg font-semibold">Generate clips from your source</div>
+          <div className="text-[12px] text-[color:var(--muted)] mt-1">Sends transcript or description to Claude (or local heuristic) and writes real clips into the project.</div>
+        </div>
+        <button className="btn btn-primary" onClick={run} disabled={busy}>{busy ? 'Analyzing…' : 'Run real analyze'}</button>
+      </div>
+      <div className="mt-3">
+        <textarea className="input w-full" rows={4} placeholder="Paste source transcript or description (or use the project transcript above)" value={src} onChange={e=>setSrc(e.target.value)} />
+      </div>
+      {err && <div className="mt-2 text-[12px] text-red-400">{err}</div>}
+      {info && <div className="mt-2 text-[12px] text-emerald-400">{info}</div>}
+    </div>
+  );
+}
+
+
 
 function RepurposeTranscriptStrip({ project }){
   const dur = Math.max(1, project.durationSec || 1);
@@ -2325,6 +2378,7 @@ const removeClip = (clipId) => {
       <div className="grid gap-4">
         <RepurposeIntake project={project} setProject={setProject} />
         <RepurposeAnalyzer project={project} setProject={setProject} />
+        <RepurposeRealAnalyze project={project} setProject={setProject} />
         <RepurposeTranscriptStrip project={project} />
 
         <div className="card p-5">
