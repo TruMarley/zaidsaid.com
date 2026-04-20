@@ -77,7 +77,7 @@ const ARCHIVE_PIPELINE = [
   "Research","Outline","Script","Storyboard","Shotlist","Voice","Avatar","B-roll","Motion","Captions","Edit","Mix","Export","Publish"
 ];
 const ARCHIVE_PROVIDERS = [
-  { stage:"Research", primary:"Perplexity", fallback:"You.com", latency:"2.1s" },
+  { stage:"Research", primary:"Grok (Free)", fallback:"Perplexity", latency:"2.1s" },
   { stage:"Script", primary:"Claude 3.5", fallback:"GPT-4.1", latency:"1.4s" },
   { stage:"Storyboard", primary:"Flux 1.1 Pro", fallback:"SDXL", latency:"6.2s" },
   { stage:"Voice", primary:"ElevenLabs", fallback:"PlayHT", latency:"1.1s" },
@@ -121,7 +121,8 @@ const PROVIDERS = [
   { id:"deepgram", name:"Deepgram", vendor:"Deepgram", caps:["stt"], docs:"https://developers.deepgram.com", defaultPath:"/api/deepgram" },
   { id:"suno", name:"Suno", vendor:"Suno", caps:["music"], docs:"https://suno.com", defaultPath:"/api/suno" },
   { id:"udio", name:"Udio", vendor:"Udio", caps:["music"], docs:"https://udio.com", defaultPath:"/api/udio" },
-  { id:"perplexity", name:"Perplexity", vendor:"Perplexity", caps:["research"], docs:"https://docs.perplexity.ai", defaultPath:"/api/perplexity" }
+  { id:"perplexity", name:"Perplexity", vendor:"Perplexity", caps:["research"], docs:"https://docs.perplexity.ai", defaultPath:"/api/perplexity" },
+  { id:"grok", name:"Grok (Free)", vendor:"xAI", caps:["research"], docs:"https://docs.x.ai/docs", defaultPath:"/api/grok" }
 ];
 const PROVIDER_CAP_LABEL = { tts:"Text-to-speech", stt:"Speech-to-text", voiceClone:"Voice cloning", avatarVideo:"Avatar video", script:"Scripting", research:"Research", image:"Image gen", motion:"Motion / video gen", music:"Music", capture:"Media capture", render:"Render" };
 const PROVIDER_CAPS_ORDER = ["tts","voiceClone","avatarVideo","script","research","image","motion","stt","music"];
