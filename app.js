@@ -147,9 +147,35 @@ async function pingProvider(proxyUrl){
   } catch(e){ return { ok: false, status: 0, body: (e && e.message) || "Network error" }; }
 }
 
+async function pingAnthropicToolUse(proxyUrl){
+  const start = Date.now();
+  try {
+    const url = (proxyUrl || "").replace(/\/$/, "") + "/v1/messages";
+    const r = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "claude-3-5-haiku-latest",
+        max_tokens: 64,
+        tools: [{ name: "noop", description: "Reply with ok:true", input_schema: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] } }],
+        tool_choice: { type: "tool", name: "noop" },
+        messages: [{ role: "user", content: "Call the noop tool with ok:true." }]
+      })
+    });
+    const txt = await r.text().catch(()=> "");
+    const ms = Date.now() - start;
+    let toolOk = false;
+    try { const j = JSON.parse(txt); toolOk = !!(j && Array.isArray(j.content) && j.content.some(b => b && b.type === "tool_use")); } catch(e){}
+    return { ok: r.ok && toolOk, status: r.status, body: (toolOk ? "tool_use received · " : "") + ms + "ms · " + txt.slice(0, 140) };
+  } catch(e){ return { ok: false, status: 0, body: (e && e.message) || "Network error" }; }
+}
+
 function ProviderRow({ provider, path, enabled, onChangePath, onChangeEnabled }){
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState(null);
+  const [tuTesting, setTuTesting] = useState(false);
+  const [tuResult, setTuResult] = useState(null);
+  const isAnthropic = provider.id === "anthropic";
   const isLocal = provider.id === "local";
   const onTest = async () => {
     if(isLocal){ setResult({ ok: true, status: 200, body: "Local / browser-native capabilities are always available." }); return; }
@@ -157,6 +183,11 @@ function ProviderRow({ provider, path, enabled, onChangePath, onChangeEnabled })
     setTesting(true); setResult(null);
     const r = await pingProvider(path);
     setResult(r); setTesting(false);
+  };
+  const onToolUseTest = async () => {
+    setTuTesting(true); setTuResult(null);
+    const r = await pingAnthropicToolUse(path);
+    setTuResult(r); setTuTesting(false);
   };
   return (
     <div className="card p-4">
@@ -188,6 +219,14 @@ function ProviderRow({ provider, path, enabled, onChangePath, onChangeEnabled })
               </span>
             )}
             {result && result.body && <span className="text-[11px] text-[color:var(--muted)] truncate max-w-[280px]">{result.body}</span>}
+            {isAnthropic && (
+              <button className="btn" onClick={onToolUseTest} disabled={tuTesting || !path}>{tuTesting ? "Tool-use…" : "Test tool-use"}</button>
+            )}
+            {isAnthropic && tuResult && (
+              <span className={"chip " + (tuResult.ok ? "text-emerald-200 !border-emerald-400/30 bg-emerald-500/10" : "text-rose-200 !border-rose-400/30 bg-rose-500/10")}>
+                {tuResult.ok ? "tool_use OK" : "Fail"} {tuResult.status||""} <span className="text-[color:var(--muted)] truncate max-w-[280px]">{tuResult.body}</span>
+              </span>
+            )}
           </div>
           <div className="mt-2 text-[11px] text-[color:var(--muted)]">
             Paste the public URL of your server-side proxy for {provider.name}. Keys stay on your server; this app only calls your proxy.
