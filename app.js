@@ -1,4 +1,4 @@
-/* Zaidsaid — app.js v2.0 — x70: Copy-post uses per-platform captions (auto-fetches Haiku captions on first click, picks preset-native seed)
+/* Zaidsaid — app.js v2.0 — x71: Functional file upload + video preview (unblocks per-clip render path)
  * Security: localStorage namespaced as zaidsaid.v2.*, error boundary, no innerHTML, no eval, no fetch.
  * Archived v1 seed data preserved under ARCHIVE_* for later reuse.
  */
@@ -2907,19 +2907,42 @@ function RepurposeIntake({ project, setProject }){
             </label>
           </div>
         </label>
-        {isGodMode && (
         <div>
-          <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Upload (UI only)</span>
-          <div className="mt-1 border border-dashed border-[color:var(--line)] rounded-xl p-6 text-center text-[12px] text-[color:var(--muted)]">
-            <div className="text-white/80 font-semibold">Drop a video or podcast</div>
-            <div className="mt-1">MP4 · MOV · MP3 · WAV</div>
-            <div className="mt-3 opacity-70">Uploads wire up in a later stage.</div>
-            <button type="button" className="btn mt-3" aria-disabled="true" onClick={(e)=>e.preventDefault()}>
-              Choose file
-            </button>
+          <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Upload</span>
+          <div className="mt-1 border border-dashed border-[color:var(--line)] rounded-xl p-4 text-[12px] text-[color:var(--muted)]">
+            {project.uploadedVideoUrl ? (
+              <div className="space-y-2">
+                <video src={project.uploadedVideoUrl} controls className="w-full rounded-lg border border-[color:var(--line)] bg-black max-h-[200px]" />
+                <div className="flex items-center justify-between gap-2">
+                  <div className="truncate text-white/80 text-[12px]">{project.uploadedVideoName || "uploaded.mp4"}</div>
+                  <button type="button" className="chip" onClick={()=>{
+                    try { URL.revokeObjectURL(project.uploadedVideoUrl); } catch(e){}
+                    setProject({ ...project, uploadedVideoUrl: null, uploadedVideoName: null });
+                  }}>Remove</button>
+                </div>
+              </div>
+            ) : (
+              <div className="text-center">
+                <div className="text-white/80 font-semibold">Upload a video or podcast</div>
+                <div className="mt-1">MP4 · MOV · MP3 · WAV</div>
+                <label className="btn mt-3 cursor-pointer inline-block">
+                  Choose file
+                  <input
+                    type="file"
+                    accept="video/*,audio/*"
+                    className="hidden"
+                    onChange={(e)=>{
+                      const f = e.target.files && e.target.files[0];
+                      if(!f) return;
+                      const url = URL.createObjectURL(f);
+                      setProject({ ...project, kind: "upload", uploadedVideoUrl: url, uploadedVideoName: f.name });
+                    }}
+                  />
+                </label>
+              </div>
+            )}
           </div>
         </div>
-        )}
       </div>
     </div>
   );
