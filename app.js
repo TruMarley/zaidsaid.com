@@ -25,6 +25,21 @@ function useLocalState(key, initial){
 }
 try { if (safeGet("__schema", 0) !== SCHEMA_VERSION) safeSet("__schema", SCHEMA_VERSION); } catch(e){}
 
+/* ---------------- God mode (admin / power-user surface toggle) ----------------
+ * Public MVP hides advanced controls (per-scene regen, full provider config,
+ * test endpoints, dev tabs). God mode re-reveals everything.
+ * Enable:  zaidsaid.com/?god=1   (persists in localStorage)
+ * Disable: zaidsaid.com/?god=0   (clears it)
+ * Toggle in UI: Settings > About > "God mode" switch.
+ */
+try {
+  const __zsParams = new URLSearchParams(location.search);
+  if (__zsParams.get("god") === "1") localStorage.setItem("zs_god", "1");
+  if (__zsParams.get("god") === "0") localStorage.removeItem("zs_god");
+} catch(e){}
+const isGodMode = (typeof window !== "undefined") && (function(){ try { return localStorage.getItem("zs_god") === "1"; } catch(e){ return false; } })();
+try { if (isGodMode) document.documentElement.classList.add("zs-god"); } catch(e){}
+
 /* ---------------- Brand / tokens ---------------- */
 const BRAND = { name: "Zaidsaid", tagline: "The AI video platform for teams", version: "v2.0", domain: "zaidsaid.com" };
 
@@ -413,15 +428,16 @@ function HealthPanel({ filterCap }){
 const TABS = [
   { id:"home", label:"Home", icon:"home" },
   { id:"studio", label:"Studio", icon:"studio" },
-  { id:"repurpose", label:"Repurpose", icon:"scissors" },
-  { id:"avatars", label:"Avatars & Voices", icon:"avatar" },
-  { id:"brands", label:"Brand Kits", icon:"brand" },
-  { id:"templates", label:"Templates", icon:"template" },
+  { id:"repurpose", label:"Repurpose", icon:"scissors", godOnly:true },
+  { id:"avatars", label:"Avatars & Voices", icon:"avatar", godOnly:true },
+  { id:"brands", label:"Brand Kits", icon:"brand", godOnly:true },
+  { id:"templates", label:"Templates", icon:"template", godOnly:true },
   { id:"projects", label:"Projects", icon:"folder" },
-  { id:"architecture", label:"Architecture", icon:"blocks" },
+  { id:"architecture", label:"Architecture", icon:"blocks", godOnly:true },
   { id:"settings", label:"Settings", icon:"grip" },
-  { id:"docs", label:"Docs", icon:"book" },
+  { id:"docs", label:"Docs", icon:"book", godOnly:true },
 ];
+const VISIBLE_TABS = TABS.filter(t => isGodMode || !t.godOnly);
 
 /* ---------------- Hash routing helpers ---------------- */
 function parseHash(){
@@ -477,7 +493,7 @@ function TopBar({ tab, setTab, onNewProject }){
           <span className="chip ml-1">{BRAND.version} — live</span>
         </a>
         <nav className="ml-2 flex items-center gap-1 overflow-x-auto scrollbar" aria-label="Primary">
-          {TABS.map(t => (
+          {VISIBLE_TABS.map(t => (
             <button key={t.id} onClick={()=>setTab(t.id)} aria-current={tab===t.id?"page":undefined}
               className={"flex items-center gap-2 px-3 py-2 rounded-xl text-[13px] text-[color:var(--muted)] hover:text-white whitespace-nowrap " + (tab===t.id?"tab-active":"")}>
               {I[t.icon] ? I[t.icon]({size:16}) : null}
@@ -486,6 +502,7 @@ function TopBar({ tab, setTab, onNewProject }){
           ))}
         </nav>
         <div className="ml-auto flex items-center gap-2">
+          {isGodMode && <span className="chip text-amber-200 !border-amber-400/30 bg-amber-500/10" title="Advanced / admin surface enabled">GOD</span>}
           <span className="chip"><span className="dot"/> all systems nominal</span>
           <button className="btn btn-primary" onClick={()=>{ onNewProject && onNewProject(); }}>
             {I.spark({size:16})} <span>New project</span>
@@ -1517,7 +1534,7 @@ function StepStoryboard({ project, setProject }){
             {(project.scenes||[]).map((s, i) => (
               <div key={s.id||i} className="rounded-xl overflow-hidden border border-[color:var(--line)]">
                 {s.image ? <img src={s.image} alt={'Scene '+(i+1)} className="w-full h-24 object-cover" /> : <div className="w-full h-24 bg-[color:var(--line)] flex items-center justify-center text-[11px] text-[color:var(--muted)]">no image</div>}
-                {s.image && <button className="chip text-[10px] px-2 py-0.5 m-1" onClick={()=>regenerateImageOne(s.id)} disabled={imgBusy} title="Regenerate image">{String.fromCharCode(8635)} regen</button>}
+                {s.image && isGodMode && <button className="chip text-[10px] px-2 py-0.5 m-1" onClick={()=>regenerateImageOne(s.id)} disabled={imgBusy} title="Regenerate image">{String.fromCharCode(8635)} regen</button>}
                 <div className="px-2 py-1 text-[11px] text-[color:var(--muted)] truncate">{s.title || ('Scene '+(i+1))}</div>
               </div>
             ))}
@@ -1746,7 +1763,7 @@ function StepVoice({ project, setProject }){
                   <div className="text-[11px] text-[color:var(--muted)] truncate">{s.audioSource === 'elevenlabs' ? 'ElevenLabs audio' : (s.audioSource === 'local-speech' ? 'Local SpeechSynthesis' : (s.audioSource === 'error' ? ('Error: '+(s.audioError||'')) : 'No audio yet'))}</div>
                 </div>
                 {s.audio ? <audio controls src={s.audio} className="max-w-[260px]" /> : <button className="chip" onClick={()=>previewLocalForScene(s)}>{'preview locally'}</button>}
-                <button className="chip shrink-0" onClick={()=>regenerateOne(s.id)} disabled={voiceBusy} title="Regenerate ElevenLabs voice for this scene">{String.fromCharCode(8635)}</button>
+                {isGodMode && <button className="chip shrink-0" onClick={()=>regenerateOne(s.id)} disabled={voiceBusy} title="Regenerate ElevenLabs voice for this scene">{String.fromCharCode(8635)}</button>}
               </div>
             ))}
           </div>
@@ -3344,23 +3361,25 @@ function AvatarsTab(){
         <Tag tone="info">Local/free mode. When you connect a voice-cloning provider in Settings, recorded samples will be used to synthesize natural speech.</Tag>
       </div>
 
-      <div className="mb-4">
-        <details className="card p-4">
-          <summary className="cursor-pointer flex items-center justify-between gap-2 flex-wrap list-none">
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Voice & avatar providers</span>
-              <Tag tone="brand">Proxy URLs only</Tag>
+      {isGodMode && (
+        <div className="mb-4">
+          <details className="card p-4">
+            <summary className="cursor-pointer flex items-center justify-between gap-2 flex-wrap list-none">
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Voice & avatar providers</span>
+                <Tag tone="brand">Proxy URLs only</Tag>
+              </div>
+              <span className="chip">{I.down({size:12})} Expand</span>
+            </summary>
+            <div className="mt-3 text-[12px] text-[color:var(--muted)]">Point each vendor at your server-side proxy. Raw API keys must stay on your server. Leave blank to keep using the built-in browser voice.</div>
+            <div className="mt-3 grid gap-3">
+              <ProvidersPanel filterCap="tts" />
+              <ProvidersPanel filterCap="voiceClone" />
+              <ProvidersPanel filterCap="avatarVideo" />
             </div>
-            <span className="chip">{I.down({size:12})} Expand</span>
-          </summary>
-          <div className="mt-3 text-[12px] text-[color:var(--muted)]">Point each vendor at your server-side proxy. Raw API keys must stay on your server. Leave blank to keep using the built-in browser voice.</div>
-          <div className="mt-3 grid gap-3">
-            <ProvidersPanel filterCap="tts" />
-            <ProvidersPanel filterCap="voiceClone" />
-            <ProvidersPanel filterCap="avatarVideo" />
-          </div>
-        </details>
-      </div>
+          </details>
+        </div>
+      )}
             {filtered.length === 0 ? (
         <EmptyState title="No avatars match" subtitle="Try a different search or create a new avatar." action={<button className="btn btn-primary" onClick={onNew}>{I.plus({size:14})} New avatar</button>} />
       ) : (
@@ -4544,28 +4563,40 @@ function SettingsTab(){
       </aside>
       <main className="card p-5 min-h-[320px] space-y-4">
         {section === "providers" && (
-          <div className="space-y-3">
-            <div>
-              <h3 className="text-lg font-semibold">All providers</h3>
-              <p className="text-sm text-[color:var(--muted)]">Configure proxy URLs once here. Used by every tab. Keys never leave your proxy.</p>
-              <div className="text-xs mt-1"><a href="https://github.com/TruMarley/zaidsaid.com/blob/main/proxy/README.md" target="_blank" rel="noopener" className="chip">Proxy deployment guide</a></div>
+          isGodMode ? (
+            <div className="space-y-3">
+              <div>
+                <h3 className="text-lg font-semibold">All providers</h3>
+                <p className="text-sm text-[color:var(--muted)]">Configure proxy URLs once here. Used by every tab. Keys never leave your proxy.</p>
+                <div className="text-xs mt-1"><a href="https://github.com/TruMarley/zaidsaid.com/blob/main/proxy/README.md" target="_blank" rel="noopener" className="chip">Proxy deployment guide</a></div>
+              </div>
+              {typeof ProvidersPanel === "function" ? (
+                <>
+                  <ProvidersPanel capability="tts" title="Text-to-speech" />
+                  <ProvidersPanel capability="voiceClone" title="Voice cloning" />
+                  <ProvidersPanel capability="avatarVideo" title="Avatar video" />
+                  <ProvidersPanel capability="script" title="Script / LLM" />
+                  <ProvidersPanel capability="image" title="Image generation" />
+                  <ProvidersPanel capability="motion" title="Video / motion (B-roll)" />
+                  <ProvidersPanel capability="stt" title="Transcription (STT)" />
+                  <ProvidersPanel capability="music" title="Music" />
+                  <ProvidersPanel capability="research" title="Research" />
+                </>
+              ) : (
+                <div className="text-xs text-[color:var(--muted)]">Providers module not loaded.</div>
+              )}
             </div>
-            {typeof ProvidersPanel === "function" ? (
-              <>
-                <ProvidersPanel capability="tts" title="Text-to-speech" />
-                <ProvidersPanel capability="voiceClone" title="Voice cloning" />
-                <ProvidersPanel capability="avatarVideo" title="Avatar video" />
-                <ProvidersPanel capability="script" title="Script / LLM" />
-                <ProvidersPanel capability="image" title="Image generation" />
-                <ProvidersPanel capability="motion" title="Video / motion (B-roll)" />
-                <ProvidersPanel capability="stt" title="Transcription (STT)" />
-                <ProvidersPanel capability="music" title="Music" />
-                <ProvidersPanel capability="research" title="Research" />
-              </>
-            ) : (
-              <div className="text-xs text-[color:var(--muted)]">Providers module not loaded.</div>
-            )}
-          </div>
+          ) : (
+            <div className="space-y-3">
+              <div>
+                <h3 className="text-lg font-semibold">Providers</h3>
+                <p className="text-sm text-[color:var(--muted)]">Zaidsaid uses managed AI providers by default. You can keep creating videos without configuring anything here.</p>
+              </div>
+              <div className="rounded-xl border border-[color:var(--line)] p-4 text-sm text-[color:var(--muted)]">
+                Bring-your-own-key and multi-vendor configuration are coming to team plans. For now you're using the built-in providers.
+              </div>
+            </div>
+          )
         )}
         {section === "storage" && (
           <div className="space-y-3">
@@ -4607,6 +4638,21 @@ function SettingsTab(){
               <div className="p-3 rounded-lg border border-white/10"><div className="text-[color:var(--muted)]">Host</div><div>GitHub Pages (zaidsaid.com)</div></div>
               <div className="p-3 rounded-lg border border-white/10"><div className="text-[color:var(--muted)]">Source</div><div><a href="https://github.com/TruMarley/zaidsaid.com" className="underline">TruMarley/zaidsaid.com</a></div></div>
               <div className="p-3 rounded-lg border border-white/10"><div className="text-[color:var(--muted)]">License</div><div>MIT</div></div>
+            </div>
+            <div className="pt-3 mt-3 border-t border-[color:var(--line)]">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold">God mode</div>
+                  <div className="text-xs text-[color:var(--muted)]">Reveal all provider config, per-scene regen controls, and developer surface. {isGodMode ? "Currently ON." : "Off (public MVP view)."}</div>
+                </div>
+                <button className="btn" onClick={()=>{
+                  try {
+                    if (isGodMode) { localStorage.removeItem("zs_god"); }
+                    else { localStorage.setItem("zs_god", "1"); }
+                    location.reload();
+                  } catch(e){}
+                }}>{isGodMode ? "Disable god mode" : "Enable god mode"}</button>
+              </div>
             </div>
           </div>
         )}
