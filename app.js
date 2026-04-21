@@ -2107,17 +2107,12 @@ function StepExport({ project, setProject }){
             const audibleDur = Math.min(ab.duration, durations[i]);
             const isFirst = (i === 0);
             const isLast = (i === scenes.length - 1);
-            if(isFirst){
-              gain.gain.setValueAtTime(1, startAt);
-            } else {
-              gain.gain.setValueAtTime(0, startAt);
-              gain.gain.linearRampToValueAtTime(1, startAt + AUDIO_FADE_S);
-            }
-            if(!isLast){
-              const fadeOutStart = startAt + Math.max(AUDIO_FADE_S + 0.01, audibleDur - AUDIO_FADE_S);
-              gain.gain.setValueAtTime(1, fadeOutStart);
-              gain.gain.linearRampToValueAtTime(0, fadeOutStart + AUDIO_FADE_S);
-            }
+            const fadeInS = isFirst ? 0.25 : AUDIO_FADE_S;
+            gain.gain.setValueAtTime(0, startAt);
+            gain.gain.linearRampToValueAtTime(1, startAt + fadeInS);
+            const fadeOutStart = startAt + Math.max(fadeInS + 0.01, audibleDur - AUDIO_FADE_S);
+            gain.gain.setValueAtTime(1, fadeOutStart);
+            gain.gain.linearRampToValueAtTime(0, fadeOutStart + AUDIO_FADE_S);
             try { src.start(startAt); } catch(_){}
           }
           cum += durations[i];
