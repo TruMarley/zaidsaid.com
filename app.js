@@ -2075,8 +2075,8 @@ function StepExport({ project, setProject }){
         }
         return configured;
       });
-      const INTRO_S = 1.0;
-      const OUTRO_S = 1.0;
+      const INTRO_S = 1.4;
+      const OUTRO_S = 1.2;
       const total = INTRO_S + durations.reduce((a,b)=>a+b, 0) + OUTRO_S;
       const stream = canvas.captureStream(30);
       if(audioDest){ audioDest.stream.getAudioTracks().forEach(t => stream.addTrack(t)); }
@@ -2167,6 +2167,9 @@ function StepExport({ project, setProject }){
       const offCtx = offscreen.getContext('2d');
       const FADE_S = 0.4;
       const projectTitle = ((project.name && String(project.name).trim()) || (project.logline && String(project.logline).trim()) || 'Your AI-generated video').slice(0, 70);
+      const _titleTrim = String(project.name || '').trim();
+      const _loglineTrim = String(project.logline || '').trim();
+      const projectSubtitle = (_titleTrim && _loglineTrim && _loglineTrim !== _titleTrim) ? _loglineTrim.slice(0, 90) : '';
       const drawIntro = (alpha, scaleProgress) => {
         ctx.globalAlpha = 1;
         ctx.fillStyle = '#0a0a0a'; ctx.fillRect(0, 0, W, H);
@@ -2181,9 +2184,13 @@ function StepExport({ project, setProject }){
         ctx.translate(W/2, H/2);
         ctx.scale(scale, scale);
         ctx.fillStyle = '#fff'; ctx.font = 'bold 52px system-ui, -apple-system, Segoe UI, sans-serif';
-        ctx.fillText(projectTitle, 0, -6);
-        ctx.fillStyle = 'rgba(255,255,255,0.55)'; ctx.font = '20px system-ui';
-        ctx.fillText('zaidsaid.com', 0, 44);
+        ctx.fillText(projectTitle, 0, projectSubtitle ? -28 : -6);
+        if(projectSubtitle){
+          ctx.fillStyle = 'rgba(255,255,255,0.78)'; ctx.font = '22px system-ui, -apple-system, Segoe UI, sans-serif';
+          ctx.fillText(projectSubtitle, 0, 18);
+        }
+        ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.font = '18px system-ui';
+        ctx.fillText('zaidsaid.com', 0, projectSubtitle ? 62 : 44);
         ctx.restore();
         ctx.globalAlpha = 1;
       };
