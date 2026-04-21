@@ -2095,13 +2095,30 @@ function StepExport({ project, setProject }){
       rec.start();
       const recStart = audioCtx ? audioCtx.currentTime + 0.05 : 0;
       if(audioCtx && audioDest){
+        const AUDIO_FADE_S = 0.35;
         let cum = INTRO_S;
         for(let i=0; i<scenes.length; i++){
           const ab = audioBuffers[i];
           if(ab){
             const src = audioCtx.createBufferSource();
-            src.buffer = ab; src.connect(audioDest);
-            try { src.start(recStart + cum); } catch(_){}
+            const gain = audioCtx.createGain();
+            src.buffer = ab; src.connect(gain); gain.connect(audioDest);
+            const startAt = recStart + cum;
+            const audibleDur = Math.min(ab.duration, durations[i]);
+            const isFirst = (i === 0);
+            const isLast = (i === scenes.length - 1);
+            if(isFirst){
+              gain.gain.setValueAtTime(1, startAt);
+            } else {
+              gain.gain.setValueAtTime(0, startAt);
+              gain.gain.linearRampToValueAtTime(1, startAt + AUDIO_FADE_S);
+            }
+            if(!isLast){
+              const fadeOutStart = startAt + Math.max(AUDIO_FADE_S + 0.01, audibleDur - AUDIO_FADE_S);
+              gain.gain.setValueAtTime(1, fadeOutStart);
+              gain.gain.linearRampToValueAtTime(0, fadeOutStart + AUDIO_FADE_S);
+            }
+            try { src.start(startAt); } catch(_){}
           }
           cum += durations[i];
         }
