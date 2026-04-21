@@ -1,4 +1,4 @@
-/* Zaidsaid — app.js v2.0 — x61: First-3-Seconds Scorecard — per-clip hook-speed diagnostic (score 1-10, verdict, fix) for creators
+/* Zaidsaid — app.js v2.0 — x62: Objection Pre-Answer — per-clip viewer-objection predictor + preemptive script lines (emerald panel) for mid-clip retention
  * Security: localStorage namespaced as zaidsaid.v2.*, error boundary, no innerHTML, no eval, no fetch.
  * Archived v1 seed data preserved under ARCHIVE_* for later reuse.
  */
@@ -100,7 +100,8 @@ const I = {
   starOutline: (p)=> <svg viewBox="0 0 24 24" width={p?.size||14} height={p?.size||14} fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M12 2.5 14.9 9l6.6.6-5 4.4 1.5 6.5L12 17l-6 3.5L7.5 14l-5-4.4L9.1 9z"/></svg>,
   globe: (p)=> <svg viewBox="0 0 24 24" width={p?.size||14} height={p?.size||14} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/></svg>,
   comment: (p)=> <svg viewBox="0 0 24 24" width={p?.size||14} height={p?.size||14} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M21 12a8 8 0 1 1-3.2-6.4L21 5v7z"/></svg>,
-  clock: (p)=> <svg viewBox="0 0 24 24" width={p?.size||14} height={p?.size||14} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>,  palette: (p)=> <svg viewBox="0 0 24 24" width={p?.size||14} height={p?.size||14} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M12 3a9 9 0 1 0 0 18c1.5 0 2-1 2-2s-.5-1.5-.5-2 .5-1.5 2-1.5H18a3 3 0 0 0 3-3 9 9 0 0 0-9-9Z"/><circle cx="7.5" cy="10.5" r="1"/><circle cx="12" cy="7.5" r="1"/><circle cx="16.5" cy="10.5" r="1"/></svg>,
+  clock: (p)=> <svg viewBox="0 0 24 24" width={p?.size||14} height={p?.size||14} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>,
+  shield: (p)=> <svg viewBox="0 0 24 24" width={p?.size||14} height={p?.size||14} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M12 3 4 7v6c0 5.25 3.5 8 8 8.5 4.5-.5 8-3.25 8-8.5V7z"/><path d="m9 12 2 2 4-4"/></svg>,  palette: (p)=> <svg viewBox="0 0 24 24" width={p?.size||14} height={p?.size||14} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M12 3a9 9 0 1 0 0 18c1.5 0 2-1 2-2s-.5-1.5-.5-2 .5-1.5 2-1.5H18a3 3 0 0 0 3-3 9 9 0 0 0-9-9Z"/><circle cx="7.5" cy="10.5" r="1"/><circle cx="12" cy="7.5" r="1"/><circle cx="16.5" cy="10.5" r="1"/></svg>,
   menu: (p)=> <svg viewBox="0 0 24 24" width={p?.size||14} height={p?.size||14} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M3 6h18M3 12h18M3 18h18"/></svg>,
   layers: (p)=> <svg viewBox="0 0 24 24" width={p?.size||14} height={p?.size||14} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M12 3 2 8l10 5 10-5-10-5Z"/><path d="M2 13l10 5 10-5"/><path d="M2 18l10 5 10-5"/></svg>,
   eye: (p)=> <svg viewBox="0 0 24 24" width={p?.size||14} height={p?.size||14} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>,
@@ -3074,7 +3075,7 @@ function RepurposeTranscriptStrip({ project }){
   );
 }
 
-function RepurposeClipCard({ clip, onField, onRegen, onRemove, onExplain, explainBusy, onHookAlts, hookAltsBusy, onThumbConcept, thumbConceptBusy, onHookScore, hookScoreBusy }){
+function RepurposeClipCard({ clip, onField, onRegen, onRemove, onExplain, explainBusy, onHookAlts, hookAltsBusy, onThumbConcept, thumbConceptBusy, onHookScore, hookScoreBusy, onObjAnswer, objAnswerBusy }){
   const band = viralityBand(clip.virality);
   const preset = REPURPOSE_PRESETS.find(p => p.id === clip.preset) || REPURPOSE_PRESETS[0];
   const previewW = preset.id === "vertical" ? 72 : (preset.id === "square" ? 90 : 128);
@@ -3191,6 +3192,10 @@ function RepurposeClipCard({ clip, onField, onRegen, onRemove, onExplain, explai
             {hookScoreBusy ? "Scoring..." : (clip.hookScore ? I.refresh({size:12}) : I.clock({size:12}))}
             {" "}{hookScoreBusy ? "" : (clip.hookScore ? "Re-score" : "Hook speed")}
           </button>
+          <button className="chip" onClick={onObjAnswer} disabled={!!objAnswerBusy} aria-label="Predict viewer objections and preemptive lines">
+            {objAnswerBusy ? "Predicting…" : (clip.objections ? I.refresh({size:12}) : I.shield({size:12}))}
+            {" "}{objAnswerBusy ? "" : (clip.objections ? "Refresh" : "Objections")}
+          </button>
         </div>
         <div className="flex items-center gap-1">
           <span className="chip">Status: {clip.status || "draft"}</span>
@@ -3291,6 +3296,19 @@ function RepurposeClipCard({ clip, onField, onRegen, onRemove, onExplain, explai
           </div>
         );
       })()}
+      {Array.isArray(clip.objections) && clip.objections.length > 0 && (
+        <div className="mt-3 rounded-xl border border-emerald-400/20 bg-emerald-500/8 p-3">
+          <div className="text-[11px] uppercase tracking-widest text-emerald-300/70 mb-2">Objection Pre-Answer</div>
+          <div className="grid gap-3">
+            {clip.objections.map((obj, i) => obj && (
+              <div key={i} className="text-[12px]">
+                <div><span className="text-[11px] uppercase tracking-widest text-emerald-300/60 block mb-0.5">Objection {i + 1}</span><span className="text-white/80 italic">&ldquo;{obj.objection}&rdquo;</span></div>
+                <div className="mt-1"><span className="text-[11px] uppercase tracking-widest text-emerald-300/60 block mb-0.5">Say before it</span><span className="text-emerald-100/90">{obj.preemptive}</span></div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -3659,6 +3677,82 @@ function generateHookScoreLocal(clip){
 }
 /* ---- end First-3-Seconds Scorecard helpers ---- */
 
+/* ---- Objection Pre-Answer helpers (x62) ---- */
+async function generateObjAnswerViaClaude(proxyUrl, clip, project){
+  const url = (proxyUrl||"").replace(/\/$/, "") + "/v1/messages";
+  const tool = {
+    name: "emit_objections",
+    description: "Predict up to 3 viewer objections that could cause mid-clip drop-off, and generate a 1–2 sentence preemptive script line the creator can say *before* each objection fires.",
+    input_schema: {
+      type: "object",
+      properties: {
+        objections: {
+          type: "array",
+          maxItems: 3,
+          description: "Array of up to 3 objection+preemptive pairs ordered by drop-off risk (highest first).",
+          items: {
+            type: "object",
+            properties: {
+              objection: { type: "string", description: "The viewer's internal pushback in plain language, ≤12 words, written as a thought they'd have mid-watch (e.g. 'That only works if you already have money')." },
+              preemptive: { type: "string", description: "1–2 sentence script line the creator says *before* this objection fires. Start with a transitional phrase like 'Now you might be thinking…' or 'Before you say…'. Keep it conversational." },
+            },
+            required: ["objection","preemptive"],
+          },
+        },
+      },
+      required: ["objections"],
+    },
+  };
+  const brand = (project && project.brand) || "";
+  const systemMsg = "You are a short-form video retention coach. Analyze the clip content and predict the top viewer objections that cause people to stop watching before the end. For each, write a preemptive script line the creator can weave in to neutralize the objection before it forms. Return tool_use only.";
+  const userMsg = "BRAND: " + brand + "\n\nCLIP TITLE: " + (clip.title||"") + "\n\nHOOK: " + (clip.hook||"") + "\n\nCAPTION: " + (clip.caption||"");
+  const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 700, system: systemMsg, tools: [tool], tool_choice: { type: "tool", name: "emit_objections" }, messages: [{ role: "user", content: userMsg }] }) });
+  if(!r.ok) throw new Error("HTTP " + r.status);
+  const j = await r.json();
+  const block = Array.isArray(j.content) ? j.content.find(c => c && c.type === "tool_use" && c.name === "emit_objections") : null;
+  if(!block || !block.input) throw new Error("no tool_use");
+  const arr = Array.isArray(block.input.objections) ? block.input.objections : [];
+  return arr.filter(o => o && o.objection && o.preemptive).slice(0, 3);
+}
+function generateObjAnswerLocal(clip){
+  const text = ((clip.title||"") + " " + (clip.hook||"") + " " + (clip.caption||"")).toLowerCase();
+  const pools = [
+    {
+      triggers: ["money","invest","financ","rich","wealth","afford","cost","price","cheap","expensiv"],
+      objection: "That only works if you already have money",
+      preemptive: "Now before you say this is only for people with a big budget — the research shows the opposite. The smallest consistent action outperforms the occasional large one every time.",
+    },
+    {
+      triggers: ["time","busy","schedule","daily","morning","habit","routine","every day","consistent"],
+      objection: "I don't have time for this",
+      preemptive: "I know what you're thinking — you don't have time. But we're talking about something so small it fits in a gap you already have.",
+    },
+    {
+      triggers: ["science","study","research","evidence","proof","data","fact","expert","doctor"],
+      objection: "That's just one cherry-picked study",
+      preemptive: "And yes, a single study can be misleading — so let me give you the meta-analysis picture instead of just one data point.",
+    },
+    {
+      triggers: ["hard","difficult","disciplin","motivat","willpower","effort","challeng","tough"],
+      objection: "I've tried this before and it didn't work",
+      preemptive: "Here's the part most people skip: the reason it didn't stick last time probably wasn't you — it was the sequence. Let me show you what changes the outcome.",
+    },
+    {
+      triggers: ["everyone","always","never","best","worst","all","most","guaranteed","definit"],
+      objection: "This sounds too good to be true",
+      preemptive: "Before you scroll — I'm not going to tell you this works for everyone, because it doesn't. But here's the specific condition where it consistently does.",
+    },
+  ];
+  const matched = pools.filter(p => p.triggers.some(t => text.includes(t)));
+  const fallback = [
+    { objection: "This doesn't apply to my situation", preemptive: "Now, this might feel niche — but the underlying principle applies much more broadly than you might think. Here's why." },
+    { objection: "I've heard this before", preemptive: "Stay with me, because the part most people miss — even if they've seen a version of this — is coming up in about ten seconds." },
+  ];
+  const results = matched.length > 0 ? matched.slice(0, 3) : fallback.slice(0, 2);
+  return results.map(r => ({ objection: r.objection, preemptive: r.preemptive }));
+}
+/* ---- end Objection Pre-Answer helpers ---- */
+
 function RepurposeTab(){
   const [project, setProject] = useLocalState("repurpose.project", REPURPOSE_SEED);
   useEffect(() => {
@@ -3728,6 +3822,21 @@ function RepurposeTab(){
   };
   const [thumbBusyId, setThumbBusyId] = useState(null);
   const [hookScoreBusyId, setHookScoreBusyId] = useState(null);
+  const [objAnswerBusyId, setObjAnswerBusyId] = useState(null);
+  const generateObjAnswer = async (clipId) => {
+    if(objAnswerBusyId) return;
+    const clip = project.clips.find(c => c.id === clipId);
+    if(!clip) return;
+    setObjAnswerBusyId(clipId);
+    const path = getAnthropicPath();
+    let objs = null;
+    if(path){
+      try { objs = await generateObjAnswerViaClaude(path, clip, project); } catch(e){ objs = null; }
+    }
+    if(!objs || !objs.length) objs = generateObjAnswerLocal(clip);
+    setProject(prev => ({ ...prev, clips: prev.clips.map(c => c.id === clipId ? { ...c, objections: objs } : c) }));
+    setObjAnswerBusyId(null);
+  };
   const generateHookScore = async (clipId) => {
     if(hookScoreBusyId) return;
     const clip = project.clips.find(c => c.id === clipId);
@@ -3917,6 +4026,8 @@ const removeClip = (clipId) => {
                     thumbConceptBusy={thumbBusyId === c.id}
                     onHookScore={()=>generateHookScore(c.id)}
                     hookScoreBusy={hookScoreBusyId === c.id}
+                    onObjAnswer={()=>generateObjAnswer(c.id)}
+                    objAnswerBusy={objAnswerBusyId === c.id}
                   />
                 </div>
               );
