@@ -1610,7 +1610,7 @@ function StepStoryboard({ project, setProject }){
         <div className="flex items-center justify-between gap-3">
           <div>
             <div className="text-[12px] uppercase tracking-wide text-[color:var(--muted)]">Visuals</div>
-            <div className="text-lg font-semibold">Generate scene images</div>
+            <div className="text-lg font-semibold flex items-center gap-2">Generate scene images{(() => { const total = (project.scenes||[]).length; const done = (project.scenes||[]).filter(s => s.image).length; if(!total) return null; const pct = Math.round((done/total)*100); const allDone = done === total; return (<span className={"text-[11px] font-medium px-2 py-0.5 rounded-full border " + (allDone ? "text-emerald-200 border-emerald-400/30 bg-emerald-500/10" : "text-indigo-200 border-indigo-400/30 bg-indigo-500/10")}>{done} / {total}{allDone ? " · ready" : (imgBusy ? " · " + pct + "%" : "")}</span>); })()}</div>
             <div className="text-[12px] text-[color:var(--muted)] mt-1">Stability AI when configured, deterministic SVG locally otherwise. Uses each scene&apos;s shot prompt.</div>
           </div>
           <button className="btn btn-primary" onClick={generateAllImages} disabled={imgBusy}>{imgBusy ? 'Rendering…' : 'Generate all images'}</button>
@@ -1871,7 +1871,7 @@ function StepVoice({ project, setProject }){
         <div className="flex items-center justify-between gap-3">
           <div>
             <div className="text-[12px] uppercase tracking-wide text-[color:var(--muted)]">Voiceover</div>
-            <div className="text-lg font-semibold">Generate scene audio</div>
+            <div className="text-lg font-semibold flex items-center gap-2">Generate scene audio{(() => { const total = (project.scenes||[]).length; const done = (project.scenes||[]).filter(s => s.audioSource).length; if(!total) return null; const pct = Math.round((done/total)*100); const allDone = done === total; return (<span className={"text-[11px] font-medium px-2 py-0.5 rounded-full border " + (allDone ? "text-emerald-200 border-emerald-400/30 bg-emerald-500/10" : "text-indigo-200 border-indigo-400/30 bg-indigo-500/10")}>{done} / {total}{allDone ? " · ready" : (voiceBusy ? " · " + pct + "%" : "")}</span>); })()}</div>
             <div className="text-[12px] text-[color:var(--muted)] mt-1">ElevenLabs when configured (returns audio data), browser SpeechSynthesis as live-playback fallback.</div>
           </div>
           <button className="btn btn-primary" onClick={generateAllVoices} disabled={voiceBusy}>{voiceBusy ? 'Synthesizing…' : 'Generate all voices'}</button>
