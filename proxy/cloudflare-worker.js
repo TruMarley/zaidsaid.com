@@ -1,5 +1,5 @@
 /**
- * Zaidsaid multi-vendor proxy — Cloudflare Worker template
+ * Zaidsaid multi-vendor proxy â Cloudflare Worker template
  *
  * Deploy: `wrangler deploy`
  * Secrets:
@@ -10,7 +10,7 @@
  *   wrangler secret put ANTHROPIC_KEY
  * wrangler secret put XAI_KEY
  *
- * Then in Zaidsaid (Settings → Providers), set each vendor's Proxy URL to
+ * Then in Zaidsaid (Settings â Providers), set each vendor's Proxy URL to
  * your deployed worker, e.g. https://my-zaidsaid-proxy.workers.dev/elevenlabs
  */
 
@@ -55,6 +55,65 @@ function corsHeaders(req) {
   };
 }
 
+function extractVideoId(input) {
+  if (!input) return null;
+  const s = String(input).trim();
+  if (/^[A-Za-z0-9_-]{11}$/.test(s)) return s;
+  const m = s.match(/(?:v=|youtu\.be\/|\/embed\/|\/shorts\/)([A-Za-z0-9_-]{11})/);
+  return m ? m[1] : null;
+}
+
+function extractJsonObject(text, marker) {
+  const startIdx = text.indexOf(marker);
+  if (startIdx < 0) return null;
+  const openIdx = text.indexOf("{", startIdx);
+  if (openIdx < 0) return null;
+  let depth = 0, inStr = false, esc = false;
+  for (let i = openIdx; i < text.length; i++) {
+    const c = text[i];
+    if (esc) { esc = false; continue; }
+    if (c === "\\") { esc = true; continue; }
+    if (c === '"') { inStr = !inStr; continue; }
+    if (inStr) continue;
+    if (c === "{") depth++;
+    else if (c === "}") { depth--; if (depth === 0) return text.slice(openIdx, i + 1); }
+  }
+  return null;
+}
+
+async function fetchYouTubeTranscript(videoId) {
+  const pageRes = await fetch("https://www.youtube.com/watch?v=" + videoId + "&hl=en", {
+    headers: {
+      "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "Accept-Language": "en-US,en;q=0.9"
+    }
+  });
+  if (!pageRes.ok) throw new Error("YouTube page HTTP " + pageRes.status);
+  const html = await pageRes.text();
+  const jsonStr = extractJsonObject(html, "ytInitialPlayerResponse");
+  if (!jsonStr) throw new Error("Could not find ytInitialPlayerResponse");
+  let data;
+  try { data = JSON.parse(jsonStr); } catch (e) { throw new Error("Could not parse player response: " + e.message); }
+  const tracks = (((data.captions || {}).playerCaptionsTracklistRenderer || {}).captionTracks) || [];
+  if (!tracks.length) throw new Error("Video has no caption tracks");
+  const preferred = tracks.find(t => (t.languageCode || "").toLowerCase().startsWith("en")) || tracks[0];
+  const trackUrl = preferred.baseUrl + "&fmt=json3";
+  const capRes = await fetch(trackUrl);
+  if (!capRes.ok) throw new Error("Captions HTTP " + capRes.status);
+  const capJson = await capRes.json();
+  const events = capJson.events || [];
+  const parts = [];
+  for (const ev of events) {
+    if (!ev.segs) continue;
+    for (const seg of ev.segs) { if (seg.utf8) parts.push(seg.utf8); }
+  }
+  const title = ((data.videoDetails || {}).title) || "";
+  const author = ((data.videoDetails || {}).author) || "";
+  const lengthSeconds = Number((data.videoDetails || {}).lengthSeconds) || 0;
+  const transcript = parts.join("").replace(/\s+/g, " ").trim();
+  return { videoId, title, author, lengthSeconds: transcript.length !== undefined ? lengthSeconds : lengthSeconds, language: preferred.languageCode || "en", transcript };
+}
+
 export default {
   async fetch(req, env) {
     const url = new URL(req.url);
@@ -65,11 +124,32 @@ export default {
       return new Response(null, { status: 204, headers: cors });
     }
 
-    // Health check — used by Zaidsaid's "Test" button
+    // Health check â used by Zaidsaid's "Test" button
     if (url.pathname === "/ping") {
       return new Response(JSON.stringify({ ok: true, ts: Date.now() }), {
         headers: { ...cors, "Content-Type": "application/json" }
       });
+    }
+
+    // YouTube transcript extraction (custom, not a simple vendor proxy)
+    if (url.pathname === "/youtube-transcript") {
+      const raw = url.searchParams.get("v") || url.searchParams.get("url") || "";
+      const videoId = extractVideoId(raw);
+      if (!videoId) {
+        return new Response(JSON.stringify({ error: "missing or invalid videoId" }), {
+          status: 400, headers: { ...cors, "Content-Type": "application/json" }
+        });
+      }
+      try {
+        const result = await fetchYouTubeTranscript(videoId);
+        return new Response(JSON.stringify(result), {
+          headers: { ...cors, "Content-Type": "application/json" }
+        });
+      } catch (err) {
+        return new Response(JSON.stringify({ error: String((err && err.message) || err), videoId }), {
+          status: 502, headers: { ...cors, "Content-Type": "application/json" }
+        });
+      }
     }
 
     // Parse: /<vendor>/<rest-of-path>
@@ -82,7 +162,7 @@ export default {
       });
     }
 
-    // Basic abuse guard — very permissive, tighten before prod
+    // Basic abuse guard â very permissive, tighten before prod
     if (req.method === "POST") {
       const ct = req.headers.get("content-type") || "";
       if (!ct.includes("application/json") && !ct.includes("multipart/form-data") && !ct.includes("audio/")) {
