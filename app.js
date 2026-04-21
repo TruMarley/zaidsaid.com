@@ -2130,11 +2130,33 @@ function StepExport({ project, setProject }){
         context.fillStyle = 'rgba(99,102,241,0.9)';
         context.fillRect(0, 0, W * g, barH);
       };
+      const wrapText = (context, text, maxW, maxLines) => {
+        const words = String(text||'').split(/\s+/).filter(Boolean);
+        const lines = [];
+        let cur = '';
+        for(const w of words){
+          const trial = cur ? cur + ' ' + w : w;
+          if(context.measureText(trial).width <= maxW){
+            cur = trial;
+          } else {
+            if(cur) lines.push(cur);
+            cur = w;
+            if(maxLines && lines.length >= maxLines) break;
+          }
+        }
+        if(cur && (!maxLines || lines.length < maxLines)) lines.push(cur);
+        return lines.slice(0, maxLines || lines.length);
+      };
       const drawSceneToCtx = (context, idx, progress, globalProgress) => {
         const p = Math.max(0, Math.min(1, progress || 0));
         context.globalAlpha = 1;
         context.fillStyle = '#0a0a0a'; context.fillRect(0,0,W,H);
         const sc = scenes[idx];
+        const voFull = (sc.voLine||'').slice(0, 140);
+        context.font = '24px system-ui';
+        const voLayout = wrapText(context, voFull, W - 120, 2);
+        const isMultiLine = voLayout.length >= 2;
+        const bandH = isMultiLine ? 230 : 200;
         if(imgs[idx]){
           const img = imgs[idx];
           const variant = idx % 5;
@@ -2150,10 +2172,10 @@ function StepExport({ project, setProject }){
           else if(variant === 3){ panY = -slack * 0.7 * H * p; }
           else if(variant === 4){ panY = slack * 0.7 * H * p; }
           context.drawImage(img, (W-dw)/2 + panX, (H-dh)/2 + panY, dw, dh);
-          const bandGrad = context.createLinearGradient(0, H-200, 0, H);
+          const bandGrad = context.createLinearGradient(0, H-bandH, 0, H);
           bandGrad.addColorStop(0, 'rgba(0,0,0,0)');
           bandGrad.addColorStop(1, 'rgba(0,0,0,0.72)');
-          context.fillStyle = bandGrad; context.fillRect(0, H-200, W, 200);
+          context.fillStyle = bandGrad; context.fillRect(0, H-bandH, W, bandH);
         } else {
           context.fillStyle = '#1a1a1a'; context.fillRect(40,40,W-80,H-80);
         }
@@ -2163,17 +2185,18 @@ function StepExport({ project, setProject }){
         context.shadowOffsetY = 2;
         context.fillStyle = '#fff'; context.font = 'bold 42px system-ui';
         const title = (sc.title||('Scene '+(idx+1))).slice(0,60);
-        context.fillText(title, 60, H-100);
+        context.fillText(title, 60, isMultiLine ? H-128 : H-100);
         context.shadowBlur = 6;
         context.font = '24px system-ui'; context.fillStyle = 'rgba(255,255,255,0.92)';
-        const voFull = (sc.voLine||'').slice(0,90);
         const _ab = audioBuffers[idx];
         const _audibleRatio = _ab ? Math.min(1, Math.min(_ab.duration, durations[idx]) / durations[idx]) : 0.9;
         const _wordProgress = Math.min(1, p / Math.max(0.3, _audibleRatio * 0.95));
         const _words = voFull.split(/\s+/).filter(Boolean);
         const _revealed = _words.length ? Math.min(_words.length, Math.max(1, Math.floor(_words.length * _wordProgress))) : 0;
-        const vo = _words.slice(0, _revealed).join(' ');
-        context.fillText(vo, 60, H-50);
+        const voText = _words.slice(0, _revealed).join(' ');
+        const voLinesReveal = wrapText(context, voText, W - 120, 2);
+        const voYs = isMultiLine ? [H - 74, H - 38] : [H - 50];
+        voLinesReveal.forEach((ln, i) => { if(voYs[i] !== undefined) context.fillText(ln, 60, voYs[i]); });
         context.shadowColor = 'transparent';
         context.shadowBlur = 0;
         context.shadowOffsetY = 0;
