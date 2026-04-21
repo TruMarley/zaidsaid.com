@@ -1527,13 +1527,14 @@ function StepStoryboard({ project, setProject }){
     const stabPath = providers && providers.stability && providers.stability.proxyUrl;
     const polPath = providers && providers.pollinations && providers.pollinations.proxyUrl;
     let okStab=0, okPol=0, okLocal=0, guard=0;
+    const seen = new Set();
     while (guard++ < 40) {
       const scenesNow = (projectRef.current && projectRef.current.scenes) || [];
-      const pendingIdx = scenesNow.findIndex(s => !s.image);
-      if (pendingIdx < 0) break;
-      const s = scenesNow[pendingIdx];
-      const sceneId = s.id;
-      const prompt = (s.shot || s.title || s.voLine || 'cinematic establishing shot').slice(0,400);
+      const pending = scenesNow.find(s => !seen.has(s.id) && !s.image);
+      if (!pending) break;
+      const sceneId = pending.id;
+      seen.add(sceneId);
+      const prompt = (pending.shot || pending.title || pending.voLine || 'cinematic establishing shot').slice(0,400);
       let dataUrl, source;
       try {
         if(stabPath){ dataUrl = await generateImageViaStability(stabPath, prompt); source='stability'; okStab++; }
@@ -1741,13 +1742,14 @@ function StepVoice({ project, setProject }){
     let providers = {}; try { providers = safeGet('providers', {}) || {}; } catch(e){}
     const path = providers && providers.elevenlabs && providers.elevenlabs.proxyUrl;
     let okEl=0, okLocal=0, errs=0, guard=0;
+    const seen = new Set();
     while (guard++ < 40) {
       const scenesNow = (projectRef.current && projectRef.current.scenes) || [];
-      const pendingIdx = scenesNow.findIndex(s => !s.audioSource);
-      if (pendingIdx < 0) break;
-      const s = scenesNow[pendingIdx];
-      const sceneId = s.id;
-      const text = (s.voLine || s.script || s.title || '').toString();
+      const pending = scenesNow.find(s => !seen.has(s.id) && !s.audioSource);
+      if (!pending) break;
+      const sceneId = pending.id;
+      seen.add(sceneId);
+      const text = (pending.voLine || pending.script || pending.title || '').toString();
       let patch = null;
       if(!text.trim()){
         patch = { audio: null, audioSource: 'skipped' };
