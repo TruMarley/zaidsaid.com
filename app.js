@@ -1,4 +1,4 @@
-/* Zaidsaid — app.js v2.0 — x79: Share Helper — per-clip Share chip expands to platform row (TikTok/Instagram/Shorts/YouTube/X/Rumble); clicking a platform copies caption, renders+downloads .webm if source uploaded, and opens that platform's upload page
+/* Zaidsaid — app.js v2.0 — x80: Smart Clipping — viral moment detection. Worker /youtube-transcript returns segments[{t,d,text}]. analyzeViaClaude uses timestamped transcript with 4-dimension scoring (hook_power/emotional_impact/quotability/surprise_drama). analyzeLocal scores ~45-75s windows, picks top N with spatial diversity across full duration. YT iframe autoplay+loop within clip range; uploaded video autoplay muted with loop-on-end.
  * Security: localStorage namespaced as zaidsaid.v2.*, error boundary, no innerHTML, no eval, no fetch.
  * Archived v1 seed data preserved under ARCHIVE_* for later reuse.
  */
@@ -1025,27 +1025,292 @@ const mvpCallClaude = async (proxyUrl, messages, opts) => {
   return res.json();
 };
 
-// MVP-F: Real Repurpose Analyze via Claude
-const analyzeViaClaude = async (proxyUrl, sourceText, targetCount) => {
-  const tools = [{ name:'emit_clips', description:'Return short-form clips extracted from the source transcript or description.', input_schema:{ type:'object', properties:{ clips:{ type:'array', items:{ type:'object', properties:{ title:{type:'string'}, hook:{type:'string'}, caption:{type:'string'}, start:{type:'number'}, end:{type:'number'}, virality:{type:'number'}, preset:{type:'string', enum:['vertical','square','landscape']} }, required:['title','hook','caption','start','end','virality','preset'] } } }, required:['clips'] } }];
-  const sys = 'You are a video repurposing analyst. Given long-form source content, identify the highest-virality short-form clips. Return ONLY via the emit_clips tool. Pick around the requested target count. Score virality 0-100. Use seconds for start/end. Pick preset based on platform fit.';
-  const userMsg = 'Target clip count: ' + (targetCount||5) + '\n\nSource:\n' + (sourceText||'').slice(0, 6000);
-  const j = await mvpCallClaude(proxyUrl, [{role:'user', content:userMsg}], { system:sys, tools, tool_choice:{type:'tool', name:'emit_clips'}, max_tokens:2048 });
-  const tu = (j.content||[]).find(b => b.type==='tool_use' && b.name==='emit_clips');
-  if(!tu || !tu.input || !Array.isArray(tu.input.clips)) throw new Error('No emit_clips tool_use in response');
-  return tu.input.clips.map((c,i) => ({ id:'c'+(i+1), title:String(c.title||'Untitled clip').slice(0,140), hook:String(c.hook||'').slice(0,200), caption:String(c.caption||'').slice(0,300), start:Number(c.start)||0, end:Number(c.end)||(Number(c.start)||0)+30, virality:Math.max(0,Math.min(100,Math.round(Number(c.virality)||60))), preset:['vertical','square','landscape'].includes(c.preset)?c.preset:'vertical', status:'draft' }));
+// x80: Format timestamp as H:MM:SS or M:SS
+const fmtTs = (sec) => {
+  const s = Math.max(0, Math.floor(Number(sec)||0));
+  const h = Math.floor(s/3600), m = Math.floor((s%3600)/60), ss = s%60;
+  return h > 0 ? (h + ':' + String(m).padStart(2,'0') + ':' + String(ss).padStart(2,'0')) : (m + ':' + String(ss).padStart(2,'0'));
 };
 
-// MVP-F: Local fallback — extract sentences, rank by length+keywords, mock timecodes.
-const analyzeLocal = (sourceText, targetCount) => {
+// x80: Build compact [t] text transcript from segments, chunking into ~6-12s windows for prompt size.
+const buildTimedTranscript = (segments, maxChars) => {
+  if(!Array.isArray(segments) || !segments.length) return { lines: [], totalDur: 0 };
+  const chunks = [];
+  let cur = null;
+  for(const seg of segments){
+    const t = Number(seg.t)||0;
+    const d = Number(seg.d)||0;
+    const text = String(seg.text||'').trim();
+    if(!text) continue;
+    if(!cur){ cur = { start: t, end: t+d, text }; continue; }
+    const span = (t+d) - cur.start;
+    if(span > 8 && cur.text.length > 40){ chunks.push(cur); cur = { start: t, end: t+d, text }; }
+    else { cur.end = t+d; cur.text = (cur.text + ' ' + text).trim(); }
+  }
+  if(cur) chunks.push(cur);
+  const totalDur = chunks.length ? chunks[chunks.length-1].end : 0;
+  let out = [];
+  let used = 0;
+  const cap = maxChars || 12000;
+  for(const c of chunks){
+    const line = '[' + fmtTs(c.start) + '] ' + c.text;
+    if(used + line.length + 1 > cap) break;
+    out.push(line);
+    used += line.length + 1;
+  }
+  return { lines: out, totalDur };
+};
+
+// x80: Parse pasted transcripts that include timestamps like "[0:12]", "0:12", "(0:12)", "00:12:34".
+// Returns segments [{t, d, text}] if timestamps detected, else empty array.
+const parsePastedTranscript = (text) => {
+  const src = String(text||'');
+  if(!src.trim()) return [];
+  // Capture any line that starts with an optional bracket/paren + H:MM:SS or M:SS + text
+  const re = /(?:^|\n)\s*[\[(]?\s*(\d{1,2}:\d{2}(?::\d{2})?)\s*[\])]?\s*[-:.\s]+\s*([^\n]+)/g;
+  const hits = [];
+  let m;
+  while((m = re.exec(src)) !== null){
+    const tsStr = m[1];
+    const parts = tsStr.split(':').map(n => Number(n));
+    let secs;
+    if(parts.length === 3) secs = parts[0]*3600 + parts[1]*60 + parts[2];
+    else if(parts.length === 2) secs = parts[0]*60 + parts[1];
+    else continue;
+    const t = (m[2]||'').trim();
+    if(!t) continue;
+    hits.push({ t: secs, text: t });
+  }
+  if(hits.length < 3) return [];
+  // Compute durations from successive starts; last gets a 5s default
+  const segs = [];
+  for(let i = 0; i < hits.length; i++){
+    const cur = hits[i];
+    const next = hits[i+1];
+    const d = next ? Math.max(0.5, next.t - cur.t) : 5;
+    segs.push({ t: +cur.t.toFixed(2), d: +d.toFixed(2), text: cur.text });
+  }
+  return segs;
+};
+
+// x80: MVP-F — Viral clip detection via Claude with timestamped segments + 4-dimension scoring
+const analyzeViaClaude = async (proxyUrl, sourceText, targetCount, segments, meta) => {
+  const tools = [{
+    name:'emit_clips',
+    description:'Return the N best viral short-form clip candidates with 4-dimension scoring.',
+    input_schema:{
+      type:'object',
+      properties:{
+        clips:{
+          type:'array',
+          items:{
+            type:'object',
+            properties:{
+              title:{type:'string', description:'Punchy 3-8 word title'},
+              hook:{type:'string', description:'Exact opening line from the transcript that pulls viewers in'},
+              caption:{type:'string', description:'1-sentence social caption summarizing the clip'},
+              start:{type:'number', description:'Clip start time in seconds'},
+              end:{type:'number', description:'Clip end time in seconds'},
+              hook_power:{type:'number', description:'0-10: does the opening demand attention?'},
+              emotional_impact:{type:'number', description:'0-10: shock, excitement, controversy, vulnerability'},
+              quotability:{type:'number', description:'0-10: standalone memorable phrase'},
+              surprise_drama:{type:'number', description:'0-10: unexpected reveal, conflict, or twist'},
+              preset:{type:'string', enum:['vertical','square','landscape']}
+            },
+            required:['title','hook','caption','start','end','hook_power','emotional_impact','quotability','surprise_drama','preset']
+          }
+        }
+      },
+      required:['clips']
+    }
+  }];
+  const hasSegments = Array.isArray(segments) && segments.length > 0;
+  const n = Math.max(1, Math.min(8, Number(targetCount)||5));
+  const sys = 'You are a viral short-form video strategist extracting TikTok/Reels/Shorts clips from long-form content. Rules:\n' +
+    '1. Each clip must be self-contained (no prior context needed)\n' +
+    '2. Must open with a hook (question, bold claim, conflict, surprising fact)\n' +
+    '3. Must close on a payoff, punchline, or resolution — NEVER mid-sentence\n' +
+    '4. Target 30-90 seconds of spoken content per clip\n' +
+    '5. Clips MUST span DIFFERENT moments across the full video — do not bunch at the start\n' +
+    '6. Use exact timestamps from the transcript for start/end\n' +
+    '7. Pick preset per platform fit: vertical (TikTok/Reels/Shorts default), square, or landscape\n' +
+    'Score each clip 0-10 on hook_power, emotional_impact, quotability, surprise_drama. Return ONLY via emit_clips tool.';
+  let userMsg;
+  if(hasSegments){
+    const { lines, totalDur } = buildTimedTranscript(segments, 14000);
+    const metaLine = meta && meta.title ? ('Video: "' + meta.title + '"' + (meta.author ? (' by ' + meta.author) : '') + '\n') : '';
+    userMsg = metaLine +
+      'Duration: ' + fmtTs(totalDur) + ' (' + Math.round(totalDur) + 's)\n' +
+      'Target clip count: ' + n + '\n\n' +
+      'Timestamped transcript (format: [M:SS] or [H:MM:SS] text):\n' + lines.join('\n') + '\n\n' +
+      'Extract exactly ' + n + ' viral clips. Each clip.start / clip.end MUST be in seconds (not formatted). ' +
+      'Distribute picks across the full ' + Math.round(totalDur) + 's duration — do not cluster near the start.';
+  } else {
+    userMsg = 'Target clip count: ' + n + '\n\n' +
+      'Source (no timestamps — infer approximate seconds across assumed duration):\n' +
+      String(sourceText||'').slice(0, 8000) + '\n\n' +
+      'Extract exactly ' + n + ' viral clips. Score each on the 4 dimensions.';
+  }
+  const j = await mvpCallClaude(proxyUrl, [{role:'user', content:userMsg}], { system:sys, tools, tool_choice:{type:'tool', name:'emit_clips'}, max_tokens:3072 });
+  const tu = (j.content||[]).find(b => b.type==='tool_use' && b.name==='emit_clips');
+  if(!tu || !tu.input || !Array.isArray(tu.input.clips)) throw new Error('No emit_clips tool_use in response');
+  return tu.input.clips.map((c,i) => {
+    const hp = Math.max(0,Math.min(10,Number(c.hook_power)||0));
+    const ei = Math.max(0,Math.min(10,Number(c.emotional_impact)||0));
+    const qu = Math.max(0,Math.min(10,Number(c.quotability)||0));
+    const sd = Math.max(0,Math.min(10,Number(c.surprise_drama)||0));
+    const virality = Math.round((hp*0.35 + ei*0.30 + qu*0.20 + sd*0.15) * 10);
+    const start = Math.max(0, Number(c.start)||0);
+    let end = Number(c.end)||start+45;
+    if(end <= start) end = start + 45;
+    if(end - start > 120) end = start + 90;
+    if(end - start < 15) end = start + 30;
+    return {
+      id:'c'+(i+1),
+      title:String(c.title||'Untitled clip').slice(0,140),
+      hook:String(c.hook||'').slice(0,240),
+      caption:String(c.caption||'').slice(0,300),
+      start: +start.toFixed(2),
+      end: +end.toFixed(2),
+      virality,
+      scores: { hook_power: hp, emotional_impact: ei, quotability: qu, surprise_drama: sd },
+      preset:['vertical','square','landscape'].includes(c.preset)?c.preset:'vertical',
+      status:'draft'
+    };
+  });
+};
+
+// x80: Score a segment for viral signals (0-10 each dimension, composite 0-100)
+const scoreSegmentViral = (text, segDurSec) => {
+  const t = String(text||'');
+  const lower = t.toLowerCase();
+  const wordCount = t.split(/\s+/).filter(Boolean).length;
+  const chars = t.length;
+  const density = segDurSec > 0 ? (chars / segDurSec) : 0;
+  const HOOK_KW = /\b(why|how|secret|truth|nobody|everyone|the one|never|always|biggest|worst|best|stop|start|hidden|surprising|actually|listen|here's|think about)\b/i;
+  const EMO_KW = /\b(shocking|incredible|crazy|insane|terrifying|amazing|unbelievable|devastating|miracle|changed my life|love|hate|fear|angry|furious|disgusting|beautiful)\b/i;
+  const DRAMA_KW = /\b(but then|suddenly|turns out|twist|actually|reveal|nobody knows|what nobody|behind the scenes|the truth is|real reason)\b/i;
+  const NUM_KW = /\b(\d+[%$k]|\$\d|\d+ (years|months|days|times|x)|first|only|#1|number one)\b/i;
+  const hookPower = Math.min(10,
+    (/^\s*(why|how|what|imagine|picture this|listen|have you|did you)\b/i.test(t) ? 4 : 0) +
+    (/\?/.test(t.slice(0, 120)) ? 2 : 0) +
+    (HOOK_KW.test(t) ? 3 : 0) +
+    (density > 15 ? 1 : 0)
+  );
+  const emotionalImpact = Math.min(10,
+    (EMO_KW.test(t) ? 5 : 0) +
+    ((t.match(/!/g)||[]).length >= 1 ? 2 : 0) +
+    (/\b(i (felt|was|thought|couldn't)|my (heart|mind|life))\b/i.test(t) ? 3 : 0)
+  );
+  const quotability = Math.min(10,
+    (wordCount >= 6 && wordCount <= 30 ? 4 : wordCount > 30 && wordCount <= 60 ? 2 : 0) +
+    (/[""].+[""]/.test(t) ? 2 : 0) +
+    (/\b(the (real|only|biggest|truth|secret)|what matters|the point)\b/i.test(t) ? 3 : 0) +
+    (/^[A-Z]/.test(t) && /[.!?]$/.test(t) ? 1 : 0)
+  );
+  const surpriseDrama = Math.min(10,
+    (DRAMA_KW.test(t) ? 5 : 0) +
+    (NUM_KW.test(t) ? 3 : 0) +
+    (/\b(no one|never before|first time|last time|the one thing)\b/i.test(t) ? 2 : 0)
+  );
+  const virality = Math.round((hookPower*0.35 + emotionalImpact*0.30 + quotability*0.20 + surpriseDrama*0.15) * 10);
+  return { hookPower, emotionalImpact, quotability, surpriseDrama, virality };
+};
+
+// x80: Local fallback — score timestamped segments, pick top N spread across duration.
+const analyzeLocal = (sourceText, targetCount, segments) => {
+  const n = Math.max(1, Math.min(8, Number(targetCount)||5));
+  const hasSegments = Array.isArray(segments) && segments.length > 0;
+  if(hasSegments){
+    const { lines, totalDur } = buildTimedTranscript(segments, 60000);
+    void lines;
+    // Chunk segments into ~45-75s candidate windows, step ~30s
+    const windowMin = 30, windowMax = 75, step = 25;
+    const candidates = [];
+    for(let startT = 0; startT < totalDur; startT += step){
+      const endT = Math.min(totalDur, startT + windowMax);
+      const winSegs = segments.filter(s => {
+        const t = Number(s.t)||0;
+        return t >= startT && t < endT;
+      });
+      if(!winSegs.length) continue;
+      const winText = winSegs.map(s => s.text).join(' ').replace(/\s+/g,' ').trim();
+      const winDur = Math.max(windowMin, Math.min(windowMax, endT - startT));
+      if(winText.length < 60) continue;
+      const score = scoreSegmentViral(winText, winDur);
+      const actualEnd = Math.min(totalDur, startT + Math.max(windowMin, Math.min(windowMax, winDur)));
+      candidates.push({ start: startT, end: actualEnd, text: winText, ...score });
+    }
+    if(candidates.length === 0) return analyzeLocalFromText(sourceText, n);
+    // Pick top N with spatial diversity — greedily select highest virality, skip windows that overlap prior picks by >50%
+    candidates.sort((a,b) => b.virality - a.virality);
+    const picked = [];
+    for(const cand of candidates){
+      if(picked.length >= n) break;
+      const overlap = picked.some(p => {
+        const ovStart = Math.max(p.start, cand.start);
+        const ovEnd = Math.min(p.end, cand.end);
+        const ov = Math.max(0, ovEnd - ovStart);
+        const shorter = Math.min(p.end-p.start, cand.end-cand.start);
+        return shorter > 0 && (ov / shorter) > 0.5;
+      });
+      if(!overlap) picked.push(cand);
+    }
+    if(picked.length < n){
+      for(const cand of candidates){
+        if(picked.length >= n) break;
+        if(!picked.includes(cand)) picked.push(cand);
+      }
+    }
+    picked.sort((a,b) => a.start - b.start);
+    return picked.slice(0, n).map((p, i) => {
+      const firstSent = (p.text.split(/(?<=[.!?])\s+/)[0] || p.text).slice(0, 140);
+      return {
+        id: 'c'+(i+1),
+        title: firstSent.slice(0, 90),
+        hook: firstSent,
+        caption: p.text.slice(0, 240),
+        start: +p.start.toFixed(2),
+        end: +p.end.toFixed(2),
+        virality: p.virality,
+        scores: { hook_power: p.hookPower, emotional_impact: p.emotionalImpact, quotability: p.quotability, surprise_drama: p.surpriseDrama },
+        preset: i%3===0 ? 'vertical' : (i%3===1 ? 'square' : 'landscape'),
+        status: 'draft'
+      };
+    });
+  }
+  return analyzeLocalFromText(sourceText, n);
+};
+
+// x80: Pure-text fallback (no timestamps). Spreads synthetic timecodes across assumed duration.
+const analyzeLocalFromText = (sourceText, n) => {
   const text = String(sourceText||'').trim();
   if(!text) return [];
   const sents = text.split(/(?<=[.!?])\s+/).map(s=>s.trim()).filter(s=>s.length>30);
-  const HOOKS = /\b(why|how|secret|truth|nobody|everyone|the one|never|always|biggest|worst|best|stop|start|hidden|surprising)\b/i;
-  const scored = sents.map((s,i) => ({ s, i, score: Math.min(100, Math.round(50 + Math.min(20, s.length/8) + (HOOKS.test(s)?20:0) + (i<5?5:0))) }));
-  scored.sort((a,b)=>b.score-a.score);
-  const top = scored.slice(0, Math.max(1, Math.min(8, targetCount||5)));
-  return top.map((row,i) => { const t = row.s; const start = 60 + i*180; return { id:'c'+(i+1), title: t.slice(0,90), hook: t.split(/[,;:]/)[0].slice(0,140), caption: t.slice(0,200), start, end: start+30+(i%3)*5, virality: row.score, preset: i%3===0?'vertical':(i%3===1?'square':'landscape'), status:'draft' }; });
+  if(!sents.length) return [];
+  const scored = sents.map((s,i) => {
+    const sc = scoreSegmentViral(s, Math.max(3, s.length/15));
+    return { s, i, ...sc };
+  });
+  scored.sort((a,b) => b.virality - a.virality);
+  const top = scored.slice(0, Math.max(1, Math.min(8, n)));
+  top.sort((a,b) => a.i - b.i);
+  const totalAssumed = Math.max(180, sents.length * 6);
+  return top.map((row,i) => {
+    const start = Math.round((row.i / Math.max(1, sents.length-1)) * (totalAssumed - 60));
+    return {
+      id:'c'+(i+1),
+      title: row.s.slice(0,90),
+      hook: row.s.split(/[,;:]/)[0].slice(0,140),
+      caption: row.s.slice(0,240),
+      start,
+      end: start + 45,
+      virality: row.virality,
+      scores: { hook_power: row.hookPower, emotional_impact: row.emotionalImpact, quotability: row.quotability, surprise_drama: row.surpriseDrama },
+      preset: i%3===0?'vertical':(i%3===1?'square':'landscape'),
+      status:'draft'
+    };
+  });
 };
 
 // MVP-B: Polish a Studio script scene via Claude
@@ -3120,20 +3385,22 @@ function RepurposeRealAnalyze({ project, setProject }){
     const target = Number(project.targetCount)||5;
     try {
       let clips;
+      const segs = Array.isArray(project.transcriptSegments) ? project.transcriptSegments : [];
+      const meta = { title: project.name || '', author: project.author || '' };
       if(path){
-        console.log('[zs] real-analyze: calling Claude');
-        clips = await analyzeViaClaude(path, text, target);
+        console.log('[zs] real-analyze: calling Claude (segments=' + segs.length + ')');
+        clips = await analyzeViaClaude(path, text, target, segs, meta);
         setInfo('Analyzed via Claude — ' + clips.length + ' clips.');
       } else {
-        console.log('[zs] real-analyze: using local fallback');
-        clips = analyzeLocal(text, target);
+        console.log('[zs] real-analyze: using local fallback (segments=' + segs.length + ')');
+        clips = analyzeLocal(text, target, segs);
         setInfo('Analyzed locally (no Anthropic proxy configured) — ' + clips.length + ' clips.');
       }
       if(!clips || !clips.length){ setErr('No clips returned. Try richer source text.'); return; }
       setProject({ ...project, clips, durationSec: project.durationSec || (clips[clips.length-1].end + 60) });
     } catch(e){
       console.warn('[zs] real-analyze error', e);
-      try { const fb = analyzeLocal(text, target); setProject({ ...project, clips: fb }); setErr('Claude call failed (' + (e && e.message || e) + '). Fell back to local analyze.'); }
+      try { const segs = Array.isArray(project.transcriptSegments) ? project.transcriptSegments : []; const fb = analyzeLocal(text, target, segs); setProject({ ...project, clips: fb }); setErr('Claude call failed (' + (e && e.message || e) + '). Fell back to local analyze.'); }
       catch(e2){ setErr('Analyze failed: ' + (e2 && e2.message || e2)); }
     } finally { setBusy(false); }
   };
@@ -3233,6 +3500,7 @@ function RepurposeClipPreview({ clip, uploadedVideoUrl, sourceUrl, width, height
   const videoRef = useRef(null);
   const [playing, setPlaying] = useState(false);
   const [pos, setPos] = useState(clip.start || 0);
+  const [muted, setMuted] = useState(true);
   const dur = Math.max(0.1, (clip.end || 0) - (clip.start || 0));
   const ytId = !uploadedVideoUrl ? extractYouTubeVideoId(sourceUrl) : null;
 
@@ -3242,24 +3510,32 @@ function RepurposeClipPreview({ clip, uploadedVideoUrl, sourceUrl, width, height
     const onTime = () => {
       setPos(v.currentTime);
       if(v.currentTime >= (clip.end || 0)){
-        v.pause();
         try { v.currentTime = clip.start || 0; } catch(e){}
-        setPlaying(false);
       }
     };
     const onPlay = () => setPlaying(true);
     const onPause = () => setPlaying(false);
+    const onLoaded = () => {
+      try { v.currentTime = clip.start || 0; } catch(e){}
+      // Autoplay muted — browsers require muted for unprompted autoplay
+      v.muted = true;
+      v.play().catch(()=>{});
+    };
     v.addEventListener("timeupdate", onTime);
     v.addEventListener("play", onPlay);
     v.addEventListener("pause", onPause);
+    v.addEventListener("loadedmetadata", onLoaded);
+    if(v.readyState >= 1) onLoaded();
     return () => {
       v.removeEventListener("timeupdate", onTime);
       v.removeEventListener("play", onPlay);
       v.removeEventListener("pause", onPause);
+      v.removeEventListener("loadedmetadata", onLoaded);
     };
   }, [uploadedVideoUrl, clip.start, clip.end]);
 
-  const toggle = () => {
+  const toggle = (e) => {
+    if(e && e.stopPropagation) e.stopPropagation();
     const v = videoRef.current;
     if(!v) return;
     if(v.paused){
@@ -3272,6 +3548,14 @@ function RepurposeClipPreview({ clip, uploadedVideoUrl, sourceUrl, width, height
     }
   };
 
+  const toggleMute = (e) => {
+    if(e && e.stopPropagation) e.stopPropagation();
+    const v = videoRef.current;
+    if(!v) return;
+    v.muted = !v.muted;
+    setMuted(v.muted);
+  };
+
   const pct = Math.max(0, Math.min(100, ((pos - (clip.start || 0)) / dur) * 100));
 
   if(uploadedVideoUrl){
@@ -3281,19 +3565,29 @@ function RepurposeClipPreview({ clip, uploadedVideoUrl, sourceUrl, width, height
           ref={videoRef}
           src={uploadedVideoUrl}
           className="w-full h-full object-cover"
-          preload="metadata"
+          preload="auto"
           playsInline
-          muted
+          autoPlay
+          muted={muted}
+          loop={false}
         />
         <button
           type="button"
           onClick={toggle}
           aria-label={playing ? "Pause preview" : "Play preview"}
-          className="absolute inset-0 flex items-center justify-center bg-black/20 hover:bg-black/40 transition-opacity"
+          className="absolute inset-0 flex items-center justify-center bg-black/10 hover:bg-black/30 transition-opacity opacity-0 hover:opacity-100"
         >
           <span className="rounded-full bg-white/90 text-black p-2 shadow-lg">
             {playing ? I.pause({size:14}) : I.play({size:14})}
           </span>
+        </button>
+        <button
+          type="button"
+          onClick={toggleMute}
+          aria-label={muted ? "Unmute preview" : "Mute preview"}
+          className="absolute top-1 right-1 rounded-full bg-black/60 hover:bg-black/80 text-white px-1.5 py-0.5 text-[10px] font-semibold"
+        >
+          {muted ? "🔇" : "🔊"}
         </button>
         <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/10">
           <div className="h-full bg-gradient-to-r from-indigo-400 to-cyan-400" style={{ width: pct + "%" }} />
@@ -3305,7 +3599,8 @@ function RepurposeClipPreview({ clip, uploadedVideoUrl, sourceUrl, width, height
   if(ytId){
     const start = Math.max(0, Math.floor(clip.start || 0));
     const end = Math.max(start + 1, Math.ceil(clip.end || 0));
-    const src = "https://www.youtube.com/embed/" + ytId + "?start=" + start + "&end=" + end + "&rel=0&modestbranding=1&playsinline=1";
+    // autoplay=1 + mute=1 for browser auto-play permission; loop=1 + playlist=VIDEOID to enable looping on a single video
+    const src = "https://www.youtube.com/embed/" + ytId + "?start=" + start + "&end=" + end + "&autoplay=1&mute=1&loop=1&playlist=" + ytId + "&controls=1&rel=0&modestbranding=1&playsinline=1&iv_load_policy=3";
     return (
       <div className="rounded-xl overflow-hidden bg-black shrink-0" style={{ width, height }}>
         <iframe
@@ -4443,9 +4738,11 @@ function RepurposeTab(){
     setProcessBusy(true); setProcessStatus("Starting…");
     try {
       let text = (project.transcriptText || "").trim();
-      const hasPastedTranscript = text.length > 0;
+      let segments = Array.isArray(project.transcriptSegments) ? project.transcriptSegments : [];
+      let meta = { title: project.name || "", author: project.author || "" };
+      const hasPastedTranscript = text.length > 0 && segments.length === 0;
       const isYT = /youtu\.?be/i.test(sourceUrl);
-      if(isYT && !hasPastedTranscript){
+      if(isYT){
         setProcessStatus("Fetching transcript…");
         try {
           const path = getAnthropicPath();
@@ -4454,38 +4751,62 @@ function RepurposeTab(){
           if(res.ok){
             const data = await res.json();
             const tx = (data.transcript || data.description || "").trim();
-            if(tx){
+            const segs = Array.isArray(data.segments) ? data.segments : [];
+            // If user already pasted text but we got real segments from YT, use the segments for timing.
+            if(segs.length > 0){
+              segments = segs;
+              if(!hasPastedTranscript) text = tx;
+              meta = { title: data.title || meta.title, author: data.author || meta.author };
+              setProject(p => ({
+                ...p,
+                transcriptText: hasPastedTranscript ? p.transcriptText : tx,
+                transcriptSegments: segs,
+                name: p.name || data.title || "",
+                author: p.author || data.author || "",
+                durationSec: (!p.durationSec || p.durationSec === 5520) && data.lengthSeconds ? data.lengthSeconds : (p.durationSec || data.lengthSeconds || p.durationSec)
+              }));
+            } else if(tx && !hasPastedTranscript){
               text = tx;
               setProject(p => ({
                 ...p,
                 transcriptText: tx,
                 name: p.name || data.title || "",
+                author: p.author || data.author || "",
                 durationSec: (!p.durationSec || p.durationSec === 5520) && data.lengthSeconds ? data.lengthSeconds : p.durationSec
               }));
               if(data.source === "description" || data.fallback){
                 toast("YouTube transcript unavailable — using description. For sharper clips, paste the full transcript below and re-run.", "warn");
               }
-            } else {
+            } else if(!tx && !hasPastedTranscript){
               toast("No transcript available from YouTube. Paste the transcript below and press Enter for best clips.", "warn");
             }
           } else {
-            toast("Transcript fetch failed. Paste the transcript below and press Enter.", "warn");
+            if(!hasPastedTranscript) toast("Transcript fetch failed. Paste the transcript below and press Enter.", "warn");
           }
         } catch(e){ /* continue with whatever text we have */ }
       }
       if(!text) text = sourceUrl;
+      // If we have pasted text but no segments from worker, try to parse timestamps from the paste.
+      if(segments.length === 0 && text && text.length > 40){
+        const pasted = parsePastedTranscript(text);
+        if(pasted.length >= 3){
+          segments = pasted;
+          setProject(p => ({ ...p, transcriptSegments: pasted }));
+        }
+      }
       const target = Number(project.targetCount) || 5;
-      setProcessStatus("Generating clips…");
+      setProcessStatus(segments.length > 0 ? ("Analyzing " + segments.length + " segments…") : "Generating clips…");
       const path = getAnthropicPath();
       let clips = null;
       if(path){
-        try { clips = await analyzeViaClaude(path, text, target); } catch(e){ clips = null; }
+        try { clips = await analyzeViaClaude(path, text, target, segments, meta); } catch(e){ console.warn('[zs] analyzeViaClaude failed', e); clips = null; }
       }
-      if(!clips || !clips.length){ clips = analyzeLocal(text, target); }
+      if(!clips || !clips.length){ clips = analyzeLocal(text, target, segments); }
       if(!clips || !clips.length){ toast("No clips generated — try a different source", "error"); return; }
       setProject(p => ({ ...p, clips, durationSec: p.durationSec || (clips[clips.length-1].end + 60) }));
       setProcessStatus("Done — " + clips.length + " clips");
-      toast("Generated " + clips.length + " clips", "success");
+      const src = segments.length > 0 ? "timestamped transcript" : (hasPastedTranscript ? "pasted transcript" : "source text");
+      toast("Generated " + clips.length + " clips from " + src, "success");
     } catch(e){
       toast("Process failed: " + (e && e.message || "unknown"), "error");
       setProcessStatus("Failed");
