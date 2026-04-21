@@ -576,8 +576,8 @@ function HomeTab({ setTab, startProject }){
           </p>
           <div className="flex flex-wrap items-center gap-3">
             <button className="btn btn-primary" onClick={()=>{ startProject && startProject(); }}>{I.spark({size:16})} <span>Start a project</span></button>
-            <button className="btn" onClick={()=>setTab("repurpose")}>{I.scissors({size:16})} <span>Repurpose long-form</span></button>
-            <button className="btn btn-ghost" onClick={()=>setTab("templates")}>{I.template({size:16})} <span>Browse templates</span></button>
+            {isGodMode && <button className="btn" onClick={()=>setTab("repurpose")}>{I.scissors({size:16})} <span>Repurpose long-form</span></button>}
+            {isGodMode && <button className="btn btn-ghost" onClick={()=>setTab("templates")}>{I.template({size:16})} <span>Browse templates</span></button>}
           </div>
           <div className="flex flex-wrap items-center gap-2 mt-2">
             {INPUTS.map(i => <span key={i.k} className="chip">{i.label}</span>)}
@@ -600,7 +600,7 @@ function HomeTab({ setTab, startProject }){
       </section>
       <section className="py-10">
         <div className="grid md:grid-cols-3 gap-4">
-          {PILLARS.map(p => (
+          {PILLARS.filter(p => isGodMode || p.title === "Generate").map(p => (
             <div key={p.title} className="card p-6">
               <div className="flex items-center gap-2 text-[color:var(--muted)]">{I[p.icon]({size:18})}<span className="text-xs uppercase tracking-wider">{p.title}</span></div>
               <div className="mt-2 text-xl font-semibold">{p.title}</div>
@@ -616,7 +616,7 @@ function HomeTab({ setTab, startProject }){
             <div className="uppercase tracking-widest text-[11px] text-[color:var(--muted)]">What's inside</div>
             <h2 className="text-2xl md:text-3xl font-bold mt-1">Everything a video team needs, one platform.</h2>
           </div>
-          <button className="btn" onClick={()=>setTab("architecture")}>See architecture {I.arrow({size:14})}</button>
+          {isGodMode && <button className="btn" onClick={()=>setTab("architecture")}>See architecture {I.arrow({size:14})}</button>}
         </div>
         <div className="grid md:grid-cols-3 gap-3">
           {FEATURES.map(f => (
@@ -635,7 +635,7 @@ function HomeTab({ setTab, startProject }){
           </div>
           <div className="md:ml-auto flex flex-wrap gap-3">
             <button className="btn btn-primary" onClick={()=>{ startProject && startProject(); }}>{I.play({size:14})} Start a project</button>
-            <button className="btn" onClick={()=>setTab("docs")}>{I.book({size:14})} Read the docs</button>
+            {isGodMode && <button className="btn" onClick={()=>setTab("docs")}>{I.book({size:14})} Read the docs</button>}
           </div>
         </div>
       </section>
