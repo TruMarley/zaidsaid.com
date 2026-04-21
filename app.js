@@ -733,9 +733,9 @@ const STUDIO_CHARACTERS = [
   { id:"vera",  name:"Vera",  role:"Host" },
 ];
 const STUDIO_SEED = {
-  name: "Why mushrooms talk to trees underground",
+  name: "",
   kind: "idea",
-  source: "Mycorrhizal networks: how fungi wire forests for carbon and warning signals.",
+  source: "",
   brandKitId: "bk-zs",
   characterId: "nova",
   language: "English",
