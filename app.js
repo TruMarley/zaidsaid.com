@@ -1621,7 +1621,7 @@ function StepStoryboard({ project, setProject }){
           <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-2">
             {(project.scenes||[]).map((s, i) => (
               <div key={s.id||i} className="rounded-xl overflow-hidden border border-[color:var(--line)]">
-                {s.image ? <img src={s.image} alt={'Scene '+(i+1)} className="w-full h-24 object-cover" /> : <div className="w-full h-24 bg-[color:var(--line)] flex items-center justify-center text-[11px] text-[color:var(--muted)] animate-pulse">{imgBusy ? 'rendering…' : 'no image'}</div>}
+                {s.image ? <img src={s.image} alt={'Scene '+(i+1)} className="w-full h-24 object-cover zs-fade-in" /> : <div className="w-full h-24 shimmer bg-[color:var(--line)] flex items-center justify-center text-[11px] text-[color:var(--muted)]">{imgBusy ? 'rendering…' : 'no image'}</div>}
                 {s.image && isGodMode && <button className="chip text-[10px] px-2 py-0.5 m-1" onClick={()=>regenerateImageOne(s.id)} disabled={imgBusy} title="Regenerate image">{String.fromCharCode(8635)} regen</button>}
                 <div className="px-2 py-1 text-[11px] text-[color:var(--muted)] truncate">{s.title || ('Scene '+(i+1))}</div>
               </div>
@@ -1870,15 +1870,15 @@ function StepVoice({ project, setProject }){
         </div>
         {voiceErr && <div className="mt-2 text-[12px] text-red-400">{voiceErr}</div>}
         {voiceInfo && <div className="mt-2 text-[12px] text-emerald-400">{voiceInfo}</div>}
-        {(project.scenes||[]).some(s => s.audio || s.audioSource) && (
+        {(voiceBusy || (project.scenes||[]).some(s => s.audio || s.audioSource)) && (
           <div className="mt-3 grid gap-2">
             {(project.scenes||[]).map((s, i) => (
-              <div key={s.id||i} className="flex items-center justify-between gap-3 rounded-xl border border-[color:var(--line)] p-2">
+              <div key={s.id||i} className={"flex items-center justify-between gap-3 rounded-xl border border-[color:var(--line)] p-2 " + (voiceBusy && !s.audioSource ? 'shimmer' : '')}>
                 <div className="min-w-0">
                   <div className="text-sm truncate">{(i+1)+'. '+(s.title||'Scene')}</div>
-                  <div className="text-[11px] text-[color:var(--muted)] truncate">{s.audioSource === 'elevenlabs' ? 'ElevenLabs audio' : (s.audioSource === 'local-speech' ? 'Local SpeechSynthesis' : (s.audioSource === 'error' ? ('Error: '+(s.audioError||'')) : 'No audio yet'))}</div>
+                  <div className="text-[11px] text-[color:var(--muted)] truncate">{s.audioSource === 'elevenlabs' ? 'ElevenLabs audio' : (s.audioSource === 'local-speech' ? 'Local SpeechSynthesis' : (s.audioSource === 'error' ? ('Error: '+(s.audioError||'')) : (voiceBusy ? 'Generating voice…' : 'No audio yet')))}</div>
                 </div>
-                {s.audio ? <audio controls src={s.audio} className="max-w-[260px]" /> : <button className="chip" onClick={()=>previewLocalForScene(s)}>{'preview locally'}</button>}
+                {s.audio ? <audio controls src={s.audio} className="max-w-[260px] zs-fade-in" /> : <button className="chip" onClick={()=>previewLocalForScene(s)}>{'preview locally'}</button>}
                 {isGodMode && <button className="chip shrink-0" onClick={()=>regenerateOne(s.id)} disabled={voiceBusy} title="Regenerate ElevenLabs voice for this scene">{String.fromCharCode(8635)}</button>}
               </div>
             ))}
