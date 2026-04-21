@@ -2025,9 +2025,13 @@ function StepExport({ project, setProject }){
   const [renderBusy, setRenderBusy] = React.useState(false);
   const [renderErr, setRenderErr] = React.useState('');
   const [renderUrl, setRenderUrl] = React.useState('');
+  const [renderMeta, setRenderMeta] = React.useState({ bytes: 0, durationSec: 0 });
   React.useEffect(() => {
     if(!renderUrl && typeof window !== 'undefined' && window.__zs_lastBlob){
-      try { setRenderUrl(URL.createObjectURL(window.__zs_lastBlob)); } catch(_){}
+      try {
+        setRenderUrl(URL.createObjectURL(window.__zs_lastBlob));
+        setRenderMeta({ bytes: window.__zs_lastBlob.size||0, durationSec: Number(window.__zs_lastDurS)||0 });
+      } catch(_){}
     }
   }, []);
   const [renderProgress, setRenderProgress] = React.useState(0);
@@ -2311,9 +2315,10 @@ function StepExport({ project, setProject }){
       rec.stop();
       await stopped;
       const blob = new Blob(chunks, { type: mime });
-      try { window.__zs_lastBlob = blob; } catch(_){}
+      try { window.__zs_lastBlob = blob; window.__zs_lastDurS = total; } catch(_){}
       const url = URL.createObjectURL(blob);
       setRenderUrl(url);
+      setRenderMeta({ bytes: blob.size||0, durationSec: total||0 });
       setRenderProgress(100);
       if(tabWasHidden){ console.warn('[zs] tab was hidden at least once during render'); }
     } catch(e){
@@ -2365,11 +2370,21 @@ function StepExport({ project, setProject }){
             <div className="h-2 bg-emerald-400 transition-all" style={{ width: renderProgress + '%' }} />
           </div>
         )}
-        {renderUrl && !renderBusy && (
+        {renderUrl && !renderBusy && (()=>{
+          const _bytes = renderMeta.bytes || 0;
+          const _dur = renderMeta.durationSec || 0;
+          const _mb = _bytes ? (_bytes/1048576) : 0;
+          const _sizeLabel = _mb >= 1 ? (_mb.toFixed(1) + ' MB') : (_bytes ? Math.max(1, Math.round(_bytes/1024)) + ' KB' : '');
+          const _durLabel = _dur ? (_dur < 60 ? (Math.round(_dur*10)/10) + 's' : Math.floor(_dur/60) + 'm ' + Math.round(_dur%60) + 's') : '';
+          const _meta = [_durLabel, _sizeLabel].filter(Boolean).join(' · ');
+          return (
           <div className="mt-4 grid gap-3">
-            <div className="flex items-center gap-2 text-emerald-300 text-sm font-semibold">
-              <span className="inline-flex w-6 h-6 rounded-full bg-emerald-400/20 items-center justify-center text-emerald-300">{I.check({size:14})}</span>
-              Video ready · tap Download to save
+            <div className="flex items-center justify-between gap-2 text-sm">
+              <div className="flex items-center gap-2 text-emerald-300 font-semibold">
+                <span className="inline-flex w-6 h-6 rounded-full bg-emerald-400/20 items-center justify-center text-emerald-300">{I.check({size:14})}</span>
+                Video ready · tap Download to save
+              </div>
+              {_meta && <div className="text-[12px] text-[color:var(--muted)] tabular-nums">{_meta}</div>}
             </div>
             <video src={renderUrl} controls autoPlay={false} className="w-full max-h-[360px] rounded-xl border border-[color:var(--line)] bg-black" />
             <div className="flex flex-wrap items-center gap-2">
@@ -2377,7 +2392,8 @@ function StepExport({ project, setProject }){
               <button type="button" onClick={()=>{ setRenderUrl(''); try { renderRealVideo(); } catch(_){} }} className="btn btn-ghost text-xs">Render again</button>
             </div>
           </div>
-        )}
+          );
+        })()}
       </div>
       <div className="grid md:grid-cols-3 gap-3">
         {STUDIO_EXPORT_PRESETS.map(p => {
