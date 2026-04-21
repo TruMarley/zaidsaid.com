@@ -1,4 +1,4 @@
-/* Zaidsaid — app.js v2.0 — x69: Copy-post button — Claude generates platform-tuned post + hashtags per clip
+/* Zaidsaid — app.js v2.0 — x70: Copy-post uses per-platform captions (auto-fetches Haiku captions on first click, picks preset-native seed)
  * Security: localStorage namespaced as zaidsaid.v2.*, error boundary, no innerHTML, no eval, no fetch.
  * Archived v1 seed data preserved under ARCHIVE_* for later reuse.
  */
@@ -4121,10 +4121,22 @@ function RepurposeTab(){
     let post = null;
     try {
       const path = getAnthropicPath();
-      if(path){
-        try { post = await generateSocialPostViaClaude(path, clip, project); } catch(e){ post = null; }
+      let workingClip = clip;
+      if(path && !clip.platformCaptions){
+        try {
+          const caps = await generateCaptionsViaClaude(path, clip, project);
+          workingClip = { ...clip, platformCaptions: caps };
+          setProject(prev => ({ ...prev, clips: prev.clips.map(cc => cc.id === clipId ? { ...cc, platformCaptions: caps } : cc) }));
+        } catch(e){ /* proceed without platformCaptions */ }
       }
-      if(!post) post = { caption: (clip.hook || "") + "\n\n" + (clip.caption || ""), hashtags: ["shorts","fyp","viralvideo"] };
+      const platformMap = { vertical: "tiktok", square: "twitter", landscape: "linkedin" };
+      const pk = platformMap[workingClip.preset || "vertical"] || "tiktok";
+      const seedCaption = (workingClip.platformCaptions && workingClip.platformCaptions[pk]) || workingClip.caption || "";
+      const seedClip = { ...workingClip, caption: seedCaption };
+      if(path){
+        try { post = await generateSocialPostViaClaude(path, seedClip, project); } catch(e){ post = null; }
+      }
+      if(!post) post = { caption: (workingClip.hook || "") + "\n\n" + seedCaption, hashtags: ["shorts","fyp","viralvideo"] };
       const text = post.caption + "\n\n" + post.hashtags.map(h => "#" + h.replace(/^#/, "")).join(" ");
       try { await navigator.clipboard.writeText(text); } catch(e){}
       toast("Copied post \u2014 paste into your social", "success");
