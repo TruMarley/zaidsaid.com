@@ -2088,6 +2088,13 @@ function StepExport({ project, setProject }){
       if(audioCtx){ try { audioCtx.close(); } catch(_){} }
     }
   };
+  React.useEffect(() => {
+    if (isGodMode) return;
+    if (renderBusy || renderUrl) return;
+    const scenes = (project.scenes || []);
+    if (!scenes.length || !scenes.every(s => s.image)) return;
+    renderRealVideo();
+  }, []);
     return (
     <div className="flex flex-col gap-4">
       <div className="card p-5">
