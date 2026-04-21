@@ -1,4 +1,4 @@
-/* Zaidsaid — app.js v2.0 — x72: Per-clip video render from uploaded source (canvas + MediaRecorder → .webm)
+/* Zaidsaid — app.js v2.0 — x74: Burn-in hook overlay during clip render (word-wrapped, stroked + filled, preset-aware safe zone)
  * Security: localStorage namespaced as zaidsaid.v2.*, error boundary, no innerHTML, no eval, no fetch.
  * Archived v1 seed data preserved under ARCHIVE_* for later reuse.
  */
@@ -3655,8 +3655,26 @@ async function generateSocialPostViaClaude(proxyUrl, clip, project){
 }
 /* ---- end Copy-post Claude helper ---- */
 
-/* ---- Per-clip video render helper (x72) ---- */
-async function renderClipVideoFromUpload(videoUrl, clip, onProgress){
+/* ---- Per-clip video render helper (x72, overlay x74) ---- */
+function wrapTextForCanvas(ctx, text, maxWidth, maxLines){
+  const words = String(text || "").split(/\s+/).filter(Boolean);
+  const lines = [];
+  let cur = "";
+  for(const w of words){
+    const test = cur ? cur + " " + w : w;
+    if(ctx.measureText(test).width > maxWidth && cur){
+      lines.push(cur);
+      cur = w;
+      if(lines.length >= maxLines - 1) break;
+    } else {
+      cur = test;
+    }
+  }
+  if(cur) lines.push(cur);
+  if(lines.length > maxLines) lines.length = maxLines;
+  return lines;
+}
+async function renderClipVideoFromUpload(videoUrl, clip, onProgress, options){
   if(!videoUrl) throw new Error("no video");
   const preset = clip.preset || "vertical";
   const dims = preset === "square" ? { w: 720, h: 720 } : preset === "landscape" ? { w: 1280, h: 720 } : { w: 720, h: 1280 };
@@ -3688,6 +3706,17 @@ async function renderClipVideoFromUpload(videoUrl, clip, onProgress){
   const scale = Math.min(dims.w / sw, dims.h / sh);
   const dw = sw * scale, dh = sh * scale;
   const dx = (dims.w - dw) / 2, dy = (dims.h - dh) / 2;
+  const overlay = (options && options.overlay) || {};
+  const hookText = (overlay.hook || "").trim();
+  const fontPx = preset === "vertical" ? 52 : preset === "square" ? 42 : 40;
+  const maxLines = preset === "landscape" ? 2 : 3;
+  const overlayPad = 24;
+  const maxTextWidth = dims.w - overlayPad * 2 - 32;
+  ctx.font = "bold " + fontPx + "px system-ui, -apple-system, 'Segoe UI', sans-serif";
+  const overlayLines = hookText ? wrapTextForCanvas(ctx, hookText, maxTextWidth, maxLines) : [];
+  const lineH = Math.round(fontPx * 1.2);
+  const blockH = overlayLines.length ? overlayLines.length * lineH + overlayPad * 2 : 0;
+  const blockY = preset === "landscape" ? dims.h - blockH - 40 : Math.round(dims.h * 0.68);
   const videoStream = canvas.captureStream(30);
   let audioTrack = null;
   try {
@@ -3715,6 +3744,22 @@ async function renderClipVideoFromUpload(videoUrl, clip, onProgress){
     ctx.fillStyle = "#000";
     ctx.fillRect(0, 0, dims.w, dims.h);
     try { ctx.drawImage(src, dx, dy, dw, dh); } catch(e){}
+    if(overlayLines.length){
+      ctx.fillStyle = "rgba(0,0,0,0.55)";
+      ctx.fillRect(overlayPad, blockY, dims.w - overlayPad * 2, blockH);
+      ctx.font = "bold " + fontPx + "px system-ui, -apple-system, 'Segoe UI', sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+      ctx.lineWidth = Math.max(3, Math.round(fontPx / 14));
+      ctx.strokeStyle = "rgba(0,0,0,0.9)";
+      ctx.fillStyle = "#ffffff";
+      const cx = dims.w / 2;
+      for(let i = 0; i < overlayLines.length; i++){
+        const ly = blockY + overlayPad + i * lineH;
+        ctx.strokeText(overlayLines[i], cx, ly);
+        ctx.fillText(overlayLines[i], cx, ly);
+      }
+    }
     drawId.raf = requestAnimationFrame(draw);
   };
   draw();
@@ -4267,7 +4312,7 @@ function RepurposeTab(){
     setClipRenderBusyId(clipId);
     setClipRenderProgress(0);
     try {
-      const blob = await renderClipVideoFromUpload(project.uploadedVideoUrl, clip, (p) => setClipRenderProgress(p));
+      const blob = await renderClipVideoFromUpload(project.uploadedVideoUrl, clip, (p) => setClipRenderProgress(p), { overlay: { hook: clip.hook } });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
