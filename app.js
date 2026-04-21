@@ -785,10 +785,15 @@ function StudioStageProvider({ step, setTab }){
   );
 }
 
+const PUBLIC_STUDIO_STEP_IDS = ["script", "storyboard", "voice", "export"];
+function visibleStudioSteps(){
+  return isGodMode ? STUDIO_STEPS : STUDIO_STEPS.filter(s => PUBLIC_STUDIO_STEP_IDS.includes(s.id));
+}
 function StudioStepNav({ step, setStep }){
+  const steps = visibleStudioSteps();
   return (
     <div className="card p-2 flex items-center gap-1 overflow-x-auto scrollbar">
-      {STUDIO_STEPS.map((s, i) => {
+      {steps.map((s, i) => {
         const active = s.id === step;
         return (
           <button key={s.id}
@@ -2219,7 +2224,10 @@ function StudioTab({ setTab, studioStep, setStudioStep }){
   }, []);
   const clearSeeded = () => setSeeded(null);
 
-  const step = studioStep || "research";
+  const visibleIds = visibleStudioSteps().map(s => s.id);
+  const rawStep = studioStep || (isGodMode ? "research" : "script");
+  const step = visibleIds.includes(rawStep) ? rawStep : visibleIds[0];
+  useEffect(() => { if (step !== rawStep) setStudioStep(step); }, [step, rawStep]);
   const goto = (id) => setStudioStep(id);
   const renderStep = () => {
     switch(step){
@@ -2234,9 +2242,12 @@ function StudioTab({ setTab, studioStep, setStudioStep }){
       default:           return <StepResearch    project={project} setProject={setProject} />;
     }
   };
-  const idx = Math.max(0, STUDIO_STEPS.findIndex(s => s.id === step));
-  const prev = STUDIO_STEPS[idx-1];
-  const next = STUDIO_STEPS[idx+1];
+  const _navSteps = visibleStudioSteps();
+  const idxFull = Math.max(0, STUDIO_STEPS.findIndex(s => s.id === step));
+  const idxVis = Math.max(0, _navSteps.findIndex(s => s.id === step));
+  const idx = idxFull;
+  const prev = _navSteps[idxVis-1];
+  const next = _navSteps[idxVis+1];
   const resetProject = () => setProject(STUDIO_SEED);
   return (
     <div className="max-w-[1400px] mx-auto px-5 py-8">
@@ -4716,7 +4727,7 @@ function App(){
     if(tab !== "studio") setTab("studio");
   };
   const startProject = () => {
-    setStudioStepRaw("research");
+    setStudioStepRaw(isGodMode ? "research" : "script");
     setTab("studio");
   };
 
