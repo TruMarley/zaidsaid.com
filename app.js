@@ -1,4 +1,4 @@
-/* Zaidsaid — app.js v2.0 — x76: Cover-crop fit default for clip render (no more letterbox bars when aspect mismatches) + Unified Process Source
+/* Zaidsaid — app.js v2.0 — x77: Per-clip preview video on card right — uploaded <video> with start/end clamp + play/pause, or YouTube embed with start/end params, gradient fallback otherwise
  * Security: localStorage namespaced as zaidsaid.v2.*, error boundary, no innerHTML, no eval, no fetch.
  * Archived v1 seed data preserved under ARCHIVE_* for later reuse.
  */
@@ -105,8 +105,24 @@ const I = {
   menu: (p)=> <svg viewBox="0 0 24 24" width={p?.size||14} height={p?.size||14} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M3 6h18M3 12h18M3 18h18"/></svg>,
   layers: (p)=> <svg viewBox="0 0 24 24" width={p?.size||14} height={p?.size||14} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M12 3 2 8l10 5 10-5-10-5Z"/><path d="M2 13l10 5 10-5"/><path d="M2 18l10 5 10-5"/></svg>,
   eye: (p)=> <svg viewBox="0 0 24 24" width={p?.size||14} height={p?.size||14} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>,
+  pause: (p)=> <svg viewBox="0 0 24 24" width={p?.size||14} height={p?.size||14} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>,
 
 };
+
+function extractYouTubeVideoId(url){
+  if(!url || typeof url !== "string") return null;
+  try {
+    const m1 = url.match(/[?&]v=([a-zA-Z0-9_-]{11})/);
+    if(m1) return m1[1];
+    const m2 = url.match(/youtu\.be\/([a-zA-Z0-9_-]{11})/);
+    if(m2) return m2[1];
+    const m3 = url.match(/youtube\.com\/embed\/([a-zA-Z0-9_-]{11})/);
+    if(m3) return m3[1];
+    const m4 = url.match(/youtube\.com\/shorts\/([a-zA-Z0-9_-]{11})/);
+    if(m4) return m4[1];
+  } catch(e){}
+  return null;
+}
 
 /* ---------------- Archived v1 seed data (preserved for later reuse) ---------------- */
 const ARCHIVE_JOBS = [
@@ -3195,11 +3211,110 @@ function RepurposeTranscriptStrip({ project }){
   );
 }
 
-function RepurposeClipCard({ clip, onField, onRegen, regenBusy, onRemove, onExplain, explainBusy, onHookAlts, hookAltsBusy, onThumbConcept, thumbConceptBusy, onHookScore, hookScoreBusy, onObjAnswer, objAnswerBusy, onCommentSeeds, commentSeedsBusy, onCopyPost, copyPostBusy, onRenderVideo, renderVideoBusy, renderVideoProgress, uploadEnabled }){
+function RepurposeClipPreview({ clip, uploadedVideoUrl, sourceUrl, width, height }){
+  const videoRef = useRef(null);
+  const [playing, setPlaying] = useState(false);
+  const [pos, setPos] = useState(clip.start || 0);
+  const dur = Math.max(0.1, (clip.end || 0) - (clip.start || 0));
+  const ytId = !uploadedVideoUrl ? extractYouTubeVideoId(sourceUrl) : null;
+
+  useEffect(() => {
+    const v = videoRef.current;
+    if(!v || !uploadedVideoUrl) return;
+    const onTime = () => {
+      setPos(v.currentTime);
+      if(v.currentTime >= (clip.end || 0)){
+        v.pause();
+        try { v.currentTime = clip.start || 0; } catch(e){}
+        setPlaying(false);
+      }
+    };
+    const onPlay = () => setPlaying(true);
+    const onPause = () => setPlaying(false);
+    v.addEventListener("timeupdate", onTime);
+    v.addEventListener("play", onPlay);
+    v.addEventListener("pause", onPause);
+    return () => {
+      v.removeEventListener("timeupdate", onTime);
+      v.removeEventListener("play", onPlay);
+      v.removeEventListener("pause", onPause);
+    };
+  }, [uploadedVideoUrl, clip.start, clip.end]);
+
+  const toggle = () => {
+    const v = videoRef.current;
+    if(!v) return;
+    if(v.paused){
+      if(v.currentTime < (clip.start || 0) || v.currentTime >= (clip.end || 0)){
+        try { v.currentTime = clip.start || 0; } catch(e){}
+      }
+      v.play().catch(()=>{});
+    } else {
+      v.pause();
+    }
+  };
+
+  const pct = Math.max(0, Math.min(100, ((pos - (clip.start || 0)) / dur) * 100));
+
+  if(uploadedVideoUrl){
+    return (
+      <div className="relative rounded-xl overflow-hidden bg-black shrink-0" style={{ width, height }}>
+        <video
+          ref={videoRef}
+          src={uploadedVideoUrl}
+          className="w-full h-full object-cover"
+          preload="metadata"
+          playsInline
+          muted
+        />
+        <button
+          type="button"
+          onClick={toggle}
+          aria-label={playing ? "Pause preview" : "Play preview"}
+          className="absolute inset-0 flex items-center justify-center bg-black/20 hover:bg-black/40 transition-opacity"
+        >
+          <span className="rounded-full bg-white/90 text-black p-2 shadow-lg">
+            {playing ? I.pause({size:14}) : I.play({size:14})}
+          </span>
+        </button>
+        <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/10">
+          <div className="h-full bg-gradient-to-r from-indigo-400 to-cyan-400" style={{ width: pct + "%" }} />
+        </div>
+      </div>
+    );
+  }
+
+  if(ytId){
+    const start = Math.max(0, Math.floor(clip.start || 0));
+    const end = Math.max(start + 1, Math.ceil(clip.end || 0));
+    const src = "https://www.youtube.com/embed/" + ytId + "?start=" + start + "&end=" + end + "&rel=0&modestbranding=1&playsinline=1";
+    return (
+      <div className="rounded-xl overflow-hidden bg-black shrink-0" style={{ width, height }}>
+        <iframe
+          src={src}
+          title={"Clip preview " + (clip.title || "")}
+          className="w-full h-full"
+          frameBorder="0"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+          allowFullScreen
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl bg-gradient-to-br from-indigo-500 via-fuchsia-500 to-cyan-500 opacity-90 flex items-center justify-center text-white/80 text-[10px] shrink-0"
+      style={{ width, height }} aria-hidden>
+      <span>{(clip.preset === "vertical" ? "9:16" : clip.preset === "square" ? "1:1" : "16:9")}</span>
+    </div>
+  );
+}
+
+function RepurposeClipCard({ clip, onField, onRegen, regenBusy, onRemove, onExplain, explainBusy, onHookAlts, hookAltsBusy, onThumbConcept, thumbConceptBusy, onHookScore, hookScoreBusy, onObjAnswer, objAnswerBusy, onCommentSeeds, commentSeedsBusy, onCopyPost, copyPostBusy, onRenderVideo, renderVideoBusy, renderVideoProgress, uploadEnabled, uploadedVideoUrl, sourceUrl }){
   const band = viralityBand(clip.virality);
   const preset = REPURPOSE_PRESETS.find(p => p.id === clip.preset) || REPURPOSE_PRESETS[0];
-  const previewW = preset.id === "vertical" ? 72 : (preset.id === "square" ? 90 : 128);
-  const previewH = preset.id === "vertical" ? 128 : (preset.id === "square" ? 90 : 72);
+  const previewW = preset.id === "vertical" ? 144 : (preset.id === "square" ? 160 : 200);
+  const previewH = preset.id === "vertical" ? 256 : (preset.id === "square" ? 160 : 112);
   const [exportFlash, setExportFlash] = useState(false);
   const exportText = () => {
     const txt = buildClipExportText(clip, null);
@@ -3222,10 +3337,6 @@ function RepurposeClipCard({ clip, onField, onRegen, regenBusy, onRemove, onExpl
   return (
     <div className="card p-4">
       <div className="flex items-start gap-4">
-        <div className="rounded-xl bg-gradient-to-br from-indigo-500 via-fuchsia-500 to-cyan-500 opacity-90 flex items-center justify-center text-white/80 text-[10px]"
-          style={{ width: previewW, height: previewH }} aria-hidden>
-          <span>{preset.ratio}</span>
-        </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <span className={"px-2 py-0.5 rounded-md text-[11px] border " + band.border + " " + band.bg + " " + band.tone}>{I.flame({size:12})} {band.label} {clip.virality}</span>
@@ -3241,6 +3352,13 @@ function RepurposeClipCard({ clip, onField, onRegen, regenBusy, onRemove, onExpl
           />
           <div className="text-[12px] text-[color:var(--muted)] mt-1">{clip.hook}</div>
         </div>
+        <RepurposeClipPreview
+          clip={clip}
+          uploadedVideoUrl={uploadedVideoUrl}
+          sourceUrl={sourceUrl}
+          width={previewW}
+          height={previewH}
+        />
       </div>
       <div className="grid md:grid-cols-2 gap-3 mt-3">
         <label className="block">
@@ -4685,6 +4803,8 @@ const removeClip = (clipId) => {
                     renderVideoBusy={clipRenderBusyId === c.id}
                     renderVideoProgress={clipRenderBusyId === c.id ? clipRenderProgress : 0}
                     uploadEnabled={!!project.uploadedVideoUrl}
+                    uploadedVideoUrl={project.uploadedVideoUrl}
+                    sourceUrl={project.source}
                   />
                 </div>
               );
