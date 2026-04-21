@@ -2073,7 +2073,8 @@ function StepExport({ project, setProject }){
         return Math.max(configured, Math.ceil(audioLen * 10)/10);
       });
       const INTRO_S = 1.0;
-      const total = INTRO_S + durations.reduce((a,b)=>a+b, 0);
+      const OUTRO_S = 1.0;
+      const total = INTRO_S + durations.reduce((a,b)=>a+b, 0) + OUTRO_S;
       const stream = canvas.captureStream(30);
       if(audioDest){ audioDest.stream.getAudioTracks().forEach(t => stream.addTrack(t)); }
       const mimeCandidates = ['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm;codecs=vp9','video/webm'];
@@ -2125,16 +2126,27 @@ function StepExport({ project, setProject }){
           else if(variant === 3){ panY = -slack * 0.7 * H * p; }
           else if(variant === 4){ panY = slack * 0.7 * H * p; }
           context.drawImage(img, (W-dw)/2 + panX, (H-dh)/2 + panY, dw, dh);
-          context.fillStyle = 'rgba(0,0,0,0.45)'; context.fillRect(0, H-160, W, 160);
+          const bandGrad = context.createLinearGradient(0, H-200, 0, H);
+          bandGrad.addColorStop(0, 'rgba(0,0,0,0)');
+          bandGrad.addColorStop(1, 'rgba(0,0,0,0.72)');
+          context.fillStyle = bandGrad; context.fillRect(0, H-200, W, 200);
         } else {
           context.fillStyle = '#1a1a1a'; context.fillRect(40,40,W-80,H-80);
         }
-        context.fillStyle = '#fff'; context.font = 'bold 42px system-ui'; context.textAlign='left';
+        context.textAlign = 'left';
+        context.shadowColor = 'rgba(0,0,0,0.85)';
+        context.shadowBlur = 8;
+        context.shadowOffsetY = 2;
+        context.fillStyle = '#fff'; context.font = 'bold 42px system-ui';
         const title = (sc.title||('Scene '+(idx+1))).slice(0,60);
         context.fillText(title, 60, H-100);
-        context.font = '24px system-ui'; context.fillStyle = 'rgba(255,255,255,0.85)';
+        context.shadowBlur = 6;
+        context.font = '24px system-ui'; context.fillStyle = 'rgba(255,255,255,0.92)';
         const vo = (sc.voLine||'').slice(0,90);
         context.fillText(vo, 60, H-50);
+        context.shadowColor = 'transparent';
+        context.shadowBlur = 0;
+        context.shadowOffsetY = 0;
       };
       const offscreen = document.createElement('canvas'); offscreen.width = W; offscreen.height = H;
       const offCtx = offscreen.getContext('2d');
@@ -2204,6 +2216,34 @@ function StepExport({ project, setProject }){
         }
         elapsed += dur;
         setRenderProgress(Math.min(99, Math.round((elapsed/total)*100)));
+      }
+      const outroCTA = ((project.cta && String(project.cta).trim()) || 'Made with zaidsaid.com').slice(0, 80);
+      const drawOutro = (alpha) => {
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = '#0a0a0a'; ctx.fillRect(0, 0, W, H);
+        const grad = ctx.createRadialGradient(W/2, H/2, 40, W/2, H/2, Math.max(W, H)*0.7);
+        grad.addColorStop(0, 'rgba(236,72,153,0.18)');
+        grad.addColorStop(1, 'rgba(10,10,10,0)');
+        ctx.fillStyle = grad; ctx.fillRect(0, 0, W, H);
+        ctx.globalAlpha = alpha;
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#fff'; ctx.font = 'bold 44px system-ui, -apple-system, Segoe UI, sans-serif';
+        ctx.fillText(outroCTA, W/2, H/2 - 8);
+        ctx.fillStyle = 'rgba(255,255,255,0.55)'; ctx.font = '20px system-ui';
+        ctx.fillText('zaidsaid.com', W/2, H/2 + 44);
+        ctx.globalAlpha = 1;
+      };
+      const outroStart = audioCtx ? audioCtx.currentTime : performance.now()/1000;
+      while(true){
+        const now = audioCtx ? audioCtx.currentTime : performance.now()/1000;
+        const p = Math.min(1, (now - outroStart) / OUTRO_S);
+        const fadeIn = 0.3, fadeOut = 0.25;
+        let a = 1;
+        if (p < fadeIn) a = p / fadeIn;
+        else if (p > 1 - fadeOut) a = Math.max(0, (1 - p) / fadeOut);
+        drawOutro(a);
+        if (p >= 1) break;
+        await new Promise(r => requestAnimationFrame(r));
       }
       rec.stop();
       await stopped;
