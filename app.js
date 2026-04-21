@@ -2046,6 +2046,14 @@ function StepExport({ project, setProject }){
   const [renderProgress, setRenderProgress] = React.useState(0);
   const readyRef = React.useRef(null);
   const [loglineCopied, setLoglineCopied] = React.useState(false);
+  const [renderElapsed, setRenderElapsed] = React.useState(0);
+  React.useEffect(() => {
+    if (!renderBusy) { setRenderElapsed(0); return; }
+    const t0 = Date.now();
+    setRenderElapsed(0);
+    const iv = setInterval(() => setRenderElapsed(Math.floor((Date.now() - t0) / 1000)), 500);
+    return () => clearInterval(iv);
+  }, [renderBusy]);
   React.useEffect(() => {
     if (isGodMode) return;
     if (!renderBusy && !renderUrl) return;
@@ -2399,11 +2407,21 @@ function StepExport({ project, setProject }){
           </div>
         )}
         {renderErr && (renderBusy || renderUrl) && <div className="mt-2 text-[12px] text-red-400">{renderErr}</div>}
-        {renderBusy && (
-          <div className="mt-3 h-2 rounded-full bg-white/5 overflow-hidden">
-            <div className="h-2 bg-emerald-400 transition-all" style={{ width: renderProgress + '%' }} />
-          </div>
-        )}
+        {renderBusy && (()=>{
+          const _m = Math.floor(renderElapsed/60), _s = renderElapsed%60;
+          const _elapsed = (_m > 0 ? _m + ':' + String(_s).padStart(2,'0') : _s + 's');
+          return (
+            <div className="mt-3">
+              <div className="flex items-center justify-between text-[11.5px] text-[color:var(--muted)] tabular-nums mb-1">
+                <span>Rendering… {Math.max(1, renderProgress)}%</span>
+                <span>{_elapsed}</span>
+              </div>
+              <div className="h-2 rounded-full bg-white/5 overflow-hidden">
+                <div className="h-2 bg-emerald-400 transition-all" style={{ width: renderProgress + '%' }} />
+              </div>
+            </div>
+          );
+        })()}
         {renderUrl && !renderBusy && (()=>{
           const _bytes = renderMeta.bytes || 0;
           const _dur = renderMeta.durationSec || 0;
