@@ -51,10 +51,11 @@ try {
   const _zsRaw = localStorage.getItem("zaidsaid.v2.providers");
   const _zsPrev = _zsRaw ? JSON.parse(_zsRaw) : {};
   const _zsDefaults = {
-    anthropic:  { proxyUrl: _ZS_WORKER + "/anthropic",  enabled: true },
-    elevenlabs: { proxyUrl: _ZS_WORKER + "/elevenlabs", enabled: true },
-    stability:  { proxyUrl: _ZS_WORKER + "/stability",  enabled: true },
-    grok:       { proxyUrl: _ZS_WORKER + "/grok",       enabled: true },
+    anthropic:    { proxyUrl: _ZS_WORKER + "/anthropic",    enabled: true },
+    elevenlabs:   { proxyUrl: _ZS_WORKER + "/elevenlabs",   enabled: true },
+    stability:    { proxyUrl: _ZS_WORKER + "/stability",    enabled: true },
+    pollinations: { proxyUrl: _ZS_WORKER + "/pollinations", enabled: true },
+    grok:         { proxyUrl: _ZS_WORKER + "/grok",         enabled: true },
   };
   let _zsChanged = false;
   for (const [_k, _v] of Object.entries(_zsDefaults)) {
@@ -1536,13 +1537,18 @@ function StepStoryboard({ project, setProject }){
       seen.add(sceneId);
       const prompt = (pending.shot || pending.title || pending.voLine || 'cinematic establishing shot').slice(0,400);
       let dataUrl, source;
-      try {
-        if(stabPath){ dataUrl = await generateImageViaStability(stabPath, prompt); source='stability'; okStab++; }
-        else if(polPath){ dataUrl = await generateImageViaPollinations(polPath, prompt); source='pollinations'; okPol++; }
-        else { dataUrl = generateImageLocal(prompt); source='local-svg'; okLocal++; }
-      } catch(e){
+      let lastErr = null;
+      if(stabPath){
+        try { dataUrl = await generateImageViaStability(stabPath, prompt); source='stability'; okStab++; }
+        catch(e){ lastErr = e; }
+      }
+      if(!dataUrl && polPath){
+        try { dataUrl = await generateImageViaPollinations(polPath, prompt); source='pollinations'; okPol++; }
+        catch(e){ lastErr = e; }
+      }
+      if(!dataUrl){
         dataUrl = generateImageLocal(prompt);
-        source = 'local-svg-fallback';
+        source = lastErr ? 'local-svg-fallback' : 'local-svg';
         okLocal++;
       }
       setProject(prev => ({ ...prev, scenes: prev.scenes.map(x => x.id === sceneId ? { ...x, image: dataUrl, imageSource: source } : x) }));
@@ -1564,18 +1570,26 @@ function StepStoryboard({ project, setProject }){
     const stabPath = providers && providers.stability && providers.stability.proxyUrl;
     const polPath = providers && providers.pollinations && providers.pollinations.proxyUrl;
     setImgBusy(true); setImgErr(''); setImgInfo('');
-    try {
-      let dataUrl, source;
-      if(stabPath){ dataUrl = await generateImageViaStability(stabPath, prompt); source = 'stability'; }
-      else if(polPath){ dataUrl = await generateImageViaPollinations(polPath, prompt); source = 'pollinations'; }
-      else { dataUrl = generateImageLocal(prompt); source = 'local-svg'; }
-      setProject({ ...project, scenes: project.scenes.map(s => s.id === sceneId ? { ...s, image: dataUrl, imageSource: source } : s) });
-      setImgInfo('Regenerated image for: ' + (scene.title || 'scene'));
-    } catch(e){
-      const dataUrl = generateImageLocal(prompt);
-      setProject({ ...project, scenes: project.scenes.map(s => s.id === sceneId ? { ...s, image: dataUrl, imageSource: 'local-svg-fallback' } : s) });
-      setImgErr('Regenerate failed, used local fallback: ' + String(e && e.message || e).slice(0,100));
-    } finally { setImgBusy(false); }
+    let dataUrl, source, lastErr = null;
+    if(stabPath){
+      try { dataUrl = await generateImageViaStability(stabPath, prompt); source = 'stability'; }
+      catch(e){ lastErr = e; }
+    }
+    if(!dataUrl && polPath){
+      try { dataUrl = await generateImageViaPollinations(polPath, prompt); source = 'pollinations'; }
+      catch(e){ lastErr = e; }
+    }
+    if(!dataUrl){
+      dataUrl = generateImageLocal(prompt);
+      source = lastErr ? 'local-svg-fallback' : 'local-svg';
+    }
+    setProject({ ...project, scenes: project.scenes.map(s => s.id === sceneId ? { ...s, image: dataUrl, imageSource: source } : s) });
+    if(lastErr && source !== 'stability' && source !== 'pollinations'){
+      setImgErr('Regenerate fell back to local: ' + String(lastErr && lastErr.message || lastErr).slice(0,100));
+    } else {
+      setImgInfo('Regenerated image for: ' + (scene.title || 'scene') + ' (' + source + ')');
+    }
+    setImgBusy(false);
   };
   React.useEffect(() => {
     if (isGodMode) return;
@@ -2139,6 +2153,17 @@ function StepExport({ project, setProject }){
     if (renderBusy || renderUrl) return;
     const scenes = ((projectRef.current && projectRef.current.scenes) || []);
     if (!scenes.length || !scenes.every(s => s.image)) return;
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+      const onVisible = () => {
+        if (document.visibilityState === 'visible') {
+          document.removeEventListener('visibilitychange', onVisible);
+          const s2 = ((projectRef.current && projectRef.current.scenes) || []);
+          if (s2.length && s2.every(x => x.image) && !renderBusy && !renderUrl) renderRealVideo();
+        }
+      };
+      document.addEventListener('visibilitychange', onVisible);
+      return () => document.removeEventListener('visibilitychange', onVisible);
+    }
     renderRealVideo();
   }, [sceneSig]);
     return (
