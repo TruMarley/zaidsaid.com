@@ -858,6 +858,33 @@ const researchLocal = (sourceText) => {
   if (picked.length === 0) { const trimmed = txt.slice(0, 200); return { claims: [{ claim: trimmed, source: "User-provided source text", confidence: 0.7 }] }; }
   return { claims: picked.map((s, i) => ({ claim: s, source: i === 0 ? "Primary source excerpt" : ("Supporting passage " + (i+1)), confidence: Math.max(0.55, 0.85 - i * 0.05) })) };
 };
+const isYouTubeUrl = (s) => /(?:youtube\.com\/(?:watch|shorts|embed)|youtu\.be\/)/i.test(String(s||''));
+const getProxyBase = () => {
+  try {
+    const providers = JSON.parse(localStorage.getItem('zaidsaid.v2.providers')||'{}');
+    for(const v of Object.values(providers||{})){
+      if(v && v.proxyUrl){
+        const u = String(v.proxyUrl);
+        const m = u.match(/^(https?:\/\/[^\/]+)/i);
+        if(m) return m[1];
+      }
+    }
+  } catch(_){}
+  return '';
+};
+const fetchYouTubeTranscript = async (urlOrId) => {
+  const base = getProxyBase();
+  if(!base) throw new Error('No proxy base configured');
+  const endpoint = base + '/youtube-transcript?v=' + encodeURIComponent(String(urlOrId||''));
+  const res = await fetch(endpoint);
+  const ct = res.headers.get('content-type') || '';
+  const raw = ct.includes('application/json') ? await res.json() : await res.text();
+  if(!res.ok){
+    const detail = typeof raw === 'string' ? raw : (raw && raw.error) || JSON.stringify(raw);
+    throw new Error('Transcript HTTP ' + res.status + ' ' + String(detail).slice(0,200));
+  }
+  return raw;
+};
 // ===== MVP Helpers (B-G): module-scope so all components can use them =====
 
 // Generic Anthropic call helper that mirrors callAnthropic but lives at module scope.
@@ -1158,7 +1185,20 @@ function StepResearch({ project, setProject, setStudioStep }){ const toast = use
   const runResearch = async () => {
     console.log("[zs] runResearch invoked");
     if (researchBusy) { console.log("[zs] researchBusy=true, early return"); return; }
-    const text = String((project && project.source) || "").trim();
+    let text = String((project && project.source) || "").trim();
+    if(isYouTubeUrl(text)){
+      try {
+        console.log("[zs] detected YouTube URL, fetching transcript");
+        const yt = await fetchYouTubeTranscript(text);
+        const tText = String((yt && yt.transcript) || "").trim();
+        if(tText.length > 50){
+          text = (yt.title ? ("Title: " + yt.title + "\n") : "") + (yt.author ? ("Channel: " + yt.author + "\n") : "") + "Transcript:\n" + tText;
+          console.log("[zs] transcript loaded, length", tText.length);
+        }
+      } catch(err){
+        console.warn("[zs] transcript fetch failed — proceeding with URL as source:", err && err.message || err);
+      }
+    }
     console.log("[zs] source text length:", text.length);
     if (!text) { setResearchError("Paste or fetch source text first"); return; }
     setResearchBusy(true); setResearchSource(""); setResearchError("");
