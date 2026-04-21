@@ -1,4 +1,4 @@
-/* Zaidsaid — app.js v2.0 — Stage 3: Repurpose online
+/* Zaidsaid — app.js v2.0 — x57: YouTube transcript fetch in Repurpose Real Analyze
  * Security: localStorage namespaced as zaidsaid.v2.*, error boundary, no innerHTML, no eval, no fetch.
  * Archived v1 seed data preserved under ARCHIVE_* for later reuse.
  */
@@ -2919,6 +2919,43 @@ function RepurposeRealAnalyze({ project, setProject }){
   const [err, setErr] = React.useState('');
   const [info, setInfo] = React.useState('');
   const [src, setSrc] = React.useState('');
+  const [fetchStatus, setFetchStatus] = React.useState(''); // '' | 'fetching' | 'ok' | 'warn' | 'err'
+  const [fetchMsg, setFetchMsg] = React.useState('');
+
+  const isYouTubeSource = (s) => /youtu\.?be/i.test(s||'');
+
+  const getWorkerBase = () => {
+    const path = getAnthropicPath();
+    if(path) return path.replace(/\/anthropic\/?$/, '');
+    return 'https://zaidsaid-proxy.zaidsaid.workers.dev';
+  };
+
+  const fetchTranscript = async () => {
+    const sourceUrl = (project.source || '').trim();
+    if(!sourceUrl){ setFetchStatus('err'); setFetchMsg('Enter a YouTube URL in the Source field first.'); return; }
+    setFetchStatus('fetching'); setFetchMsg('');
+    try {
+      const base = getWorkerBase();
+      const endpoint = base + '/youtube-transcript?url=' + encodeURIComponent(sourceUrl);
+      const res = await fetch(endpoint);
+      if(!res.ok){ setFetchStatus('err'); setFetchMsg('Worker returned HTTP ' + res.status + '. Try again or paste transcript manually.'); return; }
+      const data = await res.json();
+      const text = (data.transcript || data.description || '').trim();
+      if(!text){ setFetchStatus('err'); setFetchMsg('No transcript or description returned.'); return; }
+      setSrc(text);
+      const usedTranscript = !!(data.transcript && data.transcript.trim());
+      if(!project.name && data.title) setProject(p => ({ ...p, name: data.title }));
+      if((!project.durationSec || project.durationSec === 5520) && data.duration_seconds) setProject(p => ({ ...p, durationSec: data.duration_seconds }));
+      setFetchStatus(usedTranscript ? 'ok' : 'warn');
+      setFetchMsg(usedTranscript
+        ? 'Transcript ready — ' + text.length.toLocaleString() + ' chars from YouTube.'
+        : 'No captions found — using description only (' + text.length.toLocaleString() + ' chars).');
+    } catch(e) {
+      setFetchStatus('err');
+      setFetchMsg('Fetch failed: ' + (e && e.message || String(e)));
+    }
+  };
+
   const run = async () => {
     if(busy) return;
     const text = (src || project.transcriptText || project.source || '').trim();
@@ -2955,6 +2992,22 @@ function RepurposeRealAnalyze({ project, setProject }){
         </div>
         <button className="btn btn-primary" onClick={run} disabled={busy}>{busy ? 'Analyzing…' : 'Run real analyze'}</button>
       </div>
+      {isYouTubeSource(project.source) && (
+        <div className="mt-3 flex items-center gap-2 flex-wrap">
+          <button className="btn" onClick={fetchTranscript} disabled={fetchStatus === 'fetching'}>
+            {fetchStatus === 'fetching' ? 'Fetching…' : 'Fetch transcript from YouTube'}
+          </button>
+          {fetchStatus === 'ok' && (
+            <span className="chip text-emerald-200 border-emerald-400/30 bg-emerald-500/10">{fetchMsg}</span>
+          )}
+          {fetchStatus === 'warn' && (
+            <span className="chip text-amber-200 border-amber-400/30 bg-amber-500/10">{fetchMsg}</span>
+          )}
+          {fetchStatus === 'err' && (
+            <span className="text-[12px] text-red-400">{fetchMsg}</span>
+          )}
+        </div>
+      )}
       <div className="mt-3">
         <textarea className="input w-full" rows={4} placeholder="Paste source transcript or description (or use the project transcript above)" value={src} onChange={e=>setSrc(e.target.value)} />
       </div>
