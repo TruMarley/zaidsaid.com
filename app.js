@@ -1,4 +1,4 @@
-/* Zaidsaid — app.js v2.0 — x58: Hook Breakdown Panel — Claude explains why each clip scores high
+/* Zaidsaid — app.js v2.0 — x59: Hook A/B Generator — 3 alternative hook/title pairs per clip so creators can compare and pick
  * Security: localStorage namespaced as zaidsaid.v2.*, error boundary, no innerHTML, no eval, no fetch.
  * Archived v1 seed data preserved under ARCHIVE_* for later reuse.
  */
@@ -3074,7 +3074,7 @@ function RepurposeTranscriptStrip({ project }){
   );
 }
 
-function RepurposeClipCard({ clip, onField, onRegen, onRemove, onExplain, explainBusy }){
+function RepurposeClipCard({ clip, onField, onRegen, onRemove, onExplain, explainBusy, onHookAlts, hookAltsBusy }){
   const band = viralityBand(clip.virality);
   const preset = REPURPOSE_PRESETS.find(p => p.id === clip.preset) || REPURPOSE_PRESETS[0];
   const previewW = preset.id === "vertical" ? 72 : (preset.id === "square" ? 90 : 128);
@@ -3089,9 +3089,9 @@ function RepurposeClipCard({ clip, onField, onRegen, onRemove, onExplain, explai
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <span className={"px-2 py-0.5 rounded-md text-[11px] border " + band.border + " " + band.bg + " " + band.tone}>{I.flame({size:12})} {band.label} {clip.virality}</span>
-            <span className="chip">{hmsFromSec(clip.start)} â {hmsFromSec(clip.end)}</span>
+            <span className="chip">{hmsFromSec(clip.start)} Ã¢ÂÂ {hmsFromSec(clip.end)}</span>
             <span className="chip">{clipDuration(clip)}s</span>
-            <span className="chip">{preset.ratio} Â· {platformFor(clip.preset)}</span>
+            <span className="chip">{preset.ratio} ÃÂ· {platformFor(clip.preset)}</span>
           </div>
           <input
             value={clip.title}
@@ -3153,7 +3153,7 @@ function RepurposeClipCard({ clip, onField, onRegen, onRemove, onExplain, explai
               );
             })}
           </div>
-          <div className="mt-2 text-[11px] text-[color:var(--muted)]">Platforms: {preset.platforms.join(" Â· ")}</div>
+          <div className="mt-2 text-[11px] text-[color:var(--muted)]">Platforms: {preset.platforms.join(" ÃÂ· ")}</div>
           <div className="mt-2 flex items-center gap-2">
             <label className="block">
               <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Start</span>
@@ -3176,8 +3176,12 @@ function RepurposeClipCard({ clip, onField, onRegen, onRemove, onExplain, explai
           <button className="chip" onClick={()=>onRegen("hook")}>{I.refresh({size:12})} Re-hook</button>
           <button className="chip" onClick={()=>onRegen("virality")}>{I.flame({size:12})} Re-score</button>
           <button className="chip" onClick={onExplain} disabled={!!explainBusy} aria-label="Explain why this clip scores high">
-            {explainBusy ? "Analyzingâ¦" : (clip.hookBreakdown ? I.refresh({size:12}) : I.spark({size:12}))}
+            {explainBusy ? "AnalyzingÃ¢ÂÂ¦" : (clip.hookBreakdown ? I.refresh({size:12}) : I.spark({size:12}))}
             {" "}{explainBusy ? "" : (clip.hookBreakdown ? "Re-explain" : "Why this works")}
+          </button>
+          <button className="chip" onClick={onHookAlts} disabled={!!hookAltsBusy} aria-label="Generate 3 alternative hooks">
+            {hookAltsBusy ? "Generatingâ¦" : (clip.hookAlts ? I.refresh({size:12}) : I.edit({size:12}))}
+            {" "}{hookAltsBusy ? "" : (clip.hookAlts ? "New alts" : "Hook A/B")}
           </button>
         </div>
         <div className="flex items-center gap-1">
@@ -3204,6 +3208,31 @@ function RepurposeClipCard({ clip, onField, onRegen, onRemove, onExplain, explai
           </div>
         </div>
       )}
+      {Array.isArray(clip.hookAlts) && clip.hookAlts.length > 0 && (
+        <div className="mt-3 rounded-xl border border-fuchsia-400/20 bg-fuchsia-500/8 p-3">
+          <div className="text-[11px] uppercase tracking-widest text-fuchsia-300/70 mb-2">Hook A/B â pick one</div>
+          <div className="grid gap-2">
+            {clip.hookAlts.map((alt, i) => alt && (
+              <div key={i} className="rounded-lg border border-fuchsia-400/15 bg-fuchsia-500/5 p-2.5 flex items-start gap-2">
+                <div className="flex-1 min-w-0">
+                  {alt.frame && (
+                    <span className="inline-block text-[10px] uppercase tracking-widest text-fuchsia-300/60 mb-1 border border-fuchsia-400/20 rounded px-1.5 py-0.5">{alt.frame}</span>
+                  )}
+                  <div className="text-[13px] font-semibold text-white/90 leading-snug">{alt.title}</div>
+                  <div className="text-[12px] text-[color:var(--muted)] mt-0.5 leading-snug">{alt.hook}</div>
+                </div>
+                <button
+                  className="chip shrink-0 mt-0.5"
+                  onClick={()=>{ onField("title", alt.title); onField("hook", alt.hook); }}
+                  aria-label={"Use hook variant " + (i+1)}
+                >
+                  {I.check({size:12})} Use
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -3215,7 +3244,7 @@ function clipRegenerate(field, clip){
       "The truth almost nobody says out loud",
       "Why the top 1% do this every morning",
       "The single biggest mistake people make here",
-      "What changed everything â in 60 seconds",
+      "What changed everything Ã¢ÂÂ in 60 seconds",
     ];
     return pool[Math.floor(Math.random()*pool.length)];
   }
@@ -3223,7 +3252,7 @@ function clipRegenerate(field, clip){
     const pool = [
       "If you remember one thing, remember this.",
       "This is the part everybody skips. Don't.",
-      "Watch until the end â the payoff matters.",
+      "Watch until the end Ã¢ÂÂ the payoff matters.",
       "Here's the research-backed version.",
     ];
     return pool[Math.floor(Math.random()*pool.length)];
@@ -3264,10 +3293,10 @@ function generateCaptionsLocal(clip, project){
   const tagPool = ["shortform","creator","ai","video","viral","explainer"];
   const tagsLong = tagPool.map(x=>"#"+x).join(" ");
   const tagsShort = tagPool.slice(0,2).map(x=>"#"+x).join(" ");
-  const twitter = (base.length > 260 ? base.slice(0,257) + "â¦" : base) + " " + tagsShort;
-  const linkedin = (title ? title + "\n\n" : "") + base + (brand ? "\n\nâ " + brand : "") + "\n\n" + tagsLong;
+  const twitter = (base.length > 260 ? base.slice(0,257) + "Ã¢ÂÂ¦" : base) + " " + tagsShort;
+  const linkedin = (title ? title + "\n\n" : "") + base + (brand ? "\n\nÃ¢ÂÂ " + brand : "") + "\n\n" + tagsLong;
   const instagram = base + "\n\n.\n.\n.\n" + tagsLong;
-  const tiktok = "ð¬ " + base + " " + tagsShort;
+  const tiktok = "Ã°ÂÂÂ¬ " + base + " " + tagsShort;
   return { twitter: twitter.slice(0,280), linkedin: linkedin.slice(0,3000), instagram: instagram.slice(0,2200), tiktok: tiktok.slice(0,2200) };
 }
 
@@ -3288,7 +3317,7 @@ async function generateHookBreakdownViaClaude(proxyUrl, clip, project){
       required: ["emotional_trigger","curiosity_gap","audience_fit","one_liner"],
     },
   };
-  const systemMsg = "You are a short-form video strategist. Given a clip's title, hook, and caption, explain why it will perform well on social media. Use the provided tool. Be specific and concrete â no generic advice.";
+  const systemMsg = "You are a short-form video strategist. Given a clip's title, hook, and caption, explain why it will perform well on social media. Use the provided tool. Be specific and concrete Ã¢ÂÂ no generic advice.";
   const brand = (project && project.brand) || "";
   const userMsg = [
     brand ? "BRAND: " + brand : "",
@@ -3322,17 +3351,17 @@ function generateHookBreakdownLocal(clip){
   const hasNumber = /\d/.test(title);
   const hasContrast = /vs|versus|over|instead|not/.test(title);
   const emotional_trigger = hasSurprise
-    ? "This clip triggers surprise and mild cognitive dissonance â viewers feel they've been missing something obvious. That discomfort drives shares."
+    ? "This clip triggers surprise and mild cognitive dissonance Ã¢ÂÂ viewers feel they've been missing something obvious. That discomfort drives shares."
     : hasContrast
     ? "The contrast framing activates a mild fear of being wrong, which primes viewers to watch through to validate or update their belief."
-    : "The direct, specific claim creates a moment of recognition for viewers already invested in this topic â fueling saves and replays.";
+    : "The direct, specific claim creates a moment of recognition for viewers already invested in this topic Ã¢ÂÂ fueling saves and replays.";
   const curiosity_gap = hasNumber
     ? "Specific numbers in the hook promise a concrete payoff. Viewers stay to get the exact figure rather than a vague takeaway."
     : hasSurprise
-    ? "The hook implies the viewer's current mental model is incomplete. They watch to find out exactly how â a classic open loop."
+    ? "The hook implies the viewer's current mental model is incomplete. They watch to find out exactly how Ã¢ÂÂ a classic open loop."
     : "The hook names a mechanism without explaining it, creating a small knowledge gap that compels the viewer to fill it.";
   const audience_fit = v >= 80
-    ? "High overlap with health, productivity, and self-improvement audiences â segments with the highest save-and-share rates on short-form."
+    ? "High overlap with health, productivity, and self-improvement audiences Ã¢ÂÂ segments with the highest save-and-share rates on short-form."
     : v >= 65
     ? "Strong fit for curious generalists who engage with explainer content. Likely to perform above average in the 25-40 demographic."
     : "Solid niche appeal for topic insiders. Engagement depth (comments, saves) will outperform raw view count.";
@@ -3345,6 +3374,110 @@ function generateHookBreakdownLocal(clip){
 }
 /* ---- end Hook Breakdown Panel helpers ---- */
 
+/* ---- Hook A/B Generator helpers (x59) ---- */
+async function generateHookAltsViaClaude(proxyUrl, clip, project){
+  const url = (proxyUrl||"").replace(/\/$/, "") + "/v1/messages";
+  const tool = {
+    name: "emit_hook_alts",
+    description: "Generate 3 alternative hook/title pairs for a short-form clip. Each variant uses a different persuasion frame.",
+    input_schema: {
+      type: "object",
+      properties: {
+        alt1: {
+          type: "object",
+          description: "Curiosity-gap variant â opens an unanswered question.",
+          properties: { title: { type: "string" }, hook: { type: "string" }, frame: { type: "string", description: "One-word label for the frame used, e.g. 'Curiosity'" } },
+          required: ["title","hook","frame"],
+        },
+        alt2: {
+          type: "object",
+          description: "Identity/tribe variant â speaks directly to a specific audience identity.",
+          properties: { title: { type: "string" }, hook: { type: "string" }, frame: { type: "string" } },
+          required: ["title","hook","frame"],
+        },
+        alt3: {
+          type: "object",
+          description: "Contrarian/surprise variant â challenges a common belief.",
+          properties: { title: { type: "string" }, hook: { type: "string" }, frame: { type: "string" } },
+          required: ["title","hook","frame"],
+        },
+      },
+      required: ["alt1","alt2","alt3"],
+    },
+  };
+  const systemMsg = "You are a short-form video hook writer. Given a clip's current title, hook, and platform preset, produce 3 alternative title+hook pairs that each use a distinct persuasion frame. Titles â¤ 10 words. Hooks â¤ 15 words. Be specific to the clip topic â no generic filler.";
+  const brand = (project && project.brand) || "";
+  const preset = clip.preset || "vertical";
+  const platform = preset === "square" ? "X / LinkedIn" : preset === "landscape" ? "YouTube / LinkedIn" : "TikTok / Reels / Shorts";
+  const userMsg = [
+    brand ? "BRAND: " + brand : "",
+    "PLATFORM: " + platform,
+    "CURRENT TITLE: " + (clip.title||""),
+    "CURRENT HOOK: " + (clip.hook||""),
+    "CAPTION: " + (clip.caption||""),
+    "VIRALITY SCORE: " + (clip.virality||60) + "/100",
+  ].filter(Boolean).join("\n\n");
+  const r = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 512,
+      system: systemMsg,
+      tools: [tool],
+      tool_choice: { type: "tool", name: "emit_hook_alts" },
+      messages: [{ role: "user", content: userMsg }],
+    }),
+  });
+  if(!r.ok) throw new Error("HTTP " + r.status);
+  const j = await r.json();
+  const block = Array.isArray(j.content) ? j.content.find(c => c && c.type === "tool_use" && c.name === "emit_hook_alts") : null;
+  if(!block || !block.input) throw new Error("no tool_use");
+  return [block.input.alt1, block.input.alt2, block.input.alt3];
+}
+function generateHookAltsLocal(clip){
+  const title = (clip.title||"").trim();
+  const v = clip.virality || 60;
+  // Three frames: curiosity, identity, contrarian
+  const curiosityTitles = [
+    "The one thing nobody tells you about this",
+    "Why this works when everything else fails",
+    "What actually happens when you do this",
+  ];
+  const identityTitles = [
+    "If you care about your results, watch this",
+    "For the 1% who want a real edge",
+    "This is for people who are serious about it",
+  ];
+  const contrarianTitles = [
+    "Stop doing what everyone recommends",
+    "The advice you've been following is wrong",
+    "Counterintuitive truth most people miss",
+  ];
+  const curiosityHooks = [
+    "The answer surprised every expert we asked.",
+    "Nobody talks about the second part of this.",
+    "Stay for the part that changes everything.",
+  ];
+  const identityHooks = [
+    "This is what separates the top 1% from everyone else.",
+    "If you're serious, this is non-negotiable.",
+    "High performers already know this. Now you do too.",
+  ];
+  const contrarianHooks = [
+    "Everything you've heard about this is backwards.",
+    "The mainstream advice is making things worse.",
+    "Research says the opposite of what you think.",
+  ];
+  const pick = (arr) => arr[Math.floor(Math.random()*arr.length)];
+  return [
+    { title: pick(curiosityTitles), hook: pick(curiosityHooks), frame: "Curiosity" },
+    { title: pick(identityTitles),  hook: pick(identityHooks),  frame: "Identity" },
+    { title: pick(contrarianTitles),hook: pick(contrarianHooks),frame: "Contrarian" },
+  ];
+}
+/* ---- end Hook A/B Generator helpers ---- */
+
 function RepurposeTab(){
   const [project, setProject] = useLocalState("repurpose.project", REPURPOSE_SEED);
   useEffect(() => {
@@ -3356,6 +3489,7 @@ function RepurposeTab(){
   const [batchPreset, setBatchPreset] = useLocalState("repurpose.batchPreset", "vertical");
   const [explainBusyId, setExplainBusyId] = useState(null);
   const [explainAllBusy, setExplainAllBusy] = useState(false);
+  const [hookAltsBusyId, setHookAltsBusyId] = useState(null);
 
   const clipField = (clipId, field, value) => {
     setProject({ ...project, clips: project.clips.map(c => c.id===clipId ? { ...c, [field]: value } : c) });
@@ -3396,6 +3530,20 @@ function RepurposeTab(){
     }
     setProject(prev => ({ ...prev, clips: updated }));
     setExplainAllBusy(false);
+  };
+  const generateHookAlts = async (clipId) => {
+    if(hookAltsBusyId) return;
+    const clip = project.clips.find(c => c.id === clipId);
+    if(!clip) return;
+    setHookAltsBusyId(clipId);
+    const path = getAnthropicPath();
+    let alts = null;
+    if(path){
+      try { alts = await generateHookAltsViaClaude(path, clip, project); } catch(e){ alts = null; }
+    }
+    if(!alts) alts = generateHookAltsLocal(clip);
+    setProject(prev => ({ ...prev, clips: prev.clips.map(c => c.id === clipId ? { ...c, hookAlts: alts } : c) }));
+    setHookAltsBusyId(null);
   };
     const [captionsBusy, setCaptionsBusy] = useState(false);
   const [captionsSource, setCaptionsSource] = useState("");
@@ -3451,7 +3599,7 @@ const removeClip = (clipId) => {
     setProject({
       ...project,
       clips: [...project.clips, {
-        id: nid, title:"New highlight â edit me",
+        id: nid, title:"New highlight Ã¢ÂÂ edit me",
         start: lastEnd + 30, end: lastEnd + 65, virality: 60,
         hook:"Hook copy here.", caption:"Caption copy here.",
         preset:"vertical", status:"draft",
@@ -3494,12 +3642,12 @@ const removeClip = (clipId) => {
           <p className="text-[color:var(--muted)] mt-1">Long-form in. Ranked, branded, platform-native shorts out.</p>
         </div>
         <div className="flex items-center gap-2">
-                    <button className="btn" onClick={generateAllCaptions} disabled={captionsBusy || !project.clips || project.clips.length===0}>{captionsBusy ? "Generatingâ¦" : "Generate captions"}</button>
+                    <button className="btn" onClick={generateAllCaptions} disabled={captionsBusy || !project.clips || project.clips.length===0}>{captionsBusy ? "GeneratingÃ¢ÂÂ¦" : "Generate captions"}</button>
           <button className="btn btn-outline" onClick={downloadCaptionsJson} disabled={!project.clips || project.clips.length===0 || !project.clips.some(c=>c.platformCaptions)}>Download captions.json</button>
                     {captionsSource && (
             <span className={"chip " + (captionsSource === "claude" ? "text-emerald-200 !border-emerald-400/30 bg-emerald-500/10" : "text-sky-200 !border-sky-400/30 bg-sky-500/10")}>{captionsSource === "claude" ? "Claude" : "Local"}</span>
           )}
-          <button className="btn btn-outline" onClick={explainAllClips} disabled={explainAllBusy || !!explainBusyId || !project.clips || project.clips.length===0}>{explainAllBusy ? "Analyzingâ¦" : (I.spark({size:14}))} {explainAllBusy ? "" : "Explain all"}</button>
+          <button className="btn btn-outline" onClick={explainAllClips} disabled={explainAllBusy || !!explainBusyId || !project.clips || project.clips.length===0}>{explainAllBusy ? "AnalyzingÃ¢ÂÂ¦" : (I.spark({size:14}))} {explainAllBusy ? "" : "Explain all"}</button>
 <button className="btn btn-ghost" onClick={resetSeed}>{I.refresh({size:14})} Reset to example</button>
         </div>
       </div>
@@ -3514,7 +3662,7 @@ const removeClip = (clipId) => {
           <div className="flex items-center justify-between gap-2 flex-wrap">
             <div>
               <div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Ranked highlights</div>
-              <div className="text-lg font-semibold">{project.clips.length} clips Â· top pick {Math.max(...project.clips.map(c=>c.virality))} virality</div>
+              <div className="text-lg font-semibold">{project.clips.length} clips ÃÂ· top pick {Math.max(...project.clips.map(c=>c.virality))} virality</div>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Sort by</span>
@@ -3552,6 +3700,8 @@ const removeClip = (clipId) => {
                     onRemove={()=>removeClip(c.id)}
                     onExplain={()=>explainClip(c.id)}
                     explainBusy={explainBusyId === c.id || (explainAllBusy && !c.hookBreakdown)}
+                    onHookAlts={()=>generateHookAlts(c.id)}
+                    hookAltsBusy={hookAltsBusyId === c.id}
                   />
                 </div>
               );
