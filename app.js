@@ -1568,6 +1568,11 @@ function StepStoryboard({ project, setProject }){
       setImgErr('Regenerate failed, used local fallback: ' + String(e && e.message || e).slice(0,100));
     } finally { setImgBusy(false); }
   };
+  React.useEffect(() => {
+    if (isGodMode) return;
+    const hasAnyImage = (project.scenes || []).some(s => s.image);
+    if (!hasAnyImage && !imgBusy) { generateAllImages(); }
+  }, []);
     return (
     <div className="flex flex-col gap-4">
       <div className="card p-5">
@@ -1759,6 +1764,11 @@ function StepVoice({ project, setProject }){
       setVoiceErr('Regenerate failed: ' + String(e && e.message || e).slice(0,140));
     } finally { setVoiceBusy(false); }
   };
+  React.useEffect(() => {
+    if (isGodMode) return;
+    const hasAnyVoice = (project.scenes || []).some(s => s.audio);
+    if (!hasAnyVoice && !voiceBusy) { generateAllVoices(); }
+  }, []);
     return (
     <div className="flex flex-col gap-4">
       <div className="card p-5">
