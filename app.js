@@ -1472,6 +1472,28 @@ function StepStoryboard({ project, setProject }){
     setImgInfo('Generated ' + next.length + ' images (' + okStab + ' via Stability, ' + okPol + ' via Pollinations, ' + okLocal + ' local SVG).');
     setImgBusy(false);
   };
+  const regenerateImageOne = async (sceneId) => {
+    if(imgBusy) return;
+    const scene = (project.scenes||[]).find(s => s.id === sceneId);
+    if(!scene) return;
+    const prompt = (scene.shot || scene.title || scene.voLine || 'cinematic establishing shot').slice(0,400);
+    let providers = {}; try { providers = safeGet('providers', {}) || {}; } catch(e){}
+    const stabPath = providers && providers.stability && providers.stability.proxyUrl;
+    const polPath = providers && providers.pollinations && providers.pollinations.proxyUrl;
+    setImgBusy(true); setImgErr(''); setImgInfo('');
+    try {
+      let dataUrl, source;
+      if(stabPath){ dataUrl = await generateImageViaStability(stabPath, prompt); source = 'stability'; }
+      else if(polPath){ dataUrl = await generateImageViaPollinations(polPath, prompt); source = 'pollinations'; }
+      else { dataUrl = generateImageLocal(prompt); source = 'local-svg'; }
+      setProject({ ...project, scenes: project.scenes.map(s => s.id === sceneId ? { ...s, image: dataUrl, imageSource: source } : s) });
+      setImgInfo('Regenerated image for: ' + (scene.title || 'scene'));
+    } catch(e){
+      const dataUrl = generateImageLocal(prompt);
+      setProject({ ...project, scenes: project.scenes.map(s => s.id === sceneId ? { ...s, image: dataUrl, imageSource: 'local-svg-fallback' } : s) });
+      setImgErr('Regenerate failed, used local fallback: ' + String(e && e.message || e).slice(0,100));
+    } finally { setImgBusy(false); }
+  };
     return (
     <div className="flex flex-col gap-4">
       <div className="card p-5">
@@ -1495,6 +1517,7 @@ function StepStoryboard({ project, setProject }){
             {(project.scenes||[]).map((s, i) => (
               <div key={s.id||i} className="rounded-xl overflow-hidden border border-[color:var(--line)]">
                 {s.image ? <img src={s.image} alt={'Scene '+(i+1)} className="w-full h-24 object-cover" /> : <div className="w-full h-24 bg-[color:var(--line)] flex items-center justify-center text-[11px] text-[color:var(--muted)]">no image</div>}
+                {s.image && <button className="chip text-[10px] px-2 py-0.5 m-1" onClick={()=>regenerateImageOne(s.id)} disabled={imgBusy} title="Regenerate image">{String.fromCharCode(8635)} regen</button>}
                 <div className="px-2 py-1 text-[11px] text-[color:var(--muted)] truncate">{s.title || ('Scene '+(i+1))}</div>
               </div>
             ))}
