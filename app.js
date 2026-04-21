@@ -2121,7 +2121,16 @@ function StepExport({ project, setProject }){
           cum += durations[i];
         }
       }
-      const drawSceneToCtx = (context, idx, progress) => {
+      const drawProgressBar = (context, globalP) => {
+        const g = Math.max(0, Math.min(1, globalP || 0));
+        const barH = 3;
+        context.globalAlpha = 1;
+        context.fillStyle = 'rgba(255,255,255,0.15)';
+        context.fillRect(0, 0, W, barH);
+        context.fillStyle = 'rgba(99,102,241,0.9)';
+        context.fillRect(0, 0, W * g, barH);
+      };
+      const drawSceneToCtx = (context, idx, progress, globalProgress) => {
         const p = Math.max(0, Math.min(1, progress || 0));
         context.globalAlpha = 1;
         context.fillStyle = '#0a0a0a'; context.fillRect(0,0,W,H);
@@ -2168,6 +2177,7 @@ function StepExport({ project, setProject }){
         context.shadowColor = 'transparent';
         context.shadowBlur = 0;
         context.shadowOffsetY = 0;
+        drawProgressBar(context, globalProgress);
       };
       const offscreen = document.createElement('canvas'); offscreen.width = W; offscreen.height = H;
       const offCtx = offscreen.getContext('2d');
@@ -2176,7 +2186,7 @@ function StepExport({ project, setProject }){
       const _titleTrim = String(project.name || '').trim();
       const _loglineTrim = String(project.logline || '').trim();
       const projectSubtitle = (_titleTrim && _loglineTrim && _loglineTrim !== _titleTrim) ? _loglineTrim.slice(0, 90) : '';
-      const drawIntro = (alpha, scaleProgress) => {
+      const drawIntro = (alpha, scaleProgress, globalProgress) => {
         ctx.globalAlpha = 1;
         ctx.fillStyle = '#0a0a0a'; ctx.fillRect(0, 0, W, H);
         const grad = ctx.createRadialGradient(W/2, H/2, 50, W/2, H/2, Math.max(W, H)*0.7);
@@ -2199,6 +2209,7 @@ function StepExport({ project, setProject }){
         ctx.fillText('zaidsaid.com', 0, projectSubtitle ? 62 : 44);
         ctx.restore();
         ctx.globalAlpha = 1;
+        drawProgressBar(ctx, globalProgress);
       };
       const introStart = audioCtx ? audioCtx.currentTime : performance.now()/1000;
       while(true){
@@ -2208,7 +2219,7 @@ function StepExport({ project, setProject }){
         let a = 1;
         if (p < fadeIn) a = p / fadeIn;
         else if (p > 1 - fadeOut) a = Math.max(0, (1 - p) / fadeOut);
-        drawIntro(a, Math.min(1, p / 0.4));
+        drawIntro(a, Math.min(1, p / 0.4), (p * INTRO_S) / total);
         if (p >= 1) break;
         await new Promise(r => requestAnimationFrame(r));
       }
@@ -2223,18 +2234,18 @@ function StepExport({ project, setProject }){
         while(true){
           const now = audioCtx ? audioCtx.currentTime : performance.now()/1000;
           const p = Math.min(1, (now - sceneStart) / dur);
-          drawSceneToCtx(ctx, i, p);
+          drawSceneToCtx(ctx, i, p, (elapsed + dur * p) / total);
           if(now >= holdEnd) break;
           await new Promise(r => requestAnimationFrame(r));
         }
         if(!isLast && fadeS > 0){
           const holdProgress = Math.min(1, (dur - fadeS) / dur);
-          drawSceneToCtx(offCtx, i, holdProgress);
+          drawSceneToCtx(offCtx, i, holdProgress, (elapsed + dur - fadeS) / total);
           const fadeStart = audioCtx ? audioCtx.currentTime : performance.now()/1000;
           while(true){
             const now = audioCtx ? audioCtx.currentTime : performance.now()/1000;
             const t = Math.min(1, (now - fadeStart) / fadeS);
-            drawSceneToCtx(ctx, i+1, 0);
+            drawSceneToCtx(ctx, i+1, 0, (elapsed + dur - fadeS + t * fadeS) / total);
             ctx.globalAlpha = 1 - t;
             ctx.drawImage(offscreen, 0, 0);
             ctx.globalAlpha = 1;
@@ -2246,7 +2257,7 @@ function StepExport({ project, setProject }){
         setRenderProgress(Math.min(99, Math.round((elapsed/total)*100)));
       }
       const outroCTA = ((project.cta && String(project.cta).trim()) || 'Made with zaidsaid.com').slice(0, 80);
-      const drawOutro = (alpha) => {
+      const drawOutro = (alpha, globalProgress) => {
         ctx.globalAlpha = 1;
         ctx.fillStyle = '#0a0a0a'; ctx.fillRect(0, 0, W, H);
         const grad = ctx.createRadialGradient(W/2, H/2, 40, W/2, H/2, Math.max(W, H)*0.7);
@@ -2260,6 +2271,7 @@ function StepExport({ project, setProject }){
         ctx.fillStyle = 'rgba(255,255,255,0.55)'; ctx.font = '20px system-ui';
         ctx.fillText('zaidsaid.com', W/2, H/2 + 44);
         ctx.globalAlpha = 1;
+        drawProgressBar(ctx, globalProgress);
       };
       const outroStart = audioCtx ? audioCtx.currentTime : performance.now()/1000;
       while(true){
@@ -2269,7 +2281,7 @@ function StepExport({ project, setProject }){
         let a = 1;
         if (p < fadeIn) a = p / fadeIn;
         else if (p > 1 - fadeOut) a = Math.max(0, (1 - p) / fadeOut);
-        drawOutro(a);
+        drawOutro(a, (total - OUTRO_S + p * OUTRO_S) / total);
         if (p >= 1) break;
         await new Promise(r => requestAnimationFrame(r));
       }
