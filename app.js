@@ -566,13 +566,15 @@ function HomeTab({ setTab, startProject }){
     <div className="max-w-[1400px] mx-auto px-5">
       <section className="py-14 md:py-20 relative">
         <div className="flex flex-col items-start gap-5 max-w-3xl">
-          <span className="chip"><span className="dot"/> Built for teams that publish every day</span>
+          <span className="chip"><span className="dot"/>{isGodMode ? " Built for teams that publish every day" : " Free to try · runs in your browser · no account needed"}</span>
           <h1 className="text-4xl md:text-6xl font-black tracking-tight leading-[1.05]">
-            <span className="grad-text">AI video, end-to-end.</span><br/>
-            From idea to on-brand upload — in one workflow.
+            <span className="grad-text">{isGodMode ? "AI video, end-to-end." : "Paste a topic."}</span><br/>
+            {isGodMode ? "From idea to on-brand upload — in one workflow." : "Get a narrated video in minutes."}
           </h1>
           <p className="text-[17px] text-[color:var(--muted)] max-w-2xl">
-            Zaidsaid turns text, links, audio, articles, podcasts, PDFs, and images into polished, branded, social-ready videos. Research, scripting, storyboarding, assets, motion graphics, voiceover, avatar narration, editing, and repurposing — all automated, all in one place.
+            {isGodMode
+              ? "Zaidsaid turns text, links, audio, articles, podcasts, PDFs, and images into polished, branded, social-ready videos. Research, scripting, storyboarding, assets, motion graphics, voiceover, avatar narration, editing, and repurposing — all automated, all in one place."
+              : "Drop in a topic, script, or YouTube link. Zaidsaid writes the script, generates a storyboard, narrates each scene, and gives you a finished video to download — all in your browser."}
           </p>
           <div className="flex flex-wrap items-center gap-3">
             <button className="btn btn-primary" onClick={()=>{ startProject && startProject(); }}>{I.spark({size:16})} <span>Start a project</span></button>
@@ -583,50 +585,72 @@ function HomeTab({ setTab, startProject }){
             {INPUTS.map(i => <span key={i.k} className="chip">{i.label}</span>)}
           </div>
         </div>
-        <div className="mt-10 grid grid-cols-2 md:grid-cols-4 gap-3">
-          {ARCHIVE_PIPELINE.slice(0,8).map((s,i) => (
-            <div key={s} className="card p-3 text-center text-xs text-[color:var(--muted)]">
-              <div className="text-[10px] text-[color:var(--muted)]/70">Stage {i+1}</div>
-              <div className="text-white font-semibold mt-1">{s}</div>
-            </div>
-          ))}
-        </div>
-      </section>
-      <section className="py-6">
-        <div className="flex flex-wrap items-center gap-x-8 gap-y-3 text-[color:var(--muted)] text-sm">
-          <span className="uppercase tracking-widest text-[11px]">Publishes to</span>
-          {INTEGRATIONS.map(x => <span key={x} className="text-white/80">{x}</span>)}
-        </div>
-      </section>
-      <section className="py-10">
-        <div className="grid md:grid-cols-3 gap-4">
-          {PILLARS.filter(p => isGodMode || p.title === "Generate").map(p => (
-            <div key={p.title} className="card p-6">
-              <div className="flex items-center gap-2 text-[color:var(--muted)]">{I[p.icon]({size:18})}<span className="text-xs uppercase tracking-wider">{p.title}</span></div>
-              <div className="mt-2 text-xl font-semibold">{p.title}</div>
-              <p className="mt-2 text-sm text-[color:var(--muted)]">{p.body}</p>
-              <button className="btn mt-4" onClick={()=>setTab(p.title==="Generate"?"studio":p.title==="Repurpose"?"repurpose":"avatars")}>Open {p.title} {I.arrow({size:14})}</button>
-            </div>
-          ))}
-        </div>
-      </section>
-      <section className="py-10">
-        <div className="flex items-end justify-between mb-4">
-          <div>
-            <div className="uppercase tracking-widest text-[11px] text-[color:var(--muted)]">What's inside</div>
-            <h2 className="text-2xl md:text-3xl font-bold mt-1">Everything a video team needs, one platform.</h2>
+        {isGodMode ? (
+          <div className="mt-10 grid grid-cols-2 md:grid-cols-4 gap-3">
+            {ARCHIVE_PIPELINE.slice(0,8).map((s,i) => (
+              <div key={s} className="card p-3 text-center text-xs text-[color:var(--muted)]">
+                <div className="text-[10px] text-[color:var(--muted)]/70">Stage {i+1}</div>
+                <div className="text-white font-semibold mt-1">{s}</div>
+              </div>
+            ))}
           </div>
-          {isGodMode && <button className="btn" onClick={()=>setTab("architecture")}>See architecture {I.arrow({size:14})}</button>}
-        </div>
-        <div className="grid md:grid-cols-3 gap-3">
-          {FEATURES.map(f => (
-            <div key={f.t} className="card p-5">
-              <div className="font-semibold">{f.t}</div>
-              <div className="text-sm text-[color:var(--muted)] mt-1">{f.d}</div>
-            </div>
-          ))}
-        </div>
+        ) : (
+          <div className="mt-10 grid grid-cols-1 md:grid-cols-3 gap-3">
+            {[
+              { n: "1", t: "Paste", d: "A topic, a script, or a YouTube link." },
+              { n: "2", t: "Generate", d: "Claude writes the script; Stability draws the scenes; ElevenLabs narrates." },
+              { n: "3", t: "Download", d: "A narrated WebM video, ready to post." },
+            ].map(s => (
+              <div key={s.n} className="card p-4">
+                <div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Step {s.n}</div>
+                <div className="text-white font-semibold mt-1 text-lg">{s.t}</div>
+                <div className="text-sm text-[color:var(--muted)] mt-1">{s.d}</div>
+              </div>
+            ))}
+          </div>
+        )}
       </section>
+      {isGodMode && (
+        <section className="py-6">
+          <div className="flex flex-wrap items-center gap-x-8 gap-y-3 text-[color:var(--muted)] text-sm">
+            <span className="uppercase tracking-widest text-[11px]">Publishes to</span>
+            {INTEGRATIONS.map(x => <span key={x} className="text-white/80">{x}</span>)}
+          </div>
+        </section>
+      )}
+      {isGodMode && (
+        <section className="py-10">
+          <div className="grid md:grid-cols-3 gap-4">
+            {PILLARS.map(p => (
+              <div key={p.title} className="card p-6">
+                <div className="flex items-center gap-2 text-[color:var(--muted)]">{I[p.icon]({size:18})}<span className="text-xs uppercase tracking-wider">{p.title}</span></div>
+                <div className="mt-2 text-xl font-semibold">{p.title}</div>
+                <p className="mt-2 text-sm text-[color:var(--muted)]">{p.body}</p>
+                <button className="btn mt-4" onClick={()=>setTab(p.title==="Generate"?"studio":p.title==="Repurpose"?"repurpose":"avatars")}>Open {p.title} {I.arrow({size:14})}</button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+      {isGodMode && (
+        <section className="py-10">
+          <div className="flex items-end justify-between mb-4">
+            <div>
+              <div className="uppercase tracking-widest text-[11px] text-[color:var(--muted)]">What's inside</div>
+              <h2 className="text-2xl md:text-3xl font-bold mt-1">Everything a video team needs, one platform.</h2>
+            </div>
+            <button className="btn" onClick={()=>setTab("architecture")}>See architecture {I.arrow({size:14})}</button>
+          </div>
+          <div className="grid md:grid-cols-3 gap-3">
+            {FEATURES.map(f => (
+              <div key={f.t} className="card p-5">
+                <div className="font-semibold">{f.t}</div>
+                <div className="text-sm text-[color:var(--muted)] mt-1">{f.d}</div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
       <section className="py-14">
         <div className="card p-8 ring-brand flex flex-col md:flex-row items-start md:items-center gap-6">
           <div>
