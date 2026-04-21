@@ -452,7 +452,7 @@ function HealthPanel({ filterCap }){
 const TABS = [
   { id:"home", label:"Home", icon:"home" },
   { id:"studio", label:"Studio", icon:"studio" },
-  { id:"repurpose", label:"Repurpose", icon:"scissors", godOnly:true },
+  { id:"repurpose", label:"Repurpose", icon:"scissors" },
   { id:"avatars", label:"Avatars & Voices", icon:"avatar", godOnly:true },
   { id:"brands", label:"Brand Kits", icon:"brand", godOnly:true },
   { id:"templates", label:"Templates", icon:"template", godOnly:true },
@@ -603,7 +603,7 @@ function HomeTab({ setTab, startProject }){
           <div className="flex flex-wrap items-center gap-3">
             <button className="btn btn-primary" onClick={()=>{ startProject && startProject(); }}>{I.spark({size:16})} <span>Start a project</span></button>
             {!isGodMode && <button className="btn" onClick={()=>{ startProject && startProject(); setTimeout(()=>{ try { window.dispatchEvent(new CustomEvent('zs:try-sample')); } catch(_){} }, 350); }}>{I.spark({size:16})} <span>Try a sample →</span></button>}
-            {isGodMode && <button className="btn" onClick={()=>setTab("repurpose")}>{I.scissors({size:16})} <span>Repurpose long-form</span></button>}
+            <button className="btn" onClick={()=>setTab("repurpose")}>{I.scissors({size:16})} <span>Repurpose long-form</span></button>
             {isGodMode && <button className="btn btn-ghost" onClick={()=>setTab("templates")}>{I.template({size:16})} <span>Browse templates</span></button>}
           </div>
           <div className="flex flex-wrap items-center gap-2 mt-2">
