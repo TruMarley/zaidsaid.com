@@ -41,11 +41,13 @@
     .dot{width:8px;height:8px;border-radius:999px;background:var(--ok);animation:pulseDot 1.6s infinite}
     @keyframes shimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}
     .shimmer{background:linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,.08) 50%, rgba(255,255,255,0) 100%); background-size:200% 100%; animation:shimmer 1.8s infinite}
+    @keyframes zsFadeIn{from{opacity:0;transform:scale(.98)}to{opacity:1;transform:scale(1)}}
+    .zs-fade-in{animation:zsFadeIn .45s ease-out both}
   </style>
 </head>
 <body class="glow">
   <noscript><div style="padding:24px;color:#e9ecff">Zaidsaid requires JavaScript.</div></noscript>
   <div id="root" aria-live="polite"></div>
-  <script type="text/babel" data-presets="env,react" src="./app.js?v=mvp_god_x25"></script>
+  <script type="text/babel" data-presets="env,react" src="./app.js?v=mvp_god_x26"></script>
 </body>
 </html>
