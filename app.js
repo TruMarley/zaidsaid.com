@@ -2070,7 +2070,10 @@ function StepExport({ project, setProject }){
       const durations = scenes.map((s,i) => {
         const configured = Math.max(1, Number(s.duration)||3);
         const audioLen = audioBuffers[i] ? audioBuffers[i].duration : 0;
-        return Math.max(configured, Math.ceil(audioLen * 10)/10);
+        if(audioLen > 0){
+          return Math.max(2.0, Math.ceil((audioLen + 0.3) * 10) / 10);
+        }
+        return configured;
       });
       const INTRO_S = 1.0;
       const OUTRO_S = 1.0;
