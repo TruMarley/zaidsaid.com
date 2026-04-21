@@ -1787,7 +1787,7 @@ function StepExport({ project, setProject }){
     const scenes = (project && project.scenes) || [];
     if(!scenes.length){ setRenderErr('No scenes to render.'); return; }
     if(typeof MediaRecorder === 'undefined' || !HTMLCanvasElement.prototype.captureStream){ setRenderErr('Your browser does not support MediaRecorder + canvas.captureStream.'); return; }
-    if(document.visibilityState !== 'visible'){ setRenderErr('Keep this tab visible during render â Chromium throttles background tabs and corrupts WebM output.'); return; }
+    if(document.visibilityState !== 'visible'){ console.warn('[zs] starting render with tab hidden — output may be lower quality'); }
     setRenderBusy(true); setRenderErr(''); setRenderUrl(''); setRenderProgress(0);
     let audioCtx = null; let onVis = null;
     try {
