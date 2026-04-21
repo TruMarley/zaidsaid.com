@@ -2044,6 +2044,7 @@ function StepExport({ project, setProject }){
     }
   }, []);
   const [renderProgress, setRenderProgress] = React.useState(0);
+  const readyRef = React.useRef(null);
   React.useEffect(() => {
     if (isGodMode) return;
     if (!renderBusy && !renderUrl) return;
@@ -2052,6 +2053,11 @@ function StepExport({ project, setProject }){
       : ('Rendering video… ' + Math.max(1, renderProgress) + '%');
     try { window.dispatchEvent(new CustomEvent('zs:progress', { detail: { message, busy: renderBusy } })); } catch(_){}
   }, [renderBusy, renderProgress, renderUrl]);
+  React.useEffect(() => {
+    if (renderUrl && !renderBusy && readyRef.current) {
+      try { readyRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch(_){}
+    }
+  }, [renderUrl, renderBusy]);
   const renderRealVideo = async () => {
     if(renderBusy) return;
     const scenes = ((projectRef.current && projectRef.current.scenes) || []).slice();
@@ -2405,7 +2411,7 @@ function StepExport({ project, setProject }){
           const _durLabel = _dur ? (_dur < 60 ? (Math.round(_dur*10)/10) + 's' : Math.floor(_dur/60) + 'm ' + Math.round(_dur%60) + 's') : '';
           const _meta = [_durLabel, _sizeLabel].filter(Boolean).join(' · ');
           return (
-          <div className="mt-4 grid gap-3">
+          <div ref={readyRef} className="mt-4 grid gap-3 scroll-mt-4">
             <div className="flex items-center justify-between gap-2 text-sm">
               <div className="flex items-center gap-2 text-emerald-300 font-semibold">
                 <span className="inline-flex w-6 h-6 rounded-full bg-emerald-400/20 items-center justify-center text-emerald-300">{I.check({size:14})}</span>
