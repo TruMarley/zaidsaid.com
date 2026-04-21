@@ -1,4 +1,4 @@
-/* Zaidsaid — app.js v2.0 — x65: Repurpose export v1 — per-clip + batch text package
+/* Zaidsaid — app.js v2.0 — x66: hotfix — restore markApproved close + gap-2 classname lost to UTF-16 offset in x65 dispatch
  * Security: localStorage namespaced as zaidsaid.v2.*, error boundary, no innerHTML, no eval, no fetch.
  * Archived v1 seed data preserved under ARCHIVE_* for later reuse.
  */
@@ -4174,7 +4174,9 @@ const removeClip = (clipId) => {
   };
   const markApproved = () => {
     if(!selected.length) return;
-    setProject({ ...project, clips: project.clips.map(c => selected.includes(c.id) ? { ...c, status: "approved" } : c) })  const downloadAllClips = () => {
+    setProject({ ...project, clips: project.clips.map(c => selected.includes(c.id) ? { ...c, status: "approved" } : c) });
+  };
+  const downloadAllClips = () => {
     if(!project.clips.length) return;
     try {
       const body = project.clips.map(c => buildClipExportText(c, project)).join("\n\n\n");
@@ -4317,7 +4319,8 @@ const removeClip = (clipId) => {
             <div><div className="text-[color:var(--muted)] text-[11px]">Approved</div><div>{approvedCount}</div></div>
             <div><div className="text-[color:var(--muted)] text-[11px]">Output duration</div><div>{totalExportSec}s</div></div>
           </div>
-          <div className="mt-4 flex items-center g            <button className="btn btn-primary" onClick={downloadAllClips} disabled={!project.clips.length}>{I.arrow({size:14})} Download all clips (.txt)</button>
+          <div className="mt-4 flex items-center gap-2">
+            <button className="btn btn-primary" onClick={downloadAllClips} disabled={!project.clips.length}>{I.arrow({size:14})} Download all clips (.txt)</button>
             <span className="text-[11px] text-[color:var(--muted)]">Exports a single text file with every clip's title, hook, caption, platform captions, and any generated insights.</span>
 /span>
           </div>
