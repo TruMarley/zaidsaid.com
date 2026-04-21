@@ -814,18 +814,32 @@ const PUBLIC_STUDIO_STEP_IDS = ["script", "storyboard", "voice", "export"];
 function visibleStudioSteps(){
   return isGodMode ? STUDIO_STEPS : STUDIO_STEPS.filter(s => PUBLIC_STUDIO_STEP_IDS.includes(s.id));
 }
-function StudioStepNav({ step, setStep }){
+function StudioStepNav({ step, setStep, project }){
   const steps = visibleStudioSteps();
+  const _scenes = (project && project.scenes) || [];
+  const _hasAllImages = _scenes.length > 0 && _scenes.every(s => s && s.image);
+  const _hasAllAudio = _scenes.length > 0 && _scenes.every(s => s && s.audioSource);
+  const _hasSource = !!(project && project.source && String(project.source).trim().length);
+  const _isDone = (id) => {
+    if (id === 'script') return _hasSource;
+    if (id === 'storyboard') return _hasAllImages;
+    if (id === 'voice') return _hasAllAudio;
+    return false;
+  };
   return (
     <div className="card p-2 flex items-center gap-1 overflow-x-auto scrollbar">
       {steps.map((s, i) => {
         const active = s.id === step;
+        const done = _isDone(s.id) && !active;
         return (
           <button key={s.id}
             onClick={()=>setStep(s.id)}
             aria-current={active?"step":undefined}
-            className={"flex items-center gap-2 px-3 py-2 rounded-xl text-[12.5px] whitespace-nowrap " + (active ? "bg-white/10 text-white border border-white/10" : "text-[color:var(--muted)] hover:text-white")}>
-            <span className="text-[10px] text-[color:var(--muted)]">{String(i+1).padStart(2,"0")}</span>
+            className={"flex items-center gap-2 px-3 py-2 rounded-xl text-[12.5px] whitespace-nowrap " + (active ? "bg-white/10 text-white border border-white/10" : done ? "text-emerald-200/90 hover:text-white" : "text-[color:var(--muted)] hover:text-white")}>
+            {done
+              ? <span className="inline-flex w-4 h-4 rounded-full bg-emerald-400/20 items-center justify-center text-emerald-300">{I.check({size:10})}</span>
+              : <span className="text-[10px] text-[color:var(--muted)]">{String(i+1).padStart(2,"0")}</span>
+            }
             <span>{s.label}</span>
           </button>
         );
@@ -2667,7 +2681,7 @@ function StudioTab({ setTab, studioStep, setStudioStep }){
         </div>
       )}
       <div className="grid gap-3 mb-4">
-        <StudioStepNav step={step} setStep={goto} />
+        <StudioStepNav step={step} setStep={goto} project={project} />
         {isGodMode && <StudioStageProvider step={step} setTab={setTab} />}
         {isGodMode && <StudioCharacterRow project={project} setProject={setProject} />}
         {isGodMode && <StudioBrandKitSelect project={project} setProject={setProject} />}
