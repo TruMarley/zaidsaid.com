@@ -1890,6 +1890,11 @@ function StepExport({ project, setProject }){
   const [renderBusy, setRenderBusy] = React.useState(false);
   const [renderErr, setRenderErr] = React.useState('');
   const [renderUrl, setRenderUrl] = React.useState('');
+  React.useEffect(() => {
+    if(!renderUrl && typeof window !== 'undefined' && window.__zs_lastBlob){
+      try { setRenderUrl(URL.createObjectURL(window.__zs_lastBlob)); } catch(_){}
+    }
+  }, []);
   const [renderProgress, setRenderProgress] = React.useState(0);
   const renderRealVideo = async () => {
     if(renderBusy) return;
