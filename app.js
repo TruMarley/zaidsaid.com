@@ -2104,14 +2104,26 @@ function StepExport({ project, setProject }){
           cum += durations[i];
         }
       }
-      const drawSceneToCtx = (context, idx) => {
+      const drawSceneToCtx = (context, idx, progress) => {
+        const p = Math.max(0, Math.min(1, progress || 0));
         context.globalAlpha = 1;
         context.fillStyle = '#0a0a0a'; context.fillRect(0,0,W,H);
         const sc = scenes[idx];
         if(imgs[idx]){
-          const r = Math.max(W/imgs[idx].width, H/imgs[idx].height);
-          const dw = imgs[idx].width * r, dh = imgs[idx].height * r;
-          context.drawImage(imgs[idx], (W-dw)/2, (H-dh)/2, dw, dh);
+          const img = imgs[idx];
+          const variant = idx % 5;
+          const zoomStart = (variant === 0) ? 1.10 : 1.00;
+          const zoomEnd   = (variant === 0) ? 1.00 : 1.10;
+          const zoom = zoomStart + (zoomEnd - zoomStart) * p;
+          const r = Math.max(W/img.width, H/img.height);
+          const dw = img.width * r * zoom, dh = img.height * r * zoom;
+          const slack = 0.04;
+          let panX = 0, panY = 0;
+          if(variant === 1){ panX = -slack * W * p; }
+          else if(variant === 2){ panX = slack * W * p; }
+          else if(variant === 3){ panY = -slack * 0.7 * H * p; }
+          else if(variant === 4){ panY = slack * 0.7 * H * p; }
+          context.drawImage(img, (W-dw)/2 + panX, (H-dh)/2 + panY, dw, dh);
           context.fillStyle = 'rgba(0,0,0,0.45)'; context.fillRect(0, H-160, W, 160);
         } else {
           context.fillStyle = '#1a1a1a'; context.fillRect(40,40,W-80,H-80);
@@ -2131,22 +2143,23 @@ function StepExport({ project, setProject }){
         const dur = durations[i];
         const isLast = (i === scenes.length - 1);
         const fadeS = isLast ? 0 : Math.min(FADE_S, dur * 0.3);
-        const holdS = Math.max(0, dur - fadeS);
-        drawSceneToCtx(ctx, i);
-        if(holdS > 0){
-          const holdTarget = (audioCtx ? audioCtx.currentTime : performance.now()/1000) + holdS;
-          await new Promise(r => setTimeout(r, holdS * 1000));
-          if(audioCtx){
-            while(audioCtx.currentTime < holdTarget){ await new Promise(r => setTimeout(r, 50)); }
-          }
+        const sceneStart = audioCtx ? audioCtx.currentTime : performance.now()/1000;
+        const holdEnd = sceneStart + Math.max(0, dur - fadeS);
+        while(true){
+          const now = audioCtx ? audioCtx.currentTime : performance.now()/1000;
+          const p = Math.min(1, (now - sceneStart) / dur);
+          drawSceneToCtx(ctx, i, p);
+          if(now >= holdEnd) break;
+          await new Promise(r => requestAnimationFrame(r));
         }
         if(!isLast && fadeS > 0){
-          drawSceneToCtx(offCtx, i);
+          const holdProgress = Math.min(1, (dur - fadeS) / dur);
+          drawSceneToCtx(offCtx, i, holdProgress);
           const fadeStart = audioCtx ? audioCtx.currentTime : performance.now()/1000;
           while(true){
             const now = audioCtx ? audioCtx.currentTime : performance.now()/1000;
             const t = Math.min(1, (now - fadeStart) / fadeS);
-            drawSceneToCtx(ctx, i+1);
+            drawSceneToCtx(ctx, i+1, 0);
             ctx.globalAlpha = 1 - t;
             ctx.drawImage(offscreen, 0, 0);
             ctx.globalAlpha = 1;
