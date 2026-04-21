@@ -2416,6 +2416,12 @@ function StepExport({ project, setProject }){
             <div className="flex flex-wrap items-center gap-2">
               <a href={renderUrl} download={(project.name||'zaidsaid')+'.webm'} className="btn btn-primary">{I.check({size:14})} Download .webm</a>
               <button type="button" onClick={()=>{ setRenderUrl(''); try { renderRealVideo(); } catch(_){} }} className="btn btn-ghost text-xs">Render again</button>
+              <button type="button" onClick={()=>{
+                try { window.__zs_lastBlob = null; window.__zs_lastDurS = null; } catch(_){}
+                setRenderUrl(''); setRenderErr(''); setRenderMeta({ bytes: 0, durationSec: 0 });
+                setProject(STUDIO_SEED);
+                try { window.dispatchEvent(new CustomEvent('zs:advance-step', { detail: { from: 'export' } })); } catch(_){}
+              }} className="btn btn-ghost text-xs">Make another video</button>
             </div>
           </div>
           );
@@ -2577,7 +2583,7 @@ function StudioTab({ setTab, studioStep, setStudioStep }){
     if (isGodMode) return;
     const h = (e) => {
       const from = e && e.detail && e.detail.from;
-      const map = { script: 'storyboard', storyboard: 'voice', voice: 'export' };
+      const map = { script: 'storyboard', storyboard: 'voice', voice: 'export', export: 'script' };
       if (map[from]) setStudioStep(map[from]);
     };
     const p = (e) => {
