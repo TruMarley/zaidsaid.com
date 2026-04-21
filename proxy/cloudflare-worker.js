@@ -123,33 +123,45 @@ function decodeHtmlEntities(s) {
 
 function parseCaptionPayload(text) {
   const trimmed = (text || "").trim();
-  if (!trimmed) return "";
+  if (!trimmed) return { text: "", segments: [] };
+  const segments = [];
   if (trimmed.startsWith("{")) {
     try {
       const capJson = JSON.parse(trimmed);
       const events = capJson.events || [];
-      const parts = [];
       for (const ev of events) {
         if (!ev.segs) continue;
+        const parts = [];
         for (const seg of ev.segs) { if (seg.utf8) parts.push(seg.utf8); }
+        const evText = parts.join("").replace(/\s+/g, " ").trim();
+        if (!evText) continue;
+        const t = Number(ev.tStartMs || 0) / 1000;
+        const d = Number(ev.dDurationMs || 0) / 1000;
+        segments.push({ t: +t.toFixed(2), d: +d.toFixed(2), text: evText });
       }
-      return parts.join("").replace(/\s+/g, " ").trim();
+      const joined = segments.map(s => s.text).join(" ").replace(/\s+/g, " ").trim();
+      return { text: joined, segments };
     } catch (_) { /* fall through to XML */ }
   }
-  const parts = [];
-  const reP = /<p[^>]*>([\s\S]*?)<\/p>/g;
+  const reP = /<p[^>]*\bt="(\d+)"[^>]*(?:\bd="(\d+)")?[^>]*>([\s\S]*?)<\/p>/g;
   let m;
   while ((m = reP.exec(trimmed)) !== null) {
-    const inner = m[1].replace(/<[^>]+>/g, "");
-    parts.push(decodeHtmlEntities(inner));
+    const t = Number(m[1] || 0) / 1000;
+    const d = Number(m[2] || 0) / 1000;
+    const inner = decodeHtmlEntities(m[3].replace(/<[^>]+>/g, "")).replace(/\s+/g, " ").trim();
+    if (inner) segments.push({ t: +t.toFixed(2), d: +d.toFixed(2), text: inner });
   }
-  if (parts.length === 0) {
-    const reText = /<text[^>]*>([\s\S]*?)<\/text>/g;
+  if (segments.length === 0) {
+    const reText = /<text[^>]*\bstart="([\d.]+)"[^>]*(?:\bdur="([\d.]+)")?[^>]*>([\s\S]*?)<\/text>/g;
     while ((m = reText.exec(trimmed)) !== null) {
-      parts.push(decodeHtmlEntities(m[1].replace(/<[^>]+>/g, "")));
+      const t = Number(m[1] || 0);
+      const d = Number(m[2] || 0);
+      const inner = decodeHtmlEntities(m[3].replace(/<[^>]+>/g, "")).replace(/\s+/g, " ").trim();
+      if (inner) segments.push({ t: +t.toFixed(2), d: +d.toFixed(2), text: inner });
     }
   }
-  return parts.join(" ").replace(/\s+/g, " ").trim();
+  const joined = segments.map(s => s.text).join(" ").replace(/\s+/g, " ").trim();
+  return { text: joined, segments };
 }
 
 const YT_USER_AGENTS = [
@@ -225,11 +237,12 @@ async function fetchYouTubeTranscriptViaInnerTube(videoId) {
       const capRes = await fetch(preferred.baseUrl, { headers: { "User-Agent": c.userAgent } });
       if (!capRes.ok) { attempts.push(c.name + ": captions HTTP " + capRes.status); continue; }
       const capText = await capRes.text();
-      const transcript = parseCaptionPayload(capText);
-      if (!transcript) { attempts.push(c.name + ": empty payload"); continue; }
+      const parsed = parseCaptionPayload(capText);
+      if (!parsed.text) { attempts.push(c.name + ": empty payload"); continue; }
       const vd = data.videoDetails || {};
       return {
-        transcript,
+        transcript: parsed.text,
+        segments: parsed.segments,
         language: preferred.languageCode || "en",
         client: c.name,
         scrapeMeta: {
@@ -271,10 +284,11 @@ async function fetchYouTubeTranscriptViaScrape(videoId) {
       const capRes = await fetch(preferred.baseUrl, { headers: { "User-Agent": ua } });
       if (!capRes.ok) { lastErr = new Error("Captions HTTP " + capRes.status); continue; }
       const capText = await capRes.text();
-      const transcript = parseCaptionPayload(capText);
-      if (!transcript) { lastErr = new Error("Empty transcript payload"); continue; }
+      const parsed = parseCaptionPayload(capText);
+      if (!parsed.text) { lastErr = new Error("Empty transcript payload"); continue; }
       return {
-        transcript,
+        transcript: parsed.text,
+        segments: parsed.segments,
         language: preferred.languageCode || "en",
         scrapeMeta: {
           title: ((data.videoDetails || {}).title) || "",
@@ -302,6 +316,7 @@ async function fetchYouTubeTranscript(videoId, env) {
       lengthSeconds: apiMeta?.lengthSeconds || it.scrapeMeta.lengthSeconds,
       language: it.language,
       transcript: it.transcript,
+      segments: it.segments || [],
       source: "innertube"
     };
   } catch (itErr) {
@@ -317,6 +332,7 @@ async function fetchYouTubeTranscript(videoId, env) {
       lengthSeconds: apiMeta?.lengthSeconds || scrape.scrapeMeta.lengthSeconds,
       language: scrape.language,
       transcript: scrape.transcript,
+      segments: scrape.segments || [],
       source: "scrape"
     };
   } catch (scrapeErr) {
@@ -331,6 +347,7 @@ async function fetchYouTubeTranscript(videoId, env) {
       lengthSeconds: apiMeta.lengthSeconds,
       language: "en",
       transcript: apiMeta.description,
+      segments: [],
       source: "description",
       fallback: "description-only",
       errors
