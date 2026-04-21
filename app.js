@@ -1,4 +1,4 @@
-/* Zaidsaid — app.js v2.0 — x59: Hook A/B Generator — 3 alternative hook/title pairs per clip so creators can compare and pick
+/* Zaidsaid — app.js v2.0 — x60: Thumbnail Concept Generator — per-clip visual brief (text overlay, emoji, bg color) for editors
  * Security: localStorage namespaced as zaidsaid.v2.*, error boundary, no innerHTML, no eval, no fetch.
  * Archived v1 seed data preserved under ARCHIVE_* for later reuse.
  */
@@ -3074,7 +3074,7 @@ function RepurposeTranscriptStrip({ project }){
   );
 }
 
-function RepurposeClipCard({ clip, onField, onRegen, onRemove, onExplain, explainBusy, onHookAlts, hookAltsBusy }){
+function RepurposeClipCard({ clip, onField, onRegen, onRemove, onExplain, explainBusy, onHookAlts, hookAltsBusy, onThumbConcept, thumbConceptBusy }){
   const band = viralityBand(clip.virality);
   const preset = REPURPOSE_PRESETS.find(p => p.id === clip.preset) || REPURPOSE_PRESETS[0];
   const previewW = preset.id === "vertical" ? 72 : (preset.id === "square" ? 90 : 128);
@@ -3089,9 +3089,9 @@ function RepurposeClipCard({ clip, onField, onRegen, onRemove, onExplain, explai
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <span className={"px-2 py-0.5 rounded-md text-[11px] border " + band.border + " " + band.bg + " " + band.tone}>{I.flame({size:12})} {band.label} {clip.virality}</span>
-            <span className="chip">{hmsFromSec(clip.start)} Ã¢ÂÂ {hmsFromSec(clip.end)}</span>
+            <span className="chip">{hmsFromSec(clip.start)} ÃÂ¢ÃÂÃÂ {hmsFromSec(clip.end)}</span>
             <span className="chip">{clipDuration(clip)}s</span>
-            <span className="chip">{preset.ratio} ÃÂ· {platformFor(clip.preset)}</span>
+            <span className="chip">{preset.ratio} ÃÂÃÂ· {platformFor(clip.preset)}</span>
           </div>
           <input
             value={clip.title}
@@ -3153,7 +3153,7 @@ function RepurposeClipCard({ clip, onField, onRegen, onRemove, onExplain, explai
               );
             })}
           </div>
-          <div className="mt-2 text-[11px] text-[color:var(--muted)]">Platforms: {preset.platforms.join(" ÃÂ· ")}</div>
+          <div className="mt-2 text-[11px] text-[color:var(--muted)]">Platforms: {preset.platforms.join(" ÃÂÃÂ· ")}</div>
           <div className="mt-2 flex items-center gap-2">
             <label className="block">
               <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Start</span>
@@ -3176,12 +3176,16 @@ function RepurposeClipCard({ clip, onField, onRegen, onRemove, onExplain, explai
           <button className="chip" onClick={()=>onRegen("hook")}>{I.refresh({size:12})} Re-hook</button>
           <button className="chip" onClick={()=>onRegen("virality")}>{I.flame({size:12})} Re-score</button>
           <button className="chip" onClick={onExplain} disabled={!!explainBusy} aria-label="Explain why this clip scores high">
-            {explainBusy ? "AnalyzingÃ¢ÂÂ¦" : (clip.hookBreakdown ? I.refresh({size:12}) : I.spark({size:12}))}
+            {explainBusy ? "AnalyzingÃÂ¢ÃÂÃÂ¦" : (clip.hookBreakdown ? I.refresh({size:12}) : I.spark({size:12}))}
             {" "}{explainBusy ? "" : (clip.hookBreakdown ? "Re-explain" : "Why this works")}
           </button>
           <button className="chip" onClick={onHookAlts} disabled={!!hookAltsBusy} aria-label="Generate 3 alternative hooks">
-            {hookAltsBusy ? "Generatingâ¦" : (clip.hookAlts ? I.refresh({size:12}) : I.edit({size:12}))}
+            {hookAltsBusy ? "GeneratingÃ¢ÂÂ¦" : (clip.hookAlts ? I.refresh({size:12}) : I.edit({size:12}))}
             {" "}{hookAltsBusy ? "" : (clip.hookAlts ? "New alts" : "Hook A/B")}
+          </button>
+          <button className="chip" onClick={onThumbConcept} disabled={!!thumbConceptBusy} aria-label="Generate thumbnail concept">
+            {thumbConceptBusy ? "GeneratingÃ¢ÂÂ¦" : (clip.thumbConcept ? I.refresh({size:12}) : I.spark({size:12}))}
+            {" "}{thumbConceptBusy ? "" : (clip.thumbConcept ? "New thumb" : "Thumbnail")}
           </button>
         </div>
         <div className="flex items-center gap-1">
@@ -3210,7 +3214,7 @@ function RepurposeClipCard({ clip, onField, onRegen, onRemove, onExplain, explai
       )}
       {Array.isArray(clip.hookAlts) && clip.hookAlts.length > 0 && (
         <div className="mt-3 rounded-xl border border-fuchsia-400/20 bg-fuchsia-500/8 p-3">
-          <div className="text-[11px] uppercase tracking-widest text-fuchsia-300/70 mb-2">Hook A/B â pick one</div>
+          <div className="text-[11px] uppercase tracking-widest text-fuchsia-300/70 mb-2">Hook A/B Ã¢ÂÂ pick one</div>
           <div className="grid gap-2">
             {clip.hookAlts.map((alt, i) => alt && (
               <div key={i} className="rounded-lg border border-fuchsia-400/15 bg-fuchsia-500/5 p-2.5 flex items-start gap-2">
@@ -3233,6 +3237,32 @@ function RepurposeClipCard({ clip, onField, onRegen, onRemove, onExplain, explai
           </div>
         </div>
       )}
+      {clip.thumbConcept && typeof clip.thumbConcept === "object" && (
+        <div className="mt-3 rounded-xl border border-amber-400/20 bg-amber-500/8 p-3">
+          <div className="text-[11px] uppercase tracking-widest text-amber-300/70 mb-2">Thumbnail concept</div>
+          <div className="flex items-start gap-3">
+            <div className="shrink-0 w-20 h-14 rounded-lg flex flex-col items-center justify-center text-white text-[11px] font-bold leading-tight text-center px-1 shadow-md"
+              style={{ backgroundColor: clip.thumbConcept.bg_color || "#1a1a2e" }}>
+              <span className="text-xl mb-0.5">{clip.thumbConcept.emoji}</span>
+              <span className="uppercase text-[9px] tracking-wide leading-tight">{clip.thumbConcept.text_overlay}</span>
+            </div>
+            <div className="flex-1 min-w-0 text-[12px] text-[color:var(--muted)]">
+              <div className="mb-1"><span className="text-[11px] uppercase tracking-widest text-amber-300/60 block mb-0.5">Text overlay</span>
+                <span className="text-white/90 font-semibold">{clip.thumbConcept.text_overlay}</span> {clip.thumbConcept.emoji}
+              </div>
+              <div className="mb-1"><span className="text-[11px] uppercase tracking-widest text-amber-300/60 block mb-0.5">Background</span>
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="inline-block w-3 h-3 rounded-sm border border-white/10" style={{ backgroundColor: clip.thumbConcept.bg_color }}></span>
+                  {clip.thumbConcept.bg_color} â {clip.thumbConcept.bg_label}
+                </span>
+              </div>
+              {clip.thumbConcept.rationale && (
+                <div><span className="text-[11px] uppercase tracking-widest text-amber-300/60 block mb-0.5">Why it works</span>{clip.thumbConcept.rationale}</div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -3244,7 +3274,7 @@ function clipRegenerate(field, clip){
       "The truth almost nobody says out loud",
       "Why the top 1% do this every morning",
       "The single biggest mistake people make here",
-      "What changed everything Ã¢ÂÂ in 60 seconds",
+      "What changed everything ÃÂ¢ÃÂÃÂ in 60 seconds",
     ];
     return pool[Math.floor(Math.random()*pool.length)];
   }
@@ -3252,7 +3282,7 @@ function clipRegenerate(field, clip){
     const pool = [
       "If you remember one thing, remember this.",
       "This is the part everybody skips. Don't.",
-      "Watch until the end Ã¢ÂÂ the payoff matters.",
+      "Watch until the end ÃÂ¢ÃÂÃÂ the payoff matters.",
       "Here's the research-backed version.",
     ];
     return pool[Math.floor(Math.random()*pool.length)];
@@ -3293,10 +3323,10 @@ function generateCaptionsLocal(clip, project){
   const tagPool = ["shortform","creator","ai","video","viral","explainer"];
   const tagsLong = tagPool.map(x=>"#"+x).join(" ");
   const tagsShort = tagPool.slice(0,2).map(x=>"#"+x).join(" ");
-  const twitter = (base.length > 260 ? base.slice(0,257) + "Ã¢ÂÂ¦" : base) + " " + tagsShort;
-  const linkedin = (title ? title + "\n\n" : "") + base + (brand ? "\n\nÃ¢ÂÂ " + brand : "") + "\n\n" + tagsLong;
+  const twitter = (base.length > 260 ? base.slice(0,257) + "ÃÂ¢ÃÂÃÂ¦" : base) + " " + tagsShort;
+  const linkedin = (title ? title + "\n\n" : "") + base + (brand ? "\n\nÃÂ¢ÃÂÃÂ " + brand : "") + "\n\n" + tagsLong;
   const instagram = base + "\n\n.\n.\n.\n" + tagsLong;
-  const tiktok = "Ã°ÂÂÂ¬ " + base + " " + tagsShort;
+  const tiktok = "ÃÂ°ÃÂÃÂÃÂ¬ " + base + " " + tagsShort;
   return { twitter: twitter.slice(0,280), linkedin: linkedin.slice(0,3000), instagram: instagram.slice(0,2200), tiktok: tiktok.slice(0,2200) };
 }
 
@@ -3317,7 +3347,7 @@ async function generateHookBreakdownViaClaude(proxyUrl, clip, project){
       required: ["emotional_trigger","curiosity_gap","audience_fit","one_liner"],
     },
   };
-  const systemMsg = "You are a short-form video strategist. Given a clip's title, hook, and caption, explain why it will perform well on social media. Use the provided tool. Be specific and concrete Ã¢ÂÂ no generic advice.";
+  const systemMsg = "You are a short-form video strategist. Given a clip's title, hook, and caption, explain why it will perform well on social media. Use the provided tool. Be specific and concrete ÃÂ¢ÃÂÃÂ no generic advice.";
   const brand = (project && project.brand) || "";
   const userMsg = [
     brand ? "BRAND: " + brand : "",
@@ -3351,17 +3381,17 @@ function generateHookBreakdownLocal(clip){
   const hasNumber = /\d/.test(title);
   const hasContrast = /vs|versus|over|instead|not/.test(title);
   const emotional_trigger = hasSurprise
-    ? "This clip triggers surprise and mild cognitive dissonance Ã¢ÂÂ viewers feel they've been missing something obvious. That discomfort drives shares."
+    ? "This clip triggers surprise and mild cognitive dissonance ÃÂ¢ÃÂÃÂ viewers feel they've been missing something obvious. That discomfort drives shares."
     : hasContrast
     ? "The contrast framing activates a mild fear of being wrong, which primes viewers to watch through to validate or update their belief."
-    : "The direct, specific claim creates a moment of recognition for viewers already invested in this topic Ã¢ÂÂ fueling saves and replays.";
+    : "The direct, specific claim creates a moment of recognition for viewers already invested in this topic ÃÂ¢ÃÂÃÂ fueling saves and replays.";
   const curiosity_gap = hasNumber
     ? "Specific numbers in the hook promise a concrete payoff. Viewers stay to get the exact figure rather than a vague takeaway."
     : hasSurprise
-    ? "The hook implies the viewer's current mental model is incomplete. They watch to find out exactly how Ã¢ÂÂ a classic open loop."
+    ? "The hook implies the viewer's current mental model is incomplete. They watch to find out exactly how ÃÂ¢ÃÂÃÂ a classic open loop."
     : "The hook names a mechanism without explaining it, creating a small knowledge gap that compels the viewer to fill it.";
   const audience_fit = v >= 80
-    ? "High overlap with health, productivity, and self-improvement audiences Ã¢ÂÂ segments with the highest save-and-share rates on short-form."
+    ? "High overlap with health, productivity, and self-improvement audiences ÃÂ¢ÃÂÃÂ segments with the highest save-and-share rates on short-form."
     : v >= 65
     ? "Strong fit for curious generalists who engage with explainer content. Likely to perform above average in the 25-40 demographic."
     : "Solid niche appeal for topic insiders. Engagement depth (comments, saves) will outperform raw view count.";
@@ -3385,19 +3415,19 @@ async function generateHookAltsViaClaude(proxyUrl, clip, project){
       properties: {
         alt1: {
           type: "object",
-          description: "Curiosity-gap variant â opens an unanswered question.",
+          description: "Curiosity-gap variant Ã¢ÂÂ opens an unanswered question.",
           properties: { title: { type: "string" }, hook: { type: "string" }, frame: { type: "string", description: "One-word label for the frame used, e.g. 'Curiosity'" } },
           required: ["title","hook","frame"],
         },
         alt2: {
           type: "object",
-          description: "Identity/tribe variant â speaks directly to a specific audience identity.",
+          description: "Identity/tribe variant Ã¢ÂÂ speaks directly to a specific audience identity.",
           properties: { title: { type: "string" }, hook: { type: "string" }, frame: { type: "string" } },
           required: ["title","hook","frame"],
         },
         alt3: {
           type: "object",
-          description: "Contrarian/surprise variant â challenges a common belief.",
+          description: "Contrarian/surprise variant Ã¢ÂÂ challenges a common belief.",
           properties: { title: { type: "string" }, hook: { type: "string" }, frame: { type: "string" } },
           required: ["title","hook","frame"],
         },
@@ -3405,7 +3435,7 @@ async function generateHookAltsViaClaude(proxyUrl, clip, project){
       required: ["alt1","alt2","alt3"],
     },
   };
-  const systemMsg = "You are a short-form video hook writer. Given a clip's current title, hook, and platform preset, produce 3 alternative title+hook pairs that each use a distinct persuasion frame. Titles â¤ 10 words. Hooks â¤ 15 words. Be specific to the clip topic â no generic filler.";
+  const systemMsg = "You are a short-form video hook writer. Given a clip's current title, hook, and platform preset, produce 3 alternative title+hook pairs that each use a distinct persuasion frame. Titles Ã¢ÂÂ¤ 10 words. Hooks Ã¢ÂÂ¤ 15 words. Be specific to the clip topic Ã¢ÂÂ no generic filler.";
   const brand = (project && project.brand) || "";
   const preset = clip.preset || "vertical";
   const platform = preset === "square" ? "X / LinkedIn" : preset === "landscape" ? "YouTube / LinkedIn" : "TikTok / Reels / Shorts";
@@ -3478,6 +3508,73 @@ function generateHookAltsLocal(clip){
 }
 /* ---- end Hook A/B Generator helpers ---- */
 
+/* ---- Thumbnail Concept Generator helpers (x60) ---- */
+async function generateThumbnailConceptViaClaude(proxyUrl, clip, project){
+  const url = (proxyUrl||"").replace(/\/$/, "") + "/v1/messages";
+  const tool = {
+    name: "emit_thumbnail_concept",
+    description: "Generate a short-form thumbnail concept for a clip: a bold text overlay (max 6 words), a single emoji that amplifies the message, and a background color cue as a hex code.",
+    input_schema: {
+      type: "object",
+      properties: {
+        text_overlay: { type: "string", description: "Bold text to overlay on thumbnail, max 6 words, all caps OK, no punctuation." },
+        emoji: { type: "string", description: "Single emoji that amplifies the hook visually." },
+        bg_color: { type: "string", description: "Hex color code for background mood, e.g. #1a1a2e for dark mystery, #ff6b35 for energy." },
+        bg_label: { type: "string", description: "One-word label for the color mood, e.g. 'dark', 'energetic', 'calm', 'bold'." },
+        rationale: { type: "string", description: "One sentence explaining why this concept fits the hook." },
+      },
+      required: ["text_overlay","emoji","bg_color","bg_label","rationale"],
+    },
+  };
+  const systemMsg = "You are a short-form video thumbnail designer. Given a clip title and hook, produce a thumbnail concept that maximises click-through. Return tool_use only.";
+  const userMsg = "CLIP TITLE: " + (clip.title||"") + "\n\nHOOK: " + (clip.hook||"") + "\n\nCAPTION DRAFT: " + (clip.caption||"");
+  const r = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 512,
+      system: systemMsg,
+      tools: [tool],
+      tool_choice: { type: "tool", name: "emit_thumbnail_concept" },
+      messages: [{ role: "user", content: userMsg }],
+    }),
+  });
+  if(!r.ok) throw new Error("HTTP " + r.status);
+  const j = await r.json();
+  const block = Array.isArray(j.content) ? j.content.find(c => c && c.type === "tool_use" && c.name === "emit_thumbnail_concept") : null;
+  if(!block || !block.input) throw new Error("no tool_use");
+  return block.input;
+}
+function generateThumbnailConceptLocal(clip){
+  const title = (clip.title||"").toUpperCase();
+  const words = title.split(/\s+/).filter(Boolean).slice(0,6);
+  const text_overlay = words.slice(0,5).join(" ") || "WATCH THIS";
+  const virality = clip.virality || 60;
+  let emoji = "ð¥";
+  let bg_color = "#1a1a2e";
+  let bg_label = "dark";
+  let rationale = "High-contrast dark background with bold overlay maximises perceived value.";
+  if(/truth|secret|reveal|know/i.test(title)){
+    emoji = "ð"; bg_color = "#0d0d0d"; bg_label = "mystery";
+    rationale = "Dark mystery palette signals exclusive information that builds curiosity.";
+  } else if(/money|income|rich|profit|earn/i.test(title)){
+    emoji = "ð°"; bg_color = "#1a2e1a"; bg_label = "growth";
+    rationale = "Green-tinted bg ties visually to financial success cues.";
+  } else if(/mistake|wrong|stop|never/i.test(title)){
+    emoji = "ð¨"; bg_color = "#2e1a1a"; bg_label = "urgency";
+    rationale = "Red-tinted bg triggers urgency and stop-scroll impulse.";
+  } else if(virality >= 80){
+    emoji = "ð"; bg_color = "#1a1a2e"; bg_label = "viral";
+    rationale = "High virality clip benefits from bold high-energy thumbnail.";
+  } else if(/how|step|way|trick|hack/i.test(title)){
+    emoji = "ð¯"; bg_color = "#1a2a2e"; bg_label = "clear";
+    rationale = "Teal-dark bg signals instructional clarity.";
+  }
+  return { text_overlay, emoji, bg_color, bg_label, rationale };
+}
+/* ---- end Thumbnail Concept Generator helpers ---- */
+
 function RepurposeTab(){
   const [project, setProject] = useLocalState("repurpose.project", REPURPOSE_SEED);
   useEffect(() => {
@@ -3545,7 +3642,22 @@ function RepurposeTab(){
     setProject(prev => ({ ...prev, clips: prev.clips.map(c => c.id === clipId ? { ...c, hookAlts: alts } : c) }));
     setHookAltsBusyId(null);
   };
-    const [captionsBusy, setCaptionsBusy] = useState(false);
+  const [thumbBusyId, setThumbBusyId] = useState(null);
+  const generateThumbConcept = async (clipId) => {
+    if(thumbBusyId) return;
+    const clip = project.clips.find(c => c.id === clipId);
+    if(!clip) return;
+    setThumbBusyId(clipId);
+    const path = getAnthropicPath();
+    let concept = null;
+    if(path){
+      try { concept = await generateThumbnailConceptViaClaude(path, clip, project); } catch(e){ concept = null; }
+    }
+    if(!concept) concept = generateThumbnailConceptLocal(clip);
+    setProject(prev => ({ ...prev, clips: prev.clips.map(c => c.id === clipId ? { ...c, thumbConcept: concept } : c) }));
+    setThumbBusyId(null);
+  };
+  const [captionsBusy, setCaptionsBusy] = useState(false);
   const [captionsSource, setCaptionsSource] = useState("");
   const generateAllCaptions = async () => {
     if(captionsBusy) return;
@@ -3599,7 +3711,7 @@ const removeClip = (clipId) => {
     setProject({
       ...project,
       clips: [...project.clips, {
-        id: nid, title:"New highlight Ã¢ÂÂ edit me",
+        id: nid, title:"New highlight ÃÂ¢ÃÂÃÂ edit me",
         start: lastEnd + 30, end: lastEnd + 65, virality: 60,
         hook:"Hook copy here.", caption:"Caption copy here.",
         preset:"vertical", status:"draft",
@@ -3642,12 +3754,12 @@ const removeClip = (clipId) => {
           <p className="text-[color:var(--muted)] mt-1">Long-form in. Ranked, branded, platform-native shorts out.</p>
         </div>
         <div className="flex items-center gap-2">
-                    <button className="btn" onClick={generateAllCaptions} disabled={captionsBusy || !project.clips || project.clips.length===0}>{captionsBusy ? "GeneratingÃ¢ÂÂ¦" : "Generate captions"}</button>
+                    <button className="btn" onClick={generateAllCaptions} disabled={captionsBusy || !project.clips || project.clips.length===0}>{captionsBusy ? "GeneratingÃÂ¢ÃÂÃÂ¦" : "Generate captions"}</button>
           <button className="btn btn-outline" onClick={downloadCaptionsJson} disabled={!project.clips || project.clips.length===0 || !project.clips.some(c=>c.platformCaptions)}>Download captions.json</button>
                     {captionsSource && (
             <span className={"chip " + (captionsSource === "claude" ? "text-emerald-200 !border-emerald-400/30 bg-emerald-500/10" : "text-sky-200 !border-sky-400/30 bg-sky-500/10")}>{captionsSource === "claude" ? "Claude" : "Local"}</span>
           )}
-          <button className="btn btn-outline" onClick={explainAllClips} disabled={explainAllBusy || !!explainBusyId || !project.clips || project.clips.length===0}>{explainAllBusy ? "AnalyzingÃ¢ÂÂ¦" : (I.spark({size:14}))} {explainAllBusy ? "" : "Explain all"}</button>
+          <button className="btn btn-outline" onClick={explainAllClips} disabled={explainAllBusy || !!explainBusyId || !project.clips || project.clips.length===0}>{explainAllBusy ? "AnalyzingÃÂ¢ÃÂÃÂ¦" : (I.spark({size:14}))} {explainAllBusy ? "" : "Explain all"}</button>
 <button className="btn btn-ghost" onClick={resetSeed}>{I.refresh({size:14})} Reset to example</button>
         </div>
       </div>
@@ -3662,7 +3774,7 @@ const removeClip = (clipId) => {
           <div className="flex items-center justify-between gap-2 flex-wrap">
             <div>
               <div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Ranked highlights</div>
-              <div className="text-lg font-semibold">{project.clips.length} clips ÃÂ· top pick {Math.max(...project.clips.map(c=>c.virality))} virality</div>
+              <div className="text-lg font-semibold">{project.clips.length} clips ÃÂÃÂ· top pick {Math.max(...project.clips.map(c=>c.virality))} virality</div>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Sort by</span>
@@ -3702,6 +3814,8 @@ const removeClip = (clipId) => {
                     explainBusy={explainBusyId === c.id || (explainAllBusy && !c.hookBreakdown)}
                     onHookAlts={()=>generateHookAlts(c.id)}
                     hookAltsBusy={hookAltsBusyId === c.id}
+                    onThumbConcept={()=>generateThumbConcept(c.id)}
+                    thumbConceptBusy={thumbBusyId === c.id}
                   />
                 </div>
               );
