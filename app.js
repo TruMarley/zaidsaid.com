@@ -972,7 +972,7 @@ const generateImageViaStability = async (proxyUrl, prompt, opts) => {
   fd.append('prompt', String(prompt||'cinematic establishing shot').slice(0,1500));
   fd.append('output_format', 'png');
   fd.append('aspect_ratio', (opts && opts.aspect_ratio) || '16:9');
-  const res = await fetch(url, { method:'POST', headers:{'accept':'image/*'}, body: fd });
+  const res = await fetchWithRetry(url, { method:'POST', headers:{'accept':'image/*'}, body: fd });
   if(!res.ok){ const t = await res.text().catch(()=>'') ; throw new Error('Stability HTTP '+res.status+' '+t.slice(0,200)); }
   const blob = await res.blob();
   return await new Promise((resolve,reject)=>{ const r=new FileReader(); r.onload=()=>resolve(r.result); r.onerror=reject; r.readAsDataURL(blob); });
