@@ -1,4 +1,4 @@
-/* Zaidsaid — app.js v2.0 — x66: hotfix — restore markApproved close + gap-2 classname lost to UTF-16 offset in x65 dispatch
+/* Zaidsaid — app.js v2.0 — x67: hotfix — strip 7-char orphan };\n left over from x65 misaligned downloadAllClips insert
  * Security: localStorage namespaced as zaidsaid.v2.*, error boundary, no innerHTML, no eval, no fetch.
  * Archived v1 seed data preserved under ARCHIVE_* for later reuse.
  */
@@ -4189,8 +4189,6 @@ const removeClip = (clipId) => {
       a.click();
       setTimeout(() => { try{ URL.revokeObjectURL(a.href); a.remove(); } catch(e){} }, 250);
     } catch(e) { console.warn("batch export failed:", e); }
-  };
-;
   };
   const resetSeed = () => setProject(REPURPOSE_SEED);
 
