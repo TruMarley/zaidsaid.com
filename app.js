@@ -1,4 +1,4 @@
-/* Zaidsaid — app.js v2.0 — x62: Objection Pre-Answer — per-clip viewer-objection predictor + preemptive script lines (emerald panel) for mid-clip retention
+/* Zaidsaid — app.js v2.0 — x63: Comment Seed Kit — per-clip ready-to-paste seed comments (pin/ask/reply-bait) in a violet panel to drive first-30-min engagement velocity
  * Security: localStorage namespaced as zaidsaid.v2.*, error boundary, no innerHTML, no eval, no fetch.
  * Archived v1 seed data preserved under ARCHIVE_* for later reuse.
  */
@@ -3075,7 +3075,7 @@ function RepurposeTranscriptStrip({ project }){
   );
 }
 
-function RepurposeClipCard({ clip, onField, onRegen, onRemove, onExplain, explainBusy, onHookAlts, hookAltsBusy, onThumbConcept, thumbConceptBusy, onHookScore, hookScoreBusy, onObjAnswer, objAnswerBusy }){
+function RepurposeClipCard({ clip, onField, onRegen, onRemove, onExplain, explainBusy, onHookAlts, hookAltsBusy, onThumbConcept, thumbConceptBusy, onHookScore, hookScoreBusy, onObjAnswer, objAnswerBusy, onCommentSeeds, commentSeedsBusy }){
   const band = viralityBand(clip.virality);
   const preset = REPURPOSE_PRESETS.find(p => p.id === clip.preset) || REPURPOSE_PRESETS[0];
   const previewW = preset.id === "vertical" ? 72 : (preset.id === "square" ? 90 : 128);
@@ -3196,6 +3196,10 @@ function RepurposeClipCard({ clip, onField, onRegen, onRemove, onExplain, explai
             {objAnswerBusy ? "Predicting…" : (clip.objections ? I.refresh({size:12}) : I.shield({size:12}))}
             {" "}{objAnswerBusy ? "" : (clip.objections ? "Refresh" : "Objections")}
           </button>
+          <button className="chip" onClick={onCommentSeeds} disabled={!!commentSeedsBusy} aria-label="Generate seed comments to post on your own clip">
+            {commentSeedsBusy ? "Seeding…" : (clip.commentSeeds ? I.refresh({size:12}) : I.comment({size:12}))}
+            {" "}{commentSeedsBusy ? "" : (clip.commentSeeds ? "Re-seed" : "Seed comments")}
+          </button>
         </div>
         <div className="flex items-center gap-1">
           <span className="chip">Status: {clip.status || "draft"}</span>
@@ -3304,6 +3308,25 @@ function RepurposeClipCard({ clip, onField, onRegen, onRemove, onExplain, explai
               <div key={i} className="text-[12px]">
                 <div><span className="text-[11px] uppercase tracking-widest text-emerald-300/60 block mb-0.5">Objection {i + 1}</span><span className="text-white/80 italic">&ldquo;{obj.objection}&rdquo;</span></div>
                 <div className="mt-1"><span className="text-[11px] uppercase tracking-widest text-emerald-300/60 block mb-0.5">Say before it</span><span className="text-emerald-100/90">{obj.preemptive}</span></div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {Array.isArray(clip.commentSeeds) && clip.commentSeeds.length > 0 && (
+        <div className="mt-3 rounded-xl border border-violet-400/20 bg-violet-500/8 p-3">
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-[11px] uppercase tracking-widest text-violet-300/70">Comment Seed Kit</div>
+            <div className="text-[10px] text-violet-300/50">Paste in first 30 min to seed engagement velocity</div>
+          </div>
+          <div className="grid gap-2">
+            {clip.commentSeeds.map((seed, i) => seed && (
+              <div key={i} className="rounded-lg border border-violet-400/15 bg-violet-500/5 p-2.5 flex items-start gap-2">
+                <span className="shrink-0 text-[10px] uppercase tracking-widest border border-violet-400/20 bg-violet-500/10 text-violet-200 rounded px-1.5 py-0.5 mt-0.5">{seed.role === "pin" ? "Pin" : seed.role === "ask" ? "Ask" : "Reply-bait"}</span>
+                <div className="flex-1 min-w-0 text-[12px] text-white/90 leading-snug">{seed.text}</div>
+                <button className="chip shrink-0 mt-0.5" onClick={()=>{ try{ navigator.clipboard.writeText(seed.text); } catch(e){} }} aria-label={"Copy seed comment " + (i+1)}>
+                  {I.copy({size:12})} Copy
+                </button>
               </div>
             ))}
           </div>
@@ -3753,6 +3776,82 @@ function generateObjAnswerLocal(clip){
 }
 /* ---- end Objection Pre-Answer helpers ---- */
 
+/* ---- Comment Seed Kit helpers (x63) ---- */
+async function generateCommentSeedsViaClaude(proxyUrl, clip, project){
+  const url = (proxyUrl||"").replace(/\/$/, "") + "/v1/messages";
+  const tool = {
+    name: "emit_comment_seeds",
+    description: "Generate exactly 3 ready-to-paste seed comments the creator posts on their own clip within the first 30 minutes to boost algorithmic engagement velocity.",
+    input_schema: {
+      type: "object",
+      properties: {
+        seeds: {
+          type: "array",
+          minItems: 3,
+          maxItems: 3,
+          description: "Exactly 3 seed comments, one for each role: pin, ask, reply.",
+          items: {
+            type: "object",
+            properties: {
+              role: { type: "string", enum: ["pin","ask","reply"], description: "pin = creator-pins this; adds a killer stat or reinforces the hook. ask = open question to strangers to drive replies. reply = pre-written response to preempt the most likely objection comment." },
+              text: { type: "string", description: "The comment text as the creator would post it. 1–2 sentences, conversational, no hashtags, no emoji spam, no self-promotion beyond the clip itself. Under 240 chars." },
+            },
+            required: ["role","text"],
+          },
+        },
+      },
+      required: ["seeds"],
+    },
+  };
+  const brand = (project && project.brand) || "";
+  const systemMsg = "You are a short-form growth strategist. The creator has just posted this clip. Generate exactly 3 seed comments they will paste on their own post within 30 minutes — one to pin (reinforces or extends the hook), one to ask (open question that invites strangers to reply), one reply-bait (pre-written response to the most likely dissenting comment). Tone: human, conversational, no hashtags, no emoji spam. Return tool_use only.";
+  const userMsg = "BRAND: " + brand + "\n\nCLIP TITLE: " + (clip.title||"") + "\n\nHOOK: " + (clip.hook||"") + "\n\nCAPTION: " + (clip.caption||"");
+  const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 700, system: systemMsg, tools: [tool], tool_choice: { type: "tool", name: "emit_comment_seeds" }, messages: [{ role: "user", content: userMsg }] }) });
+  if(!r.ok) throw new Error("HTTP " + r.status);
+  const j = await r.json();
+  const block = Array.isArray(j.content) ? j.content.find(c => c && c.type === "tool_use" && c.name === "emit_comment_seeds") : null;
+  if(!block || !block.input) throw new Error("no tool_use");
+  const arr = Array.isArray(block.input.seeds) ? block.input.seeds : [];
+  return arr.filter(s => s && s.role && s.text).slice(0, 3);
+}
+function generateCommentSeedsLocal(clip){
+  const title = (clip.title||"").trim();
+  const hook = (clip.hook||"").trim();
+  const text = (title + " " + hook + " " + (clip.caption||"")).toLowerCase();
+  const topicPools = [
+    {
+      triggers: ["money","invest","financ","rich","wealth","afford","cost","price"],
+      pin: "One number I cut for length: most people underestimate compounding by 3x. Stay for the timestamp at the end — that's where this actually lands.",
+      ask: "What's the smallest money-habit that made the biggest difference for you? Genuinely asking — reading every reply.",
+      reply: "Before anyone says 'this only works if you already have money' — it doesn't. The mechanism is the same at any scale, and the research on small-stake behavior backs it up.",
+    },
+    {
+      triggers: ["time","busy","schedule","habit","routine","morning","daily"],
+      pin: "The version I actually do is 90 seconds, not 10 minutes. Pinning this because most people bounce at the length claim.",
+      ask: "What's the one tiny habit that stuck for you past the first 2 weeks? Curious what survives in the real world.",
+      reply: "For the 'no time' crew — the whole point is this fits in gaps you already have. You don't add a slot; you use one.",
+    },
+    {
+      triggers: ["science","study","research","evidence","proof","data","fact"],
+      pin: "Sources in the thread. I'm linking the meta-analysis, not the single study, because the single-study version gets misquoted constantly.",
+      ask: "Which part of this was new to you? Trying to figure out what to make the next one on.",
+      reply: "For the 'one study isn't enough' replies — totally fair. The video is based on the meta-analysis; I'll drop the DOI in the replies.",
+    },
+  ];
+  const matched = topicPools.filter(p => p.triggers.some(t => text.includes(t)));
+  const chosen = matched[0] || {
+    pin: "The part I had to cut for time is actually the best part — pinning this so you don't miss it: " + (hook ? hook.slice(0, 140) : "the payoff is in the last 10 seconds."),
+    ask: "What did you take away from this? Genuinely curious — first 10 replies get a follow-up clip on whatever comes up.",
+    reply: "For anyone about to comment 'this isn't for me' — the underlying point applies way more broadly than the specific example. Here's the general version …",
+  };
+  return [
+    { role: "pin", text: chosen.pin },
+    { role: "ask", text: chosen.ask },
+    { role: "reply", text: chosen.reply },
+  ];
+}
+/* ---- end Comment Seed Kit helpers ---- */
+
 function RepurposeTab(){
   const [project, setProject] = useLocalState("repurpose.project", REPURPOSE_SEED);
   useEffect(() => {
@@ -3836,6 +3935,21 @@ function RepurposeTab(){
     if(!objs || !objs.length) objs = generateObjAnswerLocal(clip);
     setProject(prev => ({ ...prev, clips: prev.clips.map(c => c.id === clipId ? { ...c, objections: objs } : c) }));
     setObjAnswerBusyId(null);
+  };
+  const [commentSeedsBusyId, setCommentSeedsBusyId] = useState(null);
+  const generateCommentSeeds = async (clipId) => {
+    if(commentSeedsBusyId) return;
+    const clip = project.clips.find(c => c.id === clipId);
+    if(!clip) return;
+    setCommentSeedsBusyId(clipId);
+    const path = getAnthropicPath();
+    let seeds = null;
+    if(path){
+      try { seeds = await generateCommentSeedsViaClaude(path, clip, project); } catch(e){ seeds = null; }
+    }
+    if(!seeds || !seeds.length) seeds = generateCommentSeedsLocal(clip);
+    setProject(prev => ({ ...prev, clips: prev.clips.map(c => c.id === clipId ? { ...c, commentSeeds: seeds } : c) }));
+    setCommentSeedsBusyId(null);
   };
   const generateHookScore = async (clipId) => {
     if(hookScoreBusyId) return;
@@ -4028,6 +4142,8 @@ const removeClip = (clipId) => {
                     hookScoreBusy={hookScoreBusyId === c.id}
                     onObjAnswer={()=>generateObjAnswer(c.id)}
                     objAnswerBusy={objAnswerBusyId === c.id}
+                    onCommentSeeds={()=>generateCommentSeeds(c.id)}
+                    commentSeedsBusy={commentSeedsBusyId === c.id}
                   />
                 </div>
               );
