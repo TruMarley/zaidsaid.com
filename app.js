@@ -1511,6 +1511,8 @@ function StepStoryboard({ project, setProject }){
   const [imgBusy, setImgBusy] = React.useState(false);
   const [imgErr, setImgErr] = React.useState('');
   const [imgInfo, setImgInfo] = React.useState('');
+  const projectRef = React.useRef(project);
+  projectRef.current = project;
   React.useEffect(() => {
     if (isGodMode) return;
     if (!imgInfo && !imgBusy) return;
@@ -1518,15 +1520,19 @@ function StepStoryboard({ project, setProject }){
   }, [imgInfo, imgBusy]);
   const generateAllImages = async () => {
     if(imgBusy) return;
-    const scenes = (project && project.scenes) || [];
-    if(!scenes.length){ setImgErr('No scenes to render.'); return; }
+    const initialLen = ((projectRef.current && projectRef.current.scenes) || []).length;
+    if(!initialLen){ setImgErr('No scenes to render.'); return; }
     setImgBusy(true); setImgErr(''); setImgInfo('');
     let providers = {}; try { providers = safeGet('providers', {}) || {}; } catch(e){}
     const stabPath = providers && providers.stability && providers.stability.proxyUrl;
     const polPath = providers && providers.pollinations && providers.pollinations.proxyUrl;
-    let okStab=0, okPol=0, okLocal=0;
-    for(let i = 0; i < scenes.length; i++){
-      const s = scenes[i];
+    let okStab=0, okPol=0, okLocal=0, guard=0;
+    while (guard++ < 40) {
+      const scenesNow = (projectRef.current && projectRef.current.scenes) || [];
+      const pendingIdx = scenesNow.findIndex(s => !s.image);
+      if (pendingIdx < 0) break;
+      const s = scenesNow[pendingIdx];
+      const sceneId = s.id;
       const prompt = (s.shot || s.title || s.voLine || 'cinematic establishing shot').slice(0,400);
       let dataUrl, source;
       try {
@@ -1538,10 +1544,13 @@ function StepStoryboard({ project, setProject }){
         source = 'local-svg-fallback';
         okLocal++;
       }
-      setProject(prev => ({ ...prev, scenes: prev.scenes.map((x, idx) => idx === i ? { ...x, image: dataUrl, imageSource: source } : x) }));
-      setImgInfo('Generated ' + (i+1) + '/' + scenes.length + ' images…');
+      setProject(prev => ({ ...prev, scenes: prev.scenes.map(x => x.id === sceneId ? { ...x, image: dataUrl, imageSource: source } : x) }));
+      const total = ((projectRef.current && projectRef.current.scenes) || []).length || initialLen;
+      const done = okStab + okPol + okLocal;
+      setImgInfo('Generated ' + done + '/' + total + ' images…');
     }
-    setImgInfo('Generated ' + scenes.length + ' images (' + okStab + ' via Stability, ' + okPol + ' via Pollinations, ' + okLocal + ' local SVG).');
+    const finalTotal = ((projectRef.current && projectRef.current.scenes) || []).length;
+    setImgInfo('Generated ' + finalTotal + ' images (' + okStab + ' via Stability, ' + okPol + ' via Pollinations, ' + okLocal + ' local SVG).');
     setImgBusy(false);
     if (!isGodMode) { try { window.dispatchEvent(new CustomEvent('zs:advance-step', { detail: { from: 'storyboard' } })); } catch(_){} }
   };
@@ -1569,9 +1578,12 @@ function StepStoryboard({ project, setProject }){
   };
   React.useEffect(() => {
     if (isGodMode) return;
-    const hasAnyImage = (project.scenes || []).some(s => s.image);
-    if (!hasAnyImage && !imgBusy) { generateAllImages(); }
-  }, []);
+    const scenes = project.scenes || [];
+    if (!scenes.length) return;
+    const hasAnyImage = scenes.some(s => s.image);
+    if (hasAnyImage || imgBusy) return;
+    generateAllImages();
+  }, [project.scenes && project.scenes.length]);
     return (
     <div className="flex flex-col gap-4">
       <div className="card p-5">
@@ -1714,6 +1726,8 @@ function StepVoice({ project, setProject }){
   const [voiceBusy, setVoiceBusy] = React.useState(false);
   const [voiceErr, setVoiceErr] = React.useState('');
   const [voiceInfo, setVoiceInfo] = React.useState('');
+  const projectRef = React.useRef(project);
+  projectRef.current = project;
   React.useEffect(() => {
     if (isGodMode) return;
     if (!voiceInfo && !voiceBusy) return;
@@ -1721,32 +1735,41 @@ function StepVoice({ project, setProject }){
   }, [voiceInfo, voiceBusy]);
   const generateAllVoices = async () => {
     if(voiceBusy) return;
-    const scenes = (project && project.scenes) || [];
-    if(!scenes.length){ setVoiceErr('No scenes to voice.'); return; }
+    const initialLen = ((projectRef.current && projectRef.current.scenes) || []).length;
+    if(!initialLen){ setVoiceErr('No scenes to voice.'); return; }
     setVoiceBusy(true); setVoiceErr(''); setVoiceInfo('');
     let providers = {}; try { providers = safeGet('providers', {}) || {}; } catch(e){}
     const path = providers && providers.elevenlabs && providers.elevenlabs.proxyUrl;
-    let okEl=0, okLocal=0, errs=0;
-    for(let i = 0; i < scenes.length; i++){
-      const s = scenes[i];
+    let okEl=0, okLocal=0, errs=0, guard=0;
+    while (guard++ < 40) {
+      const scenesNow = (projectRef.current && projectRef.current.scenes) || [];
+      const pendingIdx = scenesNow.findIndex(s => !s.audioSource);
+      if (pendingIdx < 0) break;
+      const s = scenesNow[pendingIdx];
+      const sceneId = s.id;
       const text = (s.voLine || s.script || s.title || '').toString();
-      if(!text.trim()){ continue; }
       let patch = null;
-      try {
-        if(path){
-          const dataUrl = await ttsViaElevenLabs(path, text);
-          patch = { audio: dataUrl, audioSource: 'elevenlabs' };
-          okEl++;
-        } else {
-          patch = { audio: null, audioSource: 'local-speech' };
-          okLocal++;
+      if(!text.trim()){
+        patch = { audio: null, audioSource: 'skipped' };
+      } else {
+        try {
+          if(path){
+            const dataUrl = await ttsViaElevenLabs(path, text);
+            patch = { audio: dataUrl, audioSource: 'elevenlabs' };
+            okEl++;
+          } else {
+            patch = { audio: null, audioSource: 'local-speech' };
+            okLocal++;
+          }
+        } catch(e){
+          patch = { audio: null, audioSource: 'error', audioError: String(e && e.message || e).slice(0,140) };
+          errs++;
         }
-      } catch(e){
-        patch = { audio: null, audioSource: 'error', audioError: String(e && e.message || e).slice(0,140) };
-        errs++;
       }
-      setProject(prev => ({ ...prev, scenes: prev.scenes.map((x, idx) => idx === i ? { ...x, ...patch } : x) }));
-      setVoiceInfo('Voiced ' + (i+1) + '/' + scenes.length + ' scenes…');
+      setProject(prev => ({ ...prev, scenes: prev.scenes.map(x => x.id === sceneId ? { ...x, ...patch } : x) }));
+      const total = ((projectRef.current && projectRef.current.scenes) || []).length || initialLen;
+      const done = okEl + okLocal + errs;
+      setVoiceInfo('Voiced ' + done + '/' + total + ' scenes…');
     }
     setVoiceInfo('Voices: ' + okEl + ' via ElevenLabs · ' + okLocal + ' marked for local playback · ' + errs + ' errors.');
     setVoiceBusy(false);
@@ -1773,9 +1796,12 @@ function StepVoice({ project, setProject }){
   };
   React.useEffect(() => {
     if (isGodMode) return;
-    const hasAnyVoice = (project.scenes || []).some(s => s.audio);
-    if (!hasAnyVoice && !voiceBusy) { generateAllVoices(); }
-  }, []);
+    const scenes = project.scenes || [];
+    if (!scenes.length) return;
+    const hasAnyAudio = scenes.some(s => s.audioSource);
+    if (hasAnyAudio || voiceBusy) return;
+    generateAllVoices();
+  }, [project.scenes && project.scenes.length]);
     return (
     <div className="flex flex-col gap-4">
       <div className="card p-5">
@@ -1971,6 +1997,8 @@ function StepTimeline({ project, setProject }){
 }
 
 function StepExport({ project, setProject }){
+  const projectRef = React.useRef(project);
+  projectRef.current = project;
   const setPreset = (id) => setProject({ ...project, preset: id, platforms: (STUDIO_EXPORT_PRESETS.find(p=>p.id===id)||{}).platforms || project.platforms });
   const togglePlatform = (p) => {
     const curr = project.platforms || [];
@@ -1997,7 +2025,7 @@ function StepExport({ project, setProject }){
   }, [renderBusy, renderProgress, renderUrl]);
   const renderRealVideo = async () => {
     if(renderBusy) return;
-    const scenes = (project && project.scenes) || [];
+    const scenes = ((projectRef.current && projectRef.current.scenes) || []).slice();
     if(!scenes.length){ setRenderErr('No scenes to render.'); return; }
     if(typeof MediaRecorder === 'undefined' || !HTMLCanvasElement.prototype.captureStream){ setRenderErr('Your browser does not support MediaRecorder + canvas.captureStream.'); return; }
     if(document.visibilityState !== 'visible'){ console.warn('[zs] starting render with tab hidden — output may be lower quality'); }
@@ -2103,13 +2131,14 @@ function StepExport({ project, setProject }){
       if(audioCtx){ try { audioCtx.close(); } catch(_){} }
     }
   };
+  const sceneSig = (project.scenes || []).map(s => (s.id || '') + '|' + (s.image ? '1' : '0') + '|' + (s.audioSource ? '1' : '0')).join(',');
   React.useEffect(() => {
     if (isGodMode) return;
     if (renderBusy || renderUrl) return;
-    const scenes = (project.scenes || []);
+    const scenes = ((projectRef.current && projectRef.current.scenes) || []);
     if (!scenes.length || !scenes.every(s => s.image)) return;
     renderRealVideo();
-  }, []);
+  }, [sceneSig]);
     return (
     <div className="flex flex-col gap-4">
       <div className="card p-5">
