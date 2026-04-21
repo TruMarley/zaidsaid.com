@@ -1,4 +1,4 @@
-/* Zaidsaid — app.js v2.0 — x75: Unified Process Source (Enter key + primary button chains transcript fetch → Claude analyze → clips)
+/* Zaidsaid — app.js v2.0 — x76: Cover-crop fit default for clip render (no more letterbox bars when aspect mismatches) + Unified Process Source
  * Security: localStorage namespaced as zaidsaid.v2.*, error boundary, no innerHTML, no eval, no fetch.
  * Archived v1 seed data preserved under ARCHIVE_* for later reuse.
  */
@@ -3713,7 +3713,10 @@ async function renderClipVideoFromUpload(videoUrl, clip, onProgress, options){
   ctx.fillStyle = "#000";
   ctx.fillRect(0, 0, dims.w, dims.h);
   const sw = src.videoWidth || 1280, sh = src.videoHeight || 720;
-  const scale = Math.min(dims.w / sw, dims.h / sh);
+  const fitMode = (options && options.fit) || "cover";
+  const scale = fitMode === "contain"
+    ? Math.min(dims.w / sw, dims.h / sh)
+    : Math.max(dims.w / sw, dims.h / sh);
   const dw = sw * scale, dh = sh * scale;
   const dx = (dims.w - dw) / 2, dy = (dims.h - dh) / 2;
   const overlay = (options && options.overlay) || {};
