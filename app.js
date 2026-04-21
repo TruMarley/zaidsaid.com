@@ -1,4 +1,4 @@
-/* Zaidsaid — app.js v2.0 — x78: Manual-paste transcript as primary flow — collapsible textarea, explicit feedback when YT auto-fetch falls back to description, pasted transcript takes priority over auto-fetch
+/* Zaidsaid — app.js v2.0 — x79: Share Helper — per-clip Share chip expands to platform row (TikTok/Instagram/Shorts/YouTube/X/Rumble); clicking a platform copies caption, renders+downloads .webm if source uploaded, and opens that platform's upload page
  * Security: localStorage namespaced as zaidsaid.v2.*, error boundary, no innerHTML, no eval, no fetch.
  * Archived v1 seed data preserved under ARCHIVE_* for later reuse.
  */
@@ -3328,7 +3328,8 @@ function RepurposeClipPreview({ clip, uploadedVideoUrl, sourceUrl, width, height
   );
 }
 
-function RepurposeClipCard({ clip, onField, onRegen, regenBusy, onRemove, onExplain, explainBusy, onHookAlts, hookAltsBusy, onThumbConcept, thumbConceptBusy, onHookScore, hookScoreBusy, onObjAnswer, objAnswerBusy, onCommentSeeds, commentSeedsBusy, onCopyPost, copyPostBusy, onRenderVideo, renderVideoBusy, renderVideoProgress, uploadEnabled, uploadedVideoUrl, sourceUrl }){
+function RepurposeClipCard({ clip, onField, onRegen, regenBusy, onRemove, onExplain, explainBusy, onHookAlts, hookAltsBusy, onThumbConcept, thumbConceptBusy, onHookScore, hookScoreBusy, onObjAnswer, objAnswerBusy, onCommentSeeds, commentSeedsBusy, onCopyPost, copyPostBusy, onRenderVideo, renderVideoBusy, renderVideoProgress, uploadEnabled, uploadedVideoUrl, sourceUrl, onShare, shareBusyPlatform }){
+  const [shareOpen, setShareOpen] = useState(false);
   const band = viralityBand(clip.virality);
   const preset = REPURPOSE_PRESETS.find(p => p.id === clip.preset) || REPURPOSE_PRESETS[0];
   const previewW = preset.id === "vertical" ? 144 : (preset.id === "square" ? 160 : 200);
@@ -3501,9 +3502,38 @@ function RepurposeClipCard({ clip, onField, onRegen, regenBusy, onRemove, onExpl
               {renderVideoBusy ? ("Rendering " + Math.round((renderVideoProgress||0)*100) + "%") : "Render video"}
             </button>
           )}
+          {onShare && (
+            <button className="chip" onClick={()=>setShareOpen(v=>!v)} aria-expanded={shareOpen} aria-label="Share clip">
+              {I.share ? I.share({size:12}) : I.arrow({size:12})} Share
+            </button>
+          )}
           <span className="chip">Status: {clip.status || "draft"}</span>
           <button className="chip" onClick={onRemove} aria-label="Remove clip">{I.x({size:12})}</button>
         </div>
+        {shareOpen && onShare && (
+          <div className="mt-2 flex items-center gap-2 flex-wrap rounded-xl border border-[color:var(--line)] bg-white/[0.02] p-2">
+            <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)] mr-1">Share to</span>
+            {[
+              { k: "tiktok", label: "TikTok" },
+              { k: "instagram", label: "Instagram" },
+              { k: "shorts", label: "YT Shorts" },
+              { k: "youtube", label: "YouTube" },
+              { k: "x", label: "X" },
+              { k: "rumble", label: "Rumble" }
+            ].map(p => {
+              const busy = shareBusyPlatform === p.k;
+              return (
+                <button key={p.k} className="chip" disabled={busy} onClick={()=>onShare(p.k)} title={"Download video + copy caption + open " + p.label}>
+                  {busy ? I.refresh({size:12, className:"opacity-40"}) : I.arrow({size:12})}
+                  {busy ? "Preparing…" : p.label}
+                </button>
+              );
+            })}
+            <span className="text-[11px] text-[color:var(--muted)] ml-1">
+              {uploadEnabled ? "Downloads .webm + opens upload page" : "Upload a source video to export — caption still copies"}
+            </span>
+          </div>
+        )}
       </div>
       {clip.hookBreakdown && typeof clip.hookBreakdown === "object" && (
         <div className="mt-3 rounded-xl border border-indigo-400/20 bg-indigo-500/8 p-3">
@@ -4514,6 +4544,52 @@ function RepurposeTab(){
       setCopyPostBusyId(null);
     }
   };
+  const [shareBusyId, setShareBusyId] = useState(null);
+  const shareClip = async (clipId, platform) => {
+    if(shareBusyId) return;
+    const clip = project.clips.find(c => c.id === clipId);
+    if(!clip) return;
+    setShareBusyId(clipId + ":" + platform);
+    try {
+      const caption = buildClipExportText(clip, project);
+      try { await navigator.clipboard.writeText(caption); } catch(e){}
+      let downloaded = false;
+      if(project.uploadedVideoUrl){
+        try {
+          const blob = await renderClipVideoFromUpload(project.uploadedVideoUrl, clip, null, { overlay: { hook: clip.hook } });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          const safeTitle = (clip.title || "clip").replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "clip";
+          a.download = safeTitle + "-" + platform + ".webm";
+          document.body.appendChild(a);
+          a.click();
+          setTimeout(() => { try { document.body.removeChild(a); URL.revokeObjectURL(url); } catch(e){} }, 500);
+          downloaded = true;
+        } catch(e){ /* non-fatal */ }
+      }
+      const UPLOAD_URLS = {
+        tiktok: "https://www.tiktok.com/upload?lang=en",
+        instagram: "https://www.instagram.com/",
+        youtube: "https://studio.youtube.com/channel/UC/videos/upload",
+        shorts: "https://studio.youtube.com/channel/UC/videos/upload?d=ud",
+        x: "https://x.com/compose/post",
+        rumble: "https://rumble.com/upload.php"
+      };
+      const url = UPLOAD_URLS[platform];
+      if(url){ try { window.open(url, "_blank", "noopener,noreferrer"); } catch(e){} }
+      const bits = [];
+      if(downloaded) bits.push("video downloaded");
+      bits.push("caption copied");
+      if(!project.uploadedVideoUrl) bits.push("(upload source to include video)");
+      toast("Share → " + platform + " — " + bits.join(", "), "success");
+    } catch(e){
+      toast("Share failed: " + (e && e.message || "unknown"), "error");
+    } finally {
+      setShareBusyId(null);
+    }
+  };
+
   const renderClipVideo = async (clipId) => {
     if(clipRenderBusyId) return;
     if(!project.uploadedVideoUrl){ toast("Upload a video first", "error"); return; }
@@ -4831,6 +4907,8 @@ const removeClip = (clipId) => {
                     uploadEnabled={!!project.uploadedVideoUrl}
                     uploadedVideoUrl={project.uploadedVideoUrl}
                     sourceUrl={project.source}
+                    onShare={(platform)=>shareClip(c.id, platform)}
+                    shareBusyPlatform={shareBusyId && shareBusyId.startsWith(c.id + ":") ? shareBusyId.split(":")[1] : null}
                   />
                 </div>
               );
