@@ -1,4 +1,4 @@
-/* Zaidsaid — app.js v2.0 — x67: hotfix — strip 7-char orphan };\n left over from x65 misaligned downloadAllClips insert
+/* Zaidsaid — app.js v2.0 — x68: wire Re-title/Re-hook/Re-score chips to Claude (fallback to canned pool when no provider)
  * Security: localStorage namespaced as zaidsaid.v2.*, error boundary, no innerHTML, no eval, no fetch.
  * Archived v1 seed data preserved under ARCHIVE_* for later reuse.
  */
@@ -3162,7 +3162,7 @@ function RepurposeTranscriptStrip({ project }){
   );
 }
 
-function RepurposeClipCard({ clip, onField, onRegen, onRemove, onExplain, explainBusy, onHookAlts, hookAltsBusy, onThumbConcept, thumbConceptBusy, onHookScore, hookScoreBusy, onObjAnswer, objAnswerBusy, onCommentSeeds, commentSeedsBusy }){
+function RepurposeClipCard({ clip, onField, onRegen, regenBusy, onRemove, onExplain, explainBusy, onHookAlts, hookAltsBusy, onThumbConcept, thumbConceptBusy, onHookScore, hookScoreBusy, onObjAnswer, objAnswerBusy, onCommentSeeds, commentSeedsBusy }){
   const band = viralityBand(clip.virality);
   const preset = REPURPOSE_PRESETS.find(p => p.id === clip.preset) || REPURPOSE_PRESETS[0];
   const previewW = preset.id === "vertical" ? 72 : (preset.id === "square" ? 90 : 128);
@@ -3279,9 +3279,9 @@ function RepurposeClipCard({ clip, onField, onRegen, onRemove, onExplain, explai
       </div>
       <div className="mt-3 flex items-center justify-between gap-2 flex-wrap">
         <div className="flex items-center gap-1">
-          <button className="chip" onClick={()=>onRegen("title")}>{I.refresh({size:12})} Re-title</button>
-          <button className="chip" onClick={()=>onRegen("hook")}>{I.refresh({size:12})} Re-hook</button>
-          <button className="chip" onClick={()=>onRegen("virality")}>{I.flame({size:12})} Re-score</button>
+          <button className="chip" onClick={()=>onRegen("title")} disabled={!!regenBusy}>{regenBusy==="title" ? I.refresh({size:12,className:"opacity-40"}) : I.refresh({size:12})} {regenBusy==="title" ? "Working…" : "Re-title"}</button>
+          <button className="chip" onClick={()=>onRegen("hook")} disabled={!!regenBusy}>{regenBusy==="hook" ? I.refresh({size:12,className:"opacity-40"}) : I.refresh({size:12})} {regenBusy==="hook" ? "Working…" : "Re-hook"}</button>
+          <button className="chip" onClick={()=>onRegen("virality")} disabled={!!regenBusy}>{regenBusy==="virality" ? I.flame({size:12,className:"opacity-40"}) : I.flame({size:12})} {regenBusy==="virality" ? "Scoring…" : "Re-score"}</button>
           <button className="chip" onClick={onExplain} disabled={!!explainBusy} aria-label="Explain why this clip scores high">
             {explainBusy ? "Analyzing…" : (clip.hookBreakdown ? I.refresh({size:12}) : I.spark({size:12}))}
             {" "}{explainBusy ? "" : (clip.hookBreakdown ? "Re-explain" : "Why this works")}
@@ -3521,6 +3521,57 @@ function generateCaptionsLocal(clip, project){
   const tiktok = "🎬 " + base + " " + tagsShort;
   return { twitter: twitter.slice(0,280), linkedin: linkedin.slice(0,3000), instagram: instagram.slice(0,2200), tiktok: tiktok.slice(0,2200) };
 }
+
+/* ---- Re-title / Re-hook / Re-score Claude helper (x68) ---- */
+async function regenFieldViaClaude(proxyUrl, clip, project, field){
+  const url = (proxyUrl||"").replace(/\/$/, "") + "/v1/messages";
+  const isNum = field === "virality";
+  const valueProp = isNum
+    ? { type: "number", minimum: 0, maximum: 100 }
+    : { type: "string" };
+  const tool = {
+    name: "emit_field",
+    description: "Return one regenerated value for the requested clip field.",
+    input_schema: { type: "object", properties: { value: valueProp }, required: ["value"] },
+  };
+  const systemMsgs = {
+    title:    "You're rewriting a single short-form clip title. Keep it under 10 words. Use a pattern-interrupt or curiosity gap. Return ONE title variant. No hashtags.",
+    hook:     "You're rewriting a single hook for a short-form clip. The hook is the first spoken line; keep it under 90 characters; open with a pattern-interrupt; don't use hashtags; return ONE variant.",
+    caption:  "You're rewriting a single short-form clip caption. Keep it punchy, under 200 characters, no hashtags. Return ONE caption variant.",
+    virality: "You're scoring a short-form clip's virality potential on a 0-100 scale. 60 is average; 80+ means genuinely scroll-stopping. Return ONE integer score.",
+  };
+  const brand = (project && project.brand) || "";
+  const preset = clip.preset || "vertical";
+  const platform = preset === "square" ? "X / LinkedIn" : preset === "landscape" ? "YouTube / LinkedIn" : "TikTok / Reels / Shorts";
+  const userMsg = JSON.stringify({
+    field,
+    brand: brand || undefined,
+    platform,
+    title: clip.title || "",
+    hook: clip.hook || "",
+    caption: clip.caption || "",
+    virality: clip.virality || 60,
+    preset: clip.preset || "vertical",
+  });
+  const r = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 256,
+      system: systemMsgs[field] || systemMsgs.title,
+      tools: [tool],
+      tool_choice: { type: "tool", name: "emit_field" },
+      messages: [{ role: "user", content: userMsg }],
+    }),
+  });
+  if(!r.ok) throw new Error("HTTP " + r.status);
+  const j = await r.json();
+  const block = Array.isArray(j.content) ? j.content.find(b => b && b.type === "tool_use" && b.name === "emit_field") : null;
+  if(!block || !block.input || block.input.value === undefined) throw new Error("no tool_use");
+  return block.input.value;
+}
+/* ---- end Re-title / Re-hook / Re-score Claude helper ---- */
 
 /* ---- Hook Breakdown Panel helpers (x58) ---- */
 async function generateHookBreakdownViaClaude(proxyUrl, clip, project){
@@ -3986,17 +4037,26 @@ function RepurposeTab(){
   const [batchPreset, setBatchPreset] = useLocalState("repurpose.batchPreset", "vertical");
   const [explainBusyId, setExplainBusyId] = useState(null);
   const [explainAllBusy, setExplainAllBusy] = useState(false);
+  const [regenBusyId, setRegenBusyId] = useState(null);
   const [hookAltsBusyId, setHookAltsBusyId] = useState(null);
 
   const clipField = (clipId, field, value) => {
     setProject({ ...project, clips: project.clips.map(c => c.id===clipId ? { ...c, [field]: value } : c) });
   };
-  const clipRegen = (clipId, field) => {
+  const clipRegen = async (clipId, field) => {
+    if(regenBusyId) return;
     const clip = project.clips.find(c => c.id === clipId);
     if(!clip) return;
-    const v = clipRegenerate(field, clip);
-    if(v === null) return;
+    setRegenBusyId(clipId + ":" + field);
+    let v = null;
+    const path = getAnthropicPath();
+    if(path){
+      try { v = await regenFieldViaClaude(path, clip, project, field); } catch(e){ v = null; }
+    }
+    if(v === null || v === undefined) v = clipRegenerate(field, clip);
+    if(v === null || v === undefined){ setRegenBusyId(null); return; }
     clipField(clipId, field, v);
+    setRegenBusyId(null);
   };
   const explainClip = async (clipId) => {
     if(explainBusyId || explainAllBusy) return;
@@ -4268,6 +4328,7 @@ const removeClip = (clipId) => {
                     clip={c}
                     onField={(f,v)=>clipField(c.id, f, v)}
                     onRegen={(f)=>clipRegen(c.id, f)}
+                    regenBusy={regenBusyId && regenBusyId.startsWith(c.id + ":") ? regenBusyId.split(":")[1] : null}
                     onRemove={()=>removeClip(c.id)}
                     onExplain={()=>explainClip(c.id)}
                     explainBusy={explainBusyId === c.id || (explainAllBusy && !c.hookBreakdown)}
