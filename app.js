@@ -928,12 +928,19 @@ const generateImageViaStability = async (proxyUrl, prompt, opts) => {
 };
 const generateImageViaPollinations = async (proxyUrl, prompt, opts) => {
   const w = (opts && opts.w) || 1280; const h = (opts && opts.h) || 720;
-  const url = (proxyUrl||'').replace(/\/$/,'') + '/prompt/' + encodeURIComponent(String(prompt||'cinematic establishing shot').slice(0,400)) + '?width=' + w + '&height=' + h + '&nologo=true&model=flux';
-  const res = await fetch(url, { method:'GET', headers:{'accept':'image/*'} });
-  if(!res.ok){ const t = await res.text().catch(()=>''); throw new Error('Pollinations HTTP '+res.status+' '+t.slice(0,200)); }
-  const blob = await res.blob();
-  return await new Promise((resolve,reject)=>{ const r=new FileReader(); r.onload=()=>resolve(r.result); r.onerror=reject; r.readAsDataURL(blob); });
-};
+  const base = (proxyUrl||'').replace(/\/$/,'') + '/prompt/' + encodeURIComponent(String(prompt||'cinematic establishing shot').slice(0,400)) + '?width=' + w + '&height=' + h + '&nologo=true&model=';
+  const tryOnce = async (model, ms) => {
+    const c = new AbortController(); const t = setTimeout(()=>c.abort(), ms);
+    try {
+      const res = await fetch(base + model, { method:'GET', headers:{'accept':'image/*'}, signal: c.signal });
+      if(!res.ok) throw new Error('Pollinations ' + model + ' HTTP ' + res.status);
+      const blob = await res.blob();
+      return await new Promise((resolve,reject)=>{ const r=new FileReader(); r.onload=()=>resolve(r.result); r.onerror=reject; r.readAsDataURL(blob); });
+    } finally { clearTimeout(t); }
+  };
+  try { return await tryOnce('flux', 25000); }
+  catch(e){ return await tryOnce('turbo', 20000); }
+}
 
 // MVP-C: Local SVG fallback (deterministic from prompt)
 const generateImageLocal = (prompt, opts) => {
