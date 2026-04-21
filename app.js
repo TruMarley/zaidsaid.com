@@ -1,4 +1,4 @@
-/* Zaidsaid — app.js v2.0 — x71: Functional file upload + video preview (unblocks per-clip render path)
+/* Zaidsaid — app.js v2.0 — x72: Per-clip video render from uploaded source (canvas + MediaRecorder → .webm)
  * Security: localStorage namespaced as zaidsaid.v2.*, error boundary, no innerHTML, no eval, no fetch.
  * Archived v1 seed data preserved under ARCHIVE_* for later reuse.
  */
@@ -3185,7 +3185,7 @@ function RepurposeTranscriptStrip({ project }){
   );
 }
 
-function RepurposeClipCard({ clip, onField, onRegen, regenBusy, onRemove, onExplain, explainBusy, onHookAlts, hookAltsBusy, onThumbConcept, thumbConceptBusy, onHookScore, hookScoreBusy, onObjAnswer, objAnswerBusy, onCommentSeeds, commentSeedsBusy, onCopyPost, copyPostBusy }){
+function RepurposeClipCard({ clip, onField, onRegen, regenBusy, onRemove, onExplain, explainBusy, onHookAlts, hookAltsBusy, onThumbConcept, thumbConceptBusy, onHookScore, hookScoreBusy, onObjAnswer, objAnswerBusy, onCommentSeeds, commentSeedsBusy, onCopyPost, copyPostBusy, onRenderVideo, renderVideoBusy, renderVideoProgress, uploadEnabled }){
   const band = viralityBand(clip.virality);
   const preset = REPURPOSE_PRESETS.find(p => p.id === clip.preset) || REPURPOSE_PRESETS[0];
   const previewW = preset.id === "vertical" ? 72 : (preset.id === "square" ? 90 : 128);
@@ -3349,6 +3349,12 @@ function RepurposeClipCard({ clip, onField, onRegen, regenBusy, onRemove, onExpl
             {I.arrow({size:12})} .txt
           </button>
           <button className="chip" onClick={onCopyPost} disabled={!!copyPostBusy}>{copyPostBusy ? I.refresh({size:12,className:"opacity-40"}) : I.copy({size:12})} {copyPostBusy ? "Copying…" : "Copy post"}</button>
+          {uploadEnabled && (
+            <button className="chip" onClick={onRenderVideo} disabled={!!renderVideoBusy} title="Render this clip to .webm">
+              {renderVideoBusy ? I.refresh({size:12,className:"opacity-40"}) : I.arrow({size:12})}
+              {renderVideoBusy ? ("Rendering " + Math.round((renderVideoProgress||0)*100) + "%") : "Render video"}
+            </button>
+          )}
           <span className="chip">Status: {clip.status || "draft"}</span>
           <button className="chip" onClick={onRemove} aria-label="Remove clip">{I.x({size:12})}</button>
         </div>
@@ -3648,6 +3654,90 @@ async function generateSocialPostViaClaude(proxyUrl, clip, project){
   return { caption: block.input.caption, hashtags };
 }
 /* ---- end Copy-post Claude helper ---- */
+
+/* ---- Per-clip video render helper (x72) ---- */
+async function renderClipVideoFromUpload(videoUrl, clip, onProgress){
+  if(!videoUrl) throw new Error("no video");
+  const preset = clip.preset || "vertical";
+  const dims = preset === "square" ? { w: 720, h: 720 } : preset === "landscape" ? { w: 1280, h: 720 } : { w: 720, h: 1280 };
+  const start = Math.max(0, Number(clip.start) || 0);
+  const end = Math.max(start + 0.1, Number(clip.end) || (start + 1));
+  const duration = end - start;
+  const src = document.createElement("video");
+  src.src = videoUrl;
+  src.crossOrigin = "anonymous";
+  src.muted = false;
+  src.playsInline = true;
+  src.preload = "auto";
+  await new Promise((res, rej) => {
+    src.onloadedmetadata = () => res();
+    src.onerror = () => rej(new Error("video load failed"));
+  });
+  await new Promise((res, rej) => {
+    src.onseeked = () => res();
+    src.onerror = () => rej(new Error("seek failed"));
+    try { src.currentTime = start; } catch(e){ rej(e); }
+  });
+  const canvas = document.createElement("canvas");
+  canvas.width = dims.w;
+  canvas.height = dims.h;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#000";
+  ctx.fillRect(0, 0, dims.w, dims.h);
+  const sw = src.videoWidth || 1280, sh = src.videoHeight || 720;
+  const scale = Math.min(dims.w / sw, dims.h / sh);
+  const dw = sw * scale, dh = sh * scale;
+  const dx = (dims.w - dw) / 2, dy = (dims.h - dh) / 2;
+  const videoStream = canvas.captureStream(30);
+  let audioTrack = null;
+  try {
+    const capFn = src.captureStream || src.mozCaptureStream;
+    if(capFn){
+      const vs = capFn.call(src);
+      const ats = vs.getAudioTracks();
+      if(ats && ats.length) audioTrack = ats[0];
+    }
+  } catch(e){ /* no audio */ }
+  const combined = new MediaStream();
+  videoStream.getVideoTracks().forEach(t => combined.addTrack(t));
+  if(audioTrack) combined.addTrack(audioTrack);
+  const mimeTry = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"];
+  let mime = "";
+  for(const m of mimeTry){ if(window.MediaRecorder && MediaRecorder.isTypeSupported(m)){ mime = m; break; } }
+  const rec = new MediaRecorder(combined, mime ? { mimeType: mime } : undefined);
+  const chunks = [];
+  rec.ondataavailable = (e) => { if(e.data && e.data.size) chunks.push(e.data); };
+  const done = new Promise((res) => { rec.onstop = () => res(); });
+  rec.start(100);
+  const drawId = { raf: 0, stop: false };
+  const draw = () => {
+    if(drawId.stop) return;
+    ctx.fillStyle = "#000";
+    ctx.fillRect(0, 0, dims.w, dims.h);
+    try { ctx.drawImage(src, dx, dy, dw, dh); } catch(e){}
+    drawId.raf = requestAnimationFrame(draw);
+  };
+  draw();
+  await src.play();
+  await new Promise((res) => {
+    const tick = () => {
+      const t = src.currentTime - start;
+      if(typeof onProgress === "function") onProgress(Math.min(1, Math.max(0, t / duration)));
+      if(src.currentTime >= end || src.ended){ res(); return; }
+      setTimeout(tick, 100);
+    };
+    tick();
+  });
+  drawId.stop = true;
+  try { cancelAnimationFrame(drawId.raf); } catch(e){}
+  try { src.pause(); } catch(e){}
+  try { rec.stop(); } catch(e){}
+  await done;
+  try { src.src = ""; } catch(e){}
+  const blob = new Blob(chunks, { type: mime || "video/webm" });
+  return blob;
+}
+/* ---- end Per-clip video render helper ---- */
 
 /* ---- Hook Breakdown Panel helpers (x58) ---- */
 async function generateHookBreakdownViaClaude(proxyUrl, clip, project){
@@ -4115,6 +4205,8 @@ function RepurposeTab(){
   const [explainAllBusy, setExplainAllBusy] = useState(false);
   const [regenBusyId, setRegenBusyId] = useState(null);
   const [copyPostBusyId, setCopyPostBusyId] = useState(null);
+  const [clipRenderBusyId, setClipRenderBusyId] = useState(null);
+  const [clipRenderProgress, setClipRenderProgress] = useState(0);
   const toast = useToast();
   const [hookAltsBusyId, setHookAltsBusyId] = useState(null);
 
@@ -4165,6 +4257,31 @@ function RepurposeTab(){
       toast("Copied post \u2014 paste into your social", "success");
     } finally {
       setCopyPostBusyId(null);
+    }
+  };
+  const renderClipVideo = async (clipId) => {
+    if(clipRenderBusyId) return;
+    if(!project.uploadedVideoUrl){ toast("Upload a video first", "error"); return; }
+    const clip = project.clips.find(c => c.id === clipId);
+    if(!clip) return;
+    setClipRenderBusyId(clipId);
+    setClipRenderProgress(0);
+    try {
+      const blob = await renderClipVideoFromUpload(project.uploadedVideoUrl, clip, (p) => setClipRenderProgress(p));
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const safeTitle = (clip.title || "clip").replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "clip";
+      a.download = safeTitle + ".webm";
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => { try { document.body.removeChild(a); URL.revokeObjectURL(url); } catch(e){} }, 500);
+      toast("Clip video rendered \u2014 check downloads", "success");
+    } catch(e){
+      toast("Render failed: " + (e && e.message || "unknown"), "error");
+    } finally {
+      setClipRenderBusyId(null);
+      setClipRenderProgress(0);
     }
   };
   const explainClip = async (clipId) => {
@@ -4453,6 +4570,10 @@ const removeClip = (clipId) => {
                     commentSeedsBusy={commentSeedsBusyId === c.id}
                     onCopyPost={()=>copyPost(c.id)}
                     copyPostBusy={copyPostBusyId === c.id}
+                    onRenderVideo={()=>renderClipVideo(c.id)}
+                    renderVideoBusy={clipRenderBusyId === c.id}
+                    renderVideoProgress={clipRenderBusyId === c.id ? clipRenderProgress : 0}
+                    uploadEnabled={!!project.uploadedVideoUrl}
                   />
                 </div>
               );
