@@ -2277,14 +2277,14 @@ function StudioTab({ setTab, studioStep, setStudioStep }){
       )}
       <div className="grid gap-3 mb-4">
         <StudioStepNav step={step} setStep={goto} />
-        <StudioStageProvider step={step} setTab={setTab} />
-        <StudioCharacterRow project={project} setProject={setProject} />
-        <StudioBrandKitSelect project={project} setProject={setProject} />
+        {isGodMode && <StudioStageProvider step={step} setTab={setTab} />}
+        {isGodMode && <StudioCharacterRow project={project} setProject={setProject} />}
+        {isGodMode && <StudioBrandKitSelect project={project} setProject={setProject} />}
       </div>
       <div>{renderStep()}</div>
       <div className="mt-6 flex items-center justify-between gap-2 flex-wrap">
         <button className="btn" onClick={()=>prev && goto(prev.id)} disabled={!prev}>← {prev ? prev.label : "Start"}</button>
-        <div className="text-[11px] text-[color:var(--muted)]">Step {idx+1} of {STUDIO_STEPS.length}</div>
+        <div className="text-[11px] text-[color:var(--muted)]">Step {idxVis+1} of {_navSteps.length}</div>
         <button className="btn btn-primary" onClick={()=>next && goto(next.id)} disabled={!next}>{next ? next.label : "Done"} →</button>
       </div>
     </div>
