@@ -1,4 +1,4 @@
-/* Zaidsaid — app.js v2.0 — x74: Burn-in hook overlay during clip render (word-wrapped, stroked + filled, preset-aware safe zone)
+/* Zaidsaid — app.js v2.0 — x79: Share Helper — per-clip Share chip expands to platform row (TikTok/Instagram/Shorts/YouTube/X/Rumble); clicking a platform copies caption, renders+downloads .webm if source uploaded, and opens that platform's upload page
  * Security: localStorage namespaced as zaidsaid.v2.*, error boundary, no innerHTML, no eval, no fetch.
  * Archived v1 seed data preserved under ARCHIVE_* for later reuse.
  */
@@ -105,8 +105,24 @@ const I = {
   menu: (p)=> <svg viewBox="0 0 24 24" width={p?.size||14} height={p?.size||14} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M3 6h18M3 12h18M3 18h18"/></svg>,
   layers: (p)=> <svg viewBox="0 0 24 24" width={p?.size||14} height={p?.size||14} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M12 3 2 8l10 5 10-5-10-5Z"/><path d="M2 13l10 5 10-5"/><path d="M2 18l10 5 10-5"/></svg>,
   eye: (p)=> <svg viewBox="0 0 24 24" width={p?.size||14} height={p?.size||14} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>,
+  pause: (p)=> <svg viewBox="0 0 24 24" width={p?.size||14} height={p?.size||14} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>,
 
 };
+
+function extractYouTubeVideoId(url){
+  if(!url || typeof url !== "string") return null;
+  try {
+    const m1 = url.match(/[?&]v=([a-zA-Z0-9_-]{11})/);
+    if(m1) return m1[1];
+    const m2 = url.match(/youtu\.be\/([a-zA-Z0-9_-]{11})/);
+    if(m2) return m2[1];
+    const m3 = url.match(/youtube\.com\/embed\/([a-zA-Z0-9_-]{11})/);
+    if(m3) return m3[1];
+    const m4 = url.match(/youtube\.com\/shorts\/([a-zA-Z0-9_-]{11})/);
+    if(m4) return m4[1];
+  } catch(e){}
+  return null;
+}
 
 /* ---------------- Archived v1 seed data (preserved for later reuse) ---------------- */
 const ARCHIVE_JOBS = [
@@ -2849,7 +2865,7 @@ function buildClipExportText(clip, project){
   return out.join("\n");
 }
 
-function RepurposeIntake({ project, setProject }){
+function RepurposeIntake({ project, setProject, onProcessSource, processBusy, processStatus }){
   return (
     <div className="card p-5">
       <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -2879,10 +2895,38 @@ function RepurposeIntake({ project, setProject }){
             <input
               value={project.source || ""}
               onChange={(e)=>setProject({ ...project, source: e.target.value })}
+              onKeyDown={(e)=>{ if(e.key === "Enter" && !e.shiftKey && onProcessSource){ e.preventDefault(); onProcessSource(); } }}
               placeholder="https://youtube.com/watch?v=..."
               className="flex-1 bg-transparent text-sm focus:outline-none"
             />
+            {onProcessSource && (
+              <button type="button" className="btn btn-primary shrink-0" onClick={onProcessSource} disabled={!!processBusy} title="Press Enter">
+                {processBusy ? I.refresh({size:14, className:"opacity-60"}) : I.arrow({size:14})}
+                <span className="ml-1 text-[12px]">{processBusy ? (processStatus || "Processing…") : "Generate clips"}</span>
+              </button>
+            )}
           </div>
+          {!processBusy && processStatus && (
+            <div className="mt-1 text-[11px] text-[color:var(--muted)]">{processStatus}</div>
+          )}
+          <details className="mt-2 rounded-xl border border-[color:var(--line)] bg-white/[0.02]">
+            <summary className="cursor-pointer px-3 py-2 text-[12px] text-[color:var(--muted)] hover:text-white select-none">
+              Paste full transcript (recommended for YouTube — sharper clips)
+            </summary>
+            <div className="px-3 pb-3">
+              <textarea
+                value={project.transcriptText || ""}
+                onChange={(e)=>setProject({ ...project, transcriptText: e.target.value })}
+                placeholder="Paste the full transcript here. We'll use it to cut clips precisely with real timestamps when possible."
+                className="w-full bg-transparent border border-[color:var(--line)] rounded-lg px-3 py-2 text-[12px] focus:outline-none focus:border-white/20 min-h-[120px]"
+              />
+              <div className="mt-1 text-[11px] text-[color:var(--muted)]">
+                {(project.transcriptText || "").trim().length > 0
+                  ? ((project.transcriptText || "").trim().length + " chars — Enter / Generate will use this")
+                  : "Tip: open the video on YouTube → ••• → Show transcript → copy/paste here."}
+              </div>
+            </div>
+          </details>
           <div className="mt-2 flex items-center gap-2 flex-wrap">
             <label className="block flex-1 min-w-[200px]">
               <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Project name</span>
@@ -3185,11 +3229,111 @@ function RepurposeTranscriptStrip({ project }){
   );
 }
 
-function RepurposeClipCard({ clip, onField, onRegen, regenBusy, onRemove, onExplain, explainBusy, onHookAlts, hookAltsBusy, onThumbConcept, thumbConceptBusy, onHookScore, hookScoreBusy, onObjAnswer, objAnswerBusy, onCommentSeeds, commentSeedsBusy, onCopyPost, copyPostBusy, onRenderVideo, renderVideoBusy, renderVideoProgress, uploadEnabled }){
+function RepurposeClipPreview({ clip, uploadedVideoUrl, sourceUrl, width, height }){
+  const videoRef = useRef(null);
+  const [playing, setPlaying] = useState(false);
+  const [pos, setPos] = useState(clip.start || 0);
+  const dur = Math.max(0.1, (clip.end || 0) - (clip.start || 0));
+  const ytId = !uploadedVideoUrl ? extractYouTubeVideoId(sourceUrl) : null;
+
+  useEffect(() => {
+    const v = videoRef.current;
+    if(!v || !uploadedVideoUrl) return;
+    const onTime = () => {
+      setPos(v.currentTime);
+      if(v.currentTime >= (clip.end || 0)){
+        v.pause();
+        try { v.currentTime = clip.start || 0; } catch(e){}
+        setPlaying(false);
+      }
+    };
+    const onPlay = () => setPlaying(true);
+    const onPause = () => setPlaying(false);
+    v.addEventListener("timeupdate", onTime);
+    v.addEventListener("play", onPlay);
+    v.addEventListener("pause", onPause);
+    return () => {
+      v.removeEventListener("timeupdate", onTime);
+      v.removeEventListener("play", onPlay);
+      v.removeEventListener("pause", onPause);
+    };
+  }, [uploadedVideoUrl, clip.start, clip.end]);
+
+  const toggle = () => {
+    const v = videoRef.current;
+    if(!v) return;
+    if(v.paused){
+      if(v.currentTime < (clip.start || 0) || v.currentTime >= (clip.end || 0)){
+        try { v.currentTime = clip.start || 0; } catch(e){}
+      }
+      v.play().catch(()=>{});
+    } else {
+      v.pause();
+    }
+  };
+
+  const pct = Math.max(0, Math.min(100, ((pos - (clip.start || 0)) / dur) * 100));
+
+  if(uploadedVideoUrl){
+    return (
+      <div className="relative rounded-xl overflow-hidden bg-black shrink-0" style={{ width, height }}>
+        <video
+          ref={videoRef}
+          src={uploadedVideoUrl}
+          className="w-full h-full object-cover"
+          preload="metadata"
+          playsInline
+          muted
+        />
+        <button
+          type="button"
+          onClick={toggle}
+          aria-label={playing ? "Pause preview" : "Play preview"}
+          className="absolute inset-0 flex items-center justify-center bg-black/20 hover:bg-black/40 transition-opacity"
+        >
+          <span className="rounded-full bg-white/90 text-black p-2 shadow-lg">
+            {playing ? I.pause({size:14}) : I.play({size:14})}
+          </span>
+        </button>
+        <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/10">
+          <div className="h-full bg-gradient-to-r from-indigo-400 to-cyan-400" style={{ width: pct + "%" }} />
+        </div>
+      </div>
+    );
+  }
+
+  if(ytId){
+    const start = Math.max(0, Math.floor(clip.start || 0));
+    const end = Math.max(start + 1, Math.ceil(clip.end || 0));
+    const src = "https://www.youtube.com/embed/" + ytId + "?start=" + start + "&end=" + end + "&rel=0&modestbranding=1&playsinline=1";
+    return (
+      <div className="rounded-xl overflow-hidden bg-black shrink-0" style={{ width, height }}>
+        <iframe
+          src={src}
+          title={"Clip preview " + (clip.title || "")}
+          className="w-full h-full"
+          frameBorder="0"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+          allowFullScreen
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl bg-gradient-to-br from-indigo-500 via-fuchsia-500 to-cyan-500 opacity-90 flex items-center justify-center text-white/80 text-[10px] shrink-0"
+      style={{ width, height }} aria-hidden>
+      <span>{(clip.preset === "vertical" ? "9:16" : clip.preset === "square" ? "1:1" : "16:9")}</span>
+    </div>
+  );
+}
+
+function RepurposeClipCard({ clip, onField, onRegen, regenBusy, onRemove, onExplain, explainBusy, onHookAlts, hookAltsBusy, onThumbConcept, thumbConceptBusy, onHookScore, hookScoreBusy, onObjAnswer, objAnswerBusy, onCommentSeeds, commentSeedsBusy, onCopyPost, copyPostBusy, onRenderVideo, renderVideoBusy, renderVideoProgress, uploadEnabled, uploadedVideoUrl, sourceUrl, onShare, shareBusyPlatform }){
+  const [shareOpen, setShareOpen] = useState(false);
   const band = viralityBand(clip.virality);
   const preset = REPURPOSE_PRESETS.find(p => p.id === clip.preset) || REPURPOSE_PRESETS[0];
-  const previewW = preset.id === "vertical" ? 72 : (preset.id === "square" ? 90 : 128);
-  const previewH = preset.id === "vertical" ? 128 : (preset.id === "square" ? 90 : 72);
+  const previewW = preset.id === "vertical" ? 144 : (preset.id === "square" ? 160 : 200);
+  const previewH = preset.id === "vertical" ? 256 : (preset.id === "square" ? 160 : 112);
   const [exportFlash, setExportFlash] = useState(false);
   const exportText = () => {
     const txt = buildClipExportText(clip, null);
@@ -3212,10 +3356,6 @@ function RepurposeClipCard({ clip, onField, onRegen, regenBusy, onRemove, onExpl
   return (
     <div className="card p-4">
       <div className="flex items-start gap-4">
-        <div className="rounded-xl bg-gradient-to-br from-indigo-500 via-fuchsia-500 to-cyan-500 opacity-90 flex items-center justify-center text-white/80 text-[10px]"
-          style={{ width: previewW, height: previewH }} aria-hidden>
-          <span>{preset.ratio}</span>
-        </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <span className={"px-2 py-0.5 rounded-md text-[11px] border " + band.border + " " + band.bg + " " + band.tone}>{I.flame({size:12})} {band.label} {clip.virality}</span>
@@ -3231,6 +3371,13 @@ function RepurposeClipCard({ clip, onField, onRegen, regenBusy, onRemove, onExpl
           />
           <div className="text-[12px] text-[color:var(--muted)] mt-1">{clip.hook}</div>
         </div>
+        <RepurposeClipPreview
+          clip={clip}
+          uploadedVideoUrl={uploadedVideoUrl}
+          sourceUrl={sourceUrl}
+          width={previewW}
+          height={previewH}
+        />
       </div>
       <div className="grid md:grid-cols-2 gap-3 mt-3">
         <label className="block">
@@ -3355,9 +3502,38 @@ function RepurposeClipCard({ clip, onField, onRegen, regenBusy, onRemove, onExpl
               {renderVideoBusy ? ("Rendering " + Math.round((renderVideoProgress||0)*100) + "%") : "Render video"}
             </button>
           )}
+          {onShare && (
+            <button className="chip" onClick={()=>setShareOpen(v=>!v)} aria-expanded={shareOpen} aria-label="Share clip">
+              {I.share ? I.share({size:12}) : I.arrow({size:12})} Share
+            </button>
+          )}
           <span className="chip">Status: {clip.status || "draft"}</span>
           <button className="chip" onClick={onRemove} aria-label="Remove clip">{I.x({size:12})}</button>
         </div>
+        {shareOpen && onShare && (
+          <div className="mt-2 flex items-center gap-2 flex-wrap rounded-xl border border-[color:var(--line)] bg-white/[0.02] p-2">
+            <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)] mr-1">Share to</span>
+            {[
+              { k: "tiktok", label: "TikTok" },
+              { k: "instagram", label: "Instagram" },
+              { k: "shorts", label: "YT Shorts" },
+              { k: "youtube", label: "YouTube" },
+              { k: "x", label: "X" },
+              { k: "rumble", label: "Rumble" }
+            ].map(p => {
+              const busy = shareBusyPlatform === p.k;
+              return (
+                <button key={p.k} className="chip" disabled={busy} onClick={()=>onShare(p.k)} title={"Download video + copy caption + open " + p.label}>
+                  {busy ? I.refresh({size:12, className:"opacity-40"}) : I.arrow({size:12})}
+                  {busy ? "Preparing…" : p.label}
+                </button>
+              );
+            })}
+            <span className="text-[11px] text-[color:var(--muted)] ml-1">
+              {uploadEnabled ? "Downloads .webm + opens upload page" : "Upload a source video to export — caption still copies"}
+            </span>
+          </div>
+        )}
       </div>
       {clip.hookBreakdown && typeof clip.hookBreakdown === "object" && (
         <div className="mt-3 rounded-xl border border-indigo-400/20 bg-indigo-500/8 p-3">
@@ -3703,7 +3879,10 @@ async function renderClipVideoFromUpload(videoUrl, clip, onProgress, options){
   ctx.fillStyle = "#000";
   ctx.fillRect(0, 0, dims.w, dims.h);
   const sw = src.videoWidth || 1280, sh = src.videoHeight || 720;
-  const scale = Math.min(dims.w / sw, dims.h / sh);
+  const fitMode = (options && options.fit) || "cover";
+  const scale = fitMode === "contain"
+    ? Math.min(dims.w / sw, dims.h / sh)
+    : Math.max(dims.w / sw, dims.h / sh);
   const dw = sw * scale, dh = sh * scale;
   const dx = (dims.w - dw) / 2, dy = (dims.h - dh) / 2;
   const overlay = (options && options.overlay) || {};
@@ -4254,6 +4433,67 @@ function RepurposeTab(){
   const [clipRenderProgress, setClipRenderProgress] = useState(0);
   const toast = useToast();
   const [hookAltsBusyId, setHookAltsBusyId] = useState(null);
+  const [processBusy, setProcessBusy] = useState(false);
+  const [processStatus, setProcessStatus] = useState("");
+
+  const processSource = async () => {
+    if(processBusy) return;
+    const sourceUrl = (project.source || "").trim();
+    if(!sourceUrl){ toast("Paste a URL or transcript first", "error"); return; }
+    setProcessBusy(true); setProcessStatus("Starting…");
+    try {
+      let text = (project.transcriptText || "").trim();
+      const hasPastedTranscript = text.length > 0;
+      const isYT = /youtu\.?be/i.test(sourceUrl);
+      if(isYT && !hasPastedTranscript){
+        setProcessStatus("Fetching transcript…");
+        try {
+          const path = getAnthropicPath();
+          const base = path ? path.replace(/\/anthropic\/?$/, "") : "https://zaidsaid-proxy.zaidsaid.workers.dev";
+          const res = await fetch(base + "/youtube-transcript?url=" + encodeURIComponent(sourceUrl));
+          if(res.ok){
+            const data = await res.json();
+            const tx = (data.transcript || data.description || "").trim();
+            if(tx){
+              text = tx;
+              setProject(p => ({
+                ...p,
+                transcriptText: tx,
+                name: p.name || data.title || "",
+                durationSec: (!p.durationSec || p.durationSec === 5520) && data.lengthSeconds ? data.lengthSeconds : p.durationSec
+              }));
+              if(data.source === "description" || data.fallback){
+                toast("YouTube transcript unavailable — using description. For sharper clips, paste the full transcript below and re-run.", "warn");
+              }
+            } else {
+              toast("No transcript available from YouTube. Paste the transcript below and press Enter for best clips.", "warn");
+            }
+          } else {
+            toast("Transcript fetch failed. Paste the transcript below and press Enter.", "warn");
+          }
+        } catch(e){ /* continue with whatever text we have */ }
+      }
+      if(!text) text = sourceUrl;
+      const target = Number(project.targetCount) || 5;
+      setProcessStatus("Generating clips…");
+      const path = getAnthropicPath();
+      let clips = null;
+      if(path){
+        try { clips = await analyzeViaClaude(path, text, target); } catch(e){ clips = null; }
+      }
+      if(!clips || !clips.length){ clips = analyzeLocal(text, target); }
+      if(!clips || !clips.length){ toast("No clips generated — try a different source", "error"); return; }
+      setProject(p => ({ ...p, clips, durationSec: p.durationSec || (clips[clips.length-1].end + 60) }));
+      setProcessStatus("Done — " + clips.length + " clips");
+      toast("Generated " + clips.length + " clips", "success");
+    } catch(e){
+      toast("Process failed: " + (e && e.message || "unknown"), "error");
+      setProcessStatus("Failed");
+    } finally {
+      setProcessBusy(false);
+      setTimeout(() => setProcessStatus(""), 3500);
+    }
+  };
 
   const clipField = (clipId, field, value) => {
     setProject({ ...project, clips: project.clips.map(c => c.id===clipId ? { ...c, [field]: value } : c) });
@@ -4304,6 +4544,52 @@ function RepurposeTab(){
       setCopyPostBusyId(null);
     }
   };
+  const [shareBusyId, setShareBusyId] = useState(null);
+  const shareClip = async (clipId, platform) => {
+    if(shareBusyId) return;
+    const clip = project.clips.find(c => c.id === clipId);
+    if(!clip) return;
+    setShareBusyId(clipId + ":" + platform);
+    try {
+      const caption = buildClipExportText(clip, project);
+      try { await navigator.clipboard.writeText(caption); } catch(e){}
+      let downloaded = false;
+      if(project.uploadedVideoUrl){
+        try {
+          const blob = await renderClipVideoFromUpload(project.uploadedVideoUrl, clip, null, { overlay: { hook: clip.hook } });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          const safeTitle = (clip.title || "clip").replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "clip";
+          a.download = safeTitle + "-" + platform + ".webm";
+          document.body.appendChild(a);
+          a.click();
+          setTimeout(() => { try { document.body.removeChild(a); URL.revokeObjectURL(url); } catch(e){} }, 500);
+          downloaded = true;
+        } catch(e){ /* non-fatal */ }
+      }
+      const UPLOAD_URLS = {
+        tiktok: "https://www.tiktok.com/upload?lang=en",
+        instagram: "https://www.instagram.com/",
+        youtube: "https://studio.youtube.com/channel/UC/videos/upload",
+        shorts: "https://studio.youtube.com/channel/UC/videos/upload?d=ud",
+        x: "https://x.com/compose/post",
+        rumble: "https://rumble.com/upload.php"
+      };
+      const url = UPLOAD_URLS[platform];
+      if(url){ try { window.open(url, "_blank", "noopener,noreferrer"); } catch(e){} }
+      const bits = [];
+      if(downloaded) bits.push("video downloaded");
+      bits.push("caption copied");
+      if(!project.uploadedVideoUrl) bits.push("(upload source to include video)");
+      toast("Share → " + platform + " — " + bits.join(", "), "success");
+    } catch(e){
+      toast("Share failed: " + (e && e.message || "unknown"), "error");
+    } finally {
+      setShareBusyId(null);
+    }
+  };
+
   const renderClipVideo = async (clipId) => {
     if(clipRenderBusyId) return;
     if(!project.uploadedVideoUrl){ toast("Upload a video first", "error"); return; }
@@ -4555,7 +4841,7 @@ const removeClip = (clipId) => {
       </div>
 
       <div className="grid gap-4">
-        <RepurposeIntake project={project} setProject={setProject} />
+        <RepurposeIntake project={project} setProject={setProject} onProcessSource={processSource} processBusy={processBusy} processStatus={processStatus} />
         {isGodMode && <RepurposeAnalyzer project={project} setProject={setProject} />}
         <RepurposeRealAnalyze project={project} setProject={setProject} />
         <RepurposeTranscriptStrip project={project} />
@@ -4619,6 +4905,10 @@ const removeClip = (clipId) => {
                     renderVideoBusy={clipRenderBusyId === c.id}
                     renderVideoProgress={clipRenderBusyId === c.id ? clipRenderProgress : 0}
                     uploadEnabled={!!project.uploadedVideoUrl}
+                    uploadedVideoUrl={project.uploadedVideoUrl}
+                    sourceUrl={project.source}
+                    onShare={(platform)=>shareClip(c.id, platform)}
+                    shareBusyPlatform={shareBusyId && shareBusyId.startsWith(c.id + ":") ? shareBusyId.split(":")[1] : null}
                   />
                 </div>
               );
