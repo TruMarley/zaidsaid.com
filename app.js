@@ -2318,9 +2318,16 @@ function StepExport({ project, setProject }){
           </div>
         )}
         {renderUrl && !renderBusy && (
-          <div className="mt-3 grid gap-2">
-            <video src={renderUrl} controls className="w-full max-h-[360px] rounded-xl border border-[color:var(--line)]" />
-            <a href={renderUrl} download={(project.name||'zaidsaid')+'.webm'} className="chip self-start">Download .webm</a>
+          <div className="mt-4 grid gap-3">
+            <div className="flex items-center gap-2 text-emerald-300 text-sm font-semibold">
+              <span className="inline-flex w-6 h-6 rounded-full bg-emerald-400/20 items-center justify-center text-emerald-300">{I.check({size:14})}</span>
+              Video ready · tap Download to save
+            </div>
+            <video src={renderUrl} controls autoPlay={false} className="w-full max-h-[360px] rounded-xl border border-[color:var(--line)] bg-black" />
+            <div className="flex flex-wrap items-center gap-2">
+              <a href={renderUrl} download={(project.name||'zaidsaid')+'.webm'} className="btn btn-primary">{I.check({size:14})} Download .webm</a>
+              <button type="button" onClick={()=>{ setRenderUrl(''); try { renderRealVideo(); } catch(_){} }} className="btn btn-ghost text-xs">Render again</button>
+            </div>
           </div>
         )}
       </div>
