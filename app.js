@@ -2331,7 +2331,11 @@ function StepExport({ project, setProject }){
       if(tabWasHidden){ console.warn('[zs] tab was hidden at least once during render'); }
     } catch(e){
       console.warn('[zs] render error', e);
-      setRenderErr('Render failed: ' + (e && e.message || e));
+      const _rawMsg = (e && e.message) || String(e);
+      const _userMsg = tabWasHidden
+        ? 'Render stopped because the tab was switched away. Keep this tab visible and try again.'
+        : ('Render hit a snag: ' + _rawMsg);
+      setRenderErr(_userMsg);
     } finally {
       setRenderBusy(false);
       if(onVis){ try { document.removeEventListener('visibilitychange', onVis); } catch(_){} }
@@ -2372,7 +2376,13 @@ function StepExport({ project, setProject }){
           </div>
           <button className="btn btn-primary" onClick={renderRealVideo} disabled={renderBusy}>{renderBusy ? ('Rendering ' + renderProgress + '%') : 'Render WebM'}</button>
         </div>
-        {renderErr && <div className="mt-2 text-[12px] text-red-400">{renderErr}</div>}
+        {renderErr && !renderBusy && !renderUrl && (
+          <div className="mt-4 rounded-xl border border-red-500/30 bg-red-500/5 p-3 flex flex-wrap items-center justify-between gap-3">
+            <div className="text-[13px] text-red-300 max-w-[560px]">{renderErr}</div>
+            <button type="button" className="btn btn-primary text-xs" onClick={()=>{ setRenderErr(''); try { renderRealVideo(); } catch(_){} }}>Try again</button>
+          </div>
+        )}
+        {renderErr && (renderBusy || renderUrl) && <div className="mt-2 text-[12px] text-red-400">{renderErr}</div>}
         {renderBusy && (
           <div className="mt-3 h-2 rounded-full bg-white/5 overflow-hidden">
             <div className="h-2 bg-emerald-400 transition-all" style={{ width: renderProgress + '%' }} />
