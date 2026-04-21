@@ -1,4 +1,4 @@
-/* Zaidsaid — app.js v2.0 — x74: Burn-in hook overlay during clip render (word-wrapped, stroked + filled, preset-aware safe zone)
+/* Zaidsaid — app.js v2.0 — x75: Unified Process Source (Enter key + primary button chains transcript fetch → Claude analyze → clips)
  * Security: localStorage namespaced as zaidsaid.v2.*, error boundary, no innerHTML, no eval, no fetch.
  * Archived v1 seed data preserved under ARCHIVE_* for later reuse.
  */
@@ -2849,7 +2849,7 @@ function buildClipExportText(clip, project){
   return out.join("\n");
 }
 
-function RepurposeIntake({ project, setProject }){
+function RepurposeIntake({ project, setProject, onProcessSource, processBusy, processStatus }){
   return (
     <div className="card p-5">
       <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -2879,10 +2879,20 @@ function RepurposeIntake({ project, setProject }){
             <input
               value={project.source || ""}
               onChange={(e)=>setProject({ ...project, source: e.target.value })}
+              onKeyDown={(e)=>{ if(e.key === "Enter" && !e.shiftKey && onProcessSource){ e.preventDefault(); onProcessSource(); } }}
               placeholder="https://youtube.com/watch?v=..."
               className="flex-1 bg-transparent text-sm focus:outline-none"
             />
+            {onProcessSource && (
+              <button type="button" className="btn btn-primary shrink-0" onClick={onProcessSource} disabled={!!processBusy} title="Press Enter">
+                {processBusy ? I.refresh({size:14, className:"opacity-60"}) : I.arrow({size:14})}
+                <span className="ml-1 text-[12px]">{processBusy ? (processStatus || "Processing…") : "Generate clips"}</span>
+              </button>
+            )}
           </div>
+          {!processBusy && processStatus && (
+            <div className="mt-1 text-[11px] text-[color:var(--muted)]">{processStatus}</div>
+          )}
           <div className="mt-2 flex items-center gap-2 flex-wrap">
             <label className="block flex-1 min-w-[200px]">
               <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Project name</span>
@@ -4254,6 +4264,59 @@ function RepurposeTab(){
   const [clipRenderProgress, setClipRenderProgress] = useState(0);
   const toast = useToast();
   const [hookAltsBusyId, setHookAltsBusyId] = useState(null);
+  const [processBusy, setProcessBusy] = useState(false);
+  const [processStatus, setProcessStatus] = useState("");
+
+  const processSource = async () => {
+    if(processBusy) return;
+    const sourceUrl = (project.source || "").trim();
+    if(!sourceUrl){ toast("Paste a URL or transcript first", "error"); return; }
+    setProcessBusy(true); setProcessStatus("Starting…");
+    try {
+      let text = (project.transcriptText || "").trim();
+      const isYT = /youtu\.?be/i.test(sourceUrl);
+      if(isYT){
+        setProcessStatus("Fetching transcript…");
+        try {
+          const path = getAnthropicPath();
+          const base = path ? path.replace(/\/anthropic\/?$/, "") : "https://zaidsaid-proxy.zaidsaid.workers.dev";
+          const res = await fetch(base + "/youtube-transcript?url=" + encodeURIComponent(sourceUrl));
+          if(res.ok){
+            const data = await res.json();
+            const tx = (data.transcript || data.description || "").trim();
+            if(tx){
+              text = tx;
+              setProject(p => ({
+                ...p,
+                transcriptText: tx,
+                name: p.name || data.title || "",
+                durationSec: (!p.durationSec || p.durationSec === 5520) && data.lengthSeconds ? data.lengthSeconds : p.durationSec
+              }));
+            }
+          }
+        } catch(e){ /* continue with whatever text we have */ }
+      }
+      if(!text) text = sourceUrl;
+      const target = Number(project.targetCount) || 5;
+      setProcessStatus("Generating clips…");
+      const path = getAnthropicPath();
+      let clips = null;
+      if(path){
+        try { clips = await analyzeViaClaude(path, text, target); } catch(e){ clips = null; }
+      }
+      if(!clips || !clips.length){ clips = analyzeLocal(text, target); }
+      if(!clips || !clips.length){ toast("No clips generated — try a different source", "error"); return; }
+      setProject(p => ({ ...p, clips, durationSec: p.durationSec || (clips[clips.length-1].end + 60) }));
+      setProcessStatus("Done — " + clips.length + " clips");
+      toast("Generated " + clips.length + " clips", "success");
+    } catch(e){
+      toast("Process failed: " + (e && e.message || "unknown"), "error");
+      setProcessStatus("Failed");
+    } finally {
+      setProcessBusy(false);
+      setTimeout(() => setProcessStatus(""), 3500);
+    }
+  };
 
   const clipField = (clipId, field, value) => {
     setProject({ ...project, clips: project.clips.map(c => c.id===clipId ? { ...c, [field]: value } : c) });
@@ -4555,7 +4618,7 @@ const removeClip = (clipId) => {
       </div>
 
       <div className="grid gap-4">
-        <RepurposeIntake project={project} setProject={setProject} />
+        <RepurposeIntake project={project} setProject={setProject} onProcessSource={processSource} processBusy={processBusy} processStatus={processStatus} />
         {isGodMode && <RepurposeAnalyzer project={project} setProject={setProject} />}
         <RepurposeRealAnalyze project={project} setProject={setProject} />
         <RepurposeTranscriptStrip project={project} />
