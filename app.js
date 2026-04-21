@@ -979,7 +979,10 @@ const generateImageViaStability = async (proxyUrl, prompt, opts) => {
 };
 const generateImageViaPollinations = async (proxyUrl, prompt, opts) => {
   const w = (opts && opts.w) || 1280; const h = (opts && opts.h) || 720;
-  const base = (proxyUrl||'').replace(/\/$/,'') + '/prompt/' + encodeURIComponent(String(prompt||'cinematic establishing shot').slice(0,400)) + '?width=' + w + '&height=' + h + '&nologo=true&model=';
+  const _cineTokens = ', cinematic lighting, shallow depth of field, 35mm film, high detail, photorealistic, 8k';
+  const _rawPrompt = String(prompt||'cinematic establishing shot');
+  const _finalPrompt = (_rawPrompt.includes('cinematic') ? _rawPrompt : _rawPrompt + _cineTokens).slice(0, 400);
+  const base = (proxyUrl||'').replace(/\/$/,'') + '/prompt/' + encodeURIComponent(_finalPrompt) + '?width=' + w + '&height=' + h + '&nologo=true&model=';
   const tryOnce = async (model, ms) => {
     const c = new AbortController(); const t = setTimeout(()=>c.abort(), ms);
     try {
@@ -1641,6 +1644,24 @@ function StepVoice({ project, setProject }){
     setVoiceBusy(false);
   };
   const previewLocalForScene = (s) => { try { ttsLocal(s.voLine || s.script || s.title || ''); } catch(e){} };
+  const regenerateOne = async (sceneId) => {
+    if(voiceBusy) return;
+    const scene = (project.scenes||[]).find(s => s.id === sceneId);
+    if(!scene) return;
+    const text = (scene.voLine || scene.script || scene.title || '').toString();
+    if(!text.trim()){ setVoiceErr('Scene has no text to voice.'); return; }
+    let providers = {}; try { providers = safeGet('providers', {}) || {}; } catch(e){}
+    const path = providers && providers.elevenlabs && providers.elevenlabs.proxyUrl;
+    if(!path){ setVoiceErr('ElevenLabs proxy not configured.'); return; }
+    setVoiceBusy(true); setVoiceErr(''); setVoiceInfo('');
+    try {
+      const dataUrl = await ttsViaElevenLabs(path, text);
+      setProject({ ...project, scenes: project.scenes.map(s => s.id === sceneId ? { ...s, audio: dataUrl, audioSource: 'elevenlabs' } : s) });
+      setVoiceInfo('Regenerated voice for: ' + (scene.title || 'scene'));
+    } catch(e){
+      setVoiceErr('Regenerate failed: ' + String(e && e.message || e).slice(0,140));
+    } finally { setVoiceBusy(false); }
+  };
     return (
     <div className="flex flex-col gap-4">
       <div className="card p-5">
@@ -1702,6 +1723,7 @@ function StepVoice({ project, setProject }){
                   <div className="text-[11px] text-[color:var(--muted)] truncate">{s.audioSource === 'elevenlabs' ? 'ElevenLabs audio' : (s.audioSource === 'local-speech' ? 'Local SpeechSynthesis' : (s.audioSource === 'error' ? ('Error: '+(s.audioError||'')) : 'No audio yet'))}</div>
                 </div>
                 {s.audio ? <audio controls src={s.audio} className="max-w-[260px]" /> : <button className="chip" onClick={()=>previewLocalForScene(s)}>{'preview locally'}</button>}
+                <button className="chip shrink-0" onClick={()=>regenerateOne(s.id)} disabled={voiceBusy} title="Regenerate ElevenLabs voice for this scene">{String.fromCharCode(8635)}</button>
               </div>
             ))}
           </div>
