@@ -1545,6 +1545,7 @@ function StepStoryboard({ project, setProject }){
     setProject({ ...project, scenes: next });
     setImgInfo('Generated ' + next.length + ' images (' + okStab + ' via Stability, ' + okPol + ' via Pollinations, ' + okLocal + ' local SVG).');
     setImgBusy(false);
+    if (!isGodMode) { try { window.dispatchEvent(new CustomEvent('zs:advance-step', { detail: { from: 'storyboard' } })); } catch(_){} }
   };
   const regenerateImageOne = async (sceneId) => {
     if(imgBusy) return;
@@ -1744,6 +1745,7 @@ function StepVoice({ project, setProject }){
     setProject({ ...project, scenes: next });
     setVoiceInfo('Voices: ' + okEl + ' via ElevenLabs · ' + okLocal + ' marked for local playback · ' + errs + ' errors.');
     setVoiceBusy(false);
+    if (!isGodMode) { try { window.dispatchEvent(new CustomEvent('zs:advance-step', { detail: { from: 'voice' } })); } catch(_){} }
   };
   const previewLocalForScene = (s) => { try { ttsLocal(s.voLine || s.script || s.title || ''); } catch(e){} };
   const regenerateOne = async (sceneId) => {
@@ -2274,6 +2276,16 @@ function StudioTab({ setTab, studioStep, setStudioStep }){
   const step = visibleIds.includes(rawStep) ? rawStep : visibleIds[0];
   useEffect(() => { if (step !== rawStep) setStudioStep(step); }, [step, rawStep]);
   const goto = (id) => setStudioStep(id);
+  React.useEffect(() => {
+    if (isGodMode) return;
+    const h = (e) => {
+      const from = e && e.detail && e.detail.from;
+      const map = { storyboard: 'voice', voice: 'export' };
+      if (map[from]) setStudioStep(map[from]);
+    };
+    window.addEventListener('zs:advance-step', h);
+    return () => window.removeEventListener('zs:advance-step', h);
+  }, []);
   const renderStep = () => {
     switch(step){
       case "research": return <StepResearch project={project} setProject={setProject} setStudioStep={setStudioStep} />;
