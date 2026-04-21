@@ -110,11 +110,142 @@ async function fetchYouTubeMetaViaApi(videoId, env) {
   } catch (_) { return null; }
 }
 
+function decodeHtmlEntities(s) {
+  return String(s || "")
+    .replace(/&amp;/g, "&")
+    .replace(/&#39;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)));
+}
+
+function parseCaptionPayload(text) {
+  const trimmed = (text || "").trim();
+  if (!trimmed) return "";
+  if (trimmed.startsWith("{")) {
+    try {
+      const capJson = JSON.parse(trimmed);
+      const events = capJson.events || [];
+      const parts = [];
+      for (const ev of events) {
+        if (!ev.segs) continue;
+        for (const seg of ev.segs) { if (seg.utf8) parts.push(seg.utf8); }
+      }
+      return parts.join("").replace(/\s+/g, " ").trim();
+    } catch (_) { /* fall through to XML */ }
+  }
+  const parts = [];
+  const reP = /<p[^>]*>([\s\S]*?)<\/p>/g;
+  let m;
+  while ((m = reP.exec(trimmed)) !== null) {
+    const inner = m[1].replace(/<[^>]+>/g, "");
+    parts.push(decodeHtmlEntities(inner));
+  }
+  if (parts.length === 0) {
+    const reText = /<text[^>]*>([\s\S]*?)<\/text>/g;
+    while ((m = reText.exec(trimmed)) !== null) {
+      parts.push(decodeHtmlEntities(m[1].replace(/<[^>]+>/g, "")));
+    }
+  }
+  return parts.join(" ").replace(/\s+/g, " ").trim();
+}
+
 const YT_USER_AGENTS = [
   "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
   "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 ];
+
+const INNERTUBE_CLIENTS = [
+  {
+    name: "ANDROID",
+    clientName: "ANDROID",
+    clientVersion: "19.09.37",
+    userAgent: "com.google.android.youtube/19.09.37 (Linux; U; Android 14) gzip",
+    clientNum: "3",
+    extra: { androidSdkVersion: 34, hl: "en", gl: "US" }
+  },
+  {
+    name: "IOS",
+    clientName: "IOS",
+    clientVersion: "19.09.3",
+    userAgent: "com.google.ios.youtube/19.09.3 (iPhone14,3; U; CPU iOS 15_6 like Mac OS X)",
+    clientNum: "5",
+    extra: { deviceMake: "Apple", deviceModel: "iPhone14,3", hl: "en", gl: "US" }
+  },
+  {
+    name: "WEB",
+    clientName: "WEB",
+    clientVersion: "2.20240111.09.00",
+    userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    clientNum: "1",
+    extra: { hl: "en", gl: "US" }
+  }
+];
+
+async function fetchPlayerViaClient(videoId, c) {
+  const body = {
+    context: { client: { clientName: c.clientName, clientVersion: c.clientVersion, ...c.extra } },
+    videoId
+  };
+  const res = await fetch("https://www.youtube.com/youtubei/v1/player?prettyPrint=false", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "User-Agent": c.userAgent,
+      "X-YouTube-Client-Name": c.clientNum,
+      "X-YouTube-Client-Version": c.clientVersion,
+      "Accept-Language": "en-US,en;q=0.9",
+      "Origin": "https://www.youtube.com"
+    },
+    body: JSON.stringify(body)
+  });
+  if (!res.ok) throw new Error(c.name + " HTTP " + res.status);
+  return await res.json();
+}
+
+async function fetchYouTubeTranscriptViaInnerTube(videoId) {
+  const attempts = [];
+  for (const c of INNERTUBE_CLIENTS) {
+    try {
+      const data = await fetchPlayerViaClient(videoId, c);
+      const playability = (data.playabilityStatus || {});
+      if (playability.status && playability.status !== "OK") {
+        attempts.push(c.name + ": playability=" + playability.status);
+        continue;
+      }
+      const tracks = (((data.captions || {}).playerCaptionsTracklistRenderer || {}).captionTracks) || [];
+      if (!tracks.length) { attempts.push(c.name + ": no caption tracks"); continue; }
+      const preferred =
+        tracks.find(t => (t.languageCode || "").toLowerCase().startsWith("en") && t.kind !== "asr") ||
+        tracks.find(t => (t.languageCode || "").toLowerCase().startsWith("en")) ||
+        tracks[0];
+      const capRes = await fetch(preferred.baseUrl, { headers: { "User-Agent": c.userAgent } });
+      if (!capRes.ok) { attempts.push(c.name + ": captions HTTP " + capRes.status); continue; }
+      const capText = await capRes.text();
+      const transcript = parseCaptionPayload(capText);
+      if (!transcript) { attempts.push(c.name + ": empty payload"); continue; }
+      const vd = data.videoDetails || {};
+      return {
+        transcript,
+        language: preferred.languageCode || "en",
+        client: c.name,
+        scrapeMeta: {
+          title: vd.title || "",
+          author: vd.author || "",
+          lengthSeconds: Number(vd.lengthSeconds) || 0
+        }
+      };
+    } catch (err) {
+      attempts.push(c.name + ": " + String((err && err.message) || err));
+    }
+  }
+  const err = new Error("InnerTube all clients failed: " + attempts.join(" | "));
+  err.attempts = attempts;
+  throw err;
+}
 
 async function fetchYouTubeTranscriptViaScrape(videoId) {
   let lastErr = null;
@@ -137,17 +268,11 @@ async function fetchYouTubeTranscriptViaScrape(videoId) {
       const tracks = (((data.captions || {}).playerCaptionsTracklistRenderer || {}).captionTracks) || [];
       if (!tracks.length) { lastErr = new Error("Video has no caption tracks"); continue; }
       const preferred = tracks.find(t => (t.languageCode || "").toLowerCase().startsWith("en")) || tracks[0];
-      const trackUrl = preferred.baseUrl + "&fmt=json3";
-      const capRes = await fetch(trackUrl, { headers: { "User-Agent": ua } });
+      const capRes = await fetch(preferred.baseUrl, { headers: { "User-Agent": ua } });
       if (!capRes.ok) { lastErr = new Error("Captions HTTP " + capRes.status); continue; }
-      const capJson = await capRes.json();
-      const events = capJson.events || [];
-      const parts = [];
-      for (const ev of events) {
-        if (!ev.segs) continue;
-        for (const seg of ev.segs) { if (seg.utf8) parts.push(seg.utf8); }
-      }
-      const transcript = parts.join("").replace(/\s+/g, " ").trim();
+      const capText = await capRes.text();
+      const transcript = parseCaptionPayload(capText);
+      if (!transcript) { lastErr = new Error("Empty transcript payload"); continue; }
       return {
         transcript,
         language: preferred.languageCode || "en",
@@ -166,6 +291,22 @@ async function fetchYouTubeTranscriptViaScrape(videoId) {
 
 async function fetchYouTubeTranscript(videoId, env) {
   const apiMeta = await fetchYouTubeMetaViaApi(videoId, env);
+  const errors = [];
+
+  try {
+    const it = await fetchYouTubeTranscriptViaInnerTube(videoId);
+    return {
+      videoId,
+      title: apiMeta?.title || it.scrapeMeta.title,
+      author: apiMeta?.author || it.scrapeMeta.author,
+      lengthSeconds: apiMeta?.lengthSeconds || it.scrapeMeta.lengthSeconds,
+      language: it.language,
+      transcript: it.transcript,
+      source: "innertube"
+    };
+  } catch (itErr) {
+    errors.push("innertube: " + String((itErr && itErr.message) || itErr));
+  }
 
   try {
     const scrape = await fetchYouTubeTranscriptViaScrape(videoId);
@@ -175,23 +316,30 @@ async function fetchYouTubeTranscript(videoId, env) {
       author: apiMeta?.author || scrape.scrapeMeta.author,
       lengthSeconds: apiMeta?.lengthSeconds || scrape.scrapeMeta.lengthSeconds,
       language: scrape.language,
-      transcript: scrape.transcript
+      transcript: scrape.transcript,
+      source: "scrape"
     };
   } catch (scrapeErr) {
-    if (apiMeta && apiMeta.description) {
-      return {
-        videoId,
-        title: apiMeta.title,
-        author: apiMeta.author,
-        lengthSeconds: apiMeta.lengthSeconds,
-        language: "en",
-        transcript: apiMeta.description,
-        fallback: "description-only",
-        scrapeError: String((scrapeErr && scrapeErr.message) || scrapeErr)
-      };
-    }
-    throw scrapeErr;
+    errors.push("scrape: " + String((scrapeErr && scrapeErr.message) || scrapeErr));
   }
+
+  if (apiMeta && apiMeta.description) {
+    return {
+      videoId,
+      title: apiMeta.title,
+      author: apiMeta.author,
+      lengthSeconds: apiMeta.lengthSeconds,
+      language: "en",
+      transcript: apiMeta.description,
+      source: "description",
+      fallback: "description-only",
+      errors
+    };
+  }
+
+  const err = new Error("All transcript methods failed: " + errors.join(" | "));
+  err.errors = errors;
+  throw err;
 }
 
 export default {
