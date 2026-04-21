@@ -1620,9 +1620,17 @@ function StepStoryboard({ project, setProject }){
         {((project.scenes||[]).some(s => s.image) || imgBusy) && (
           <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-2">
             {(project.scenes||[]).map((s, i) => (
-              <div key={s.id||i} className="rounded-xl overflow-hidden border border-[color:var(--line)]">
+              <div key={s.id||i} className="relative rounded-xl overflow-hidden border border-[color:var(--line)]">
                 {s.image ? <img src={s.image} alt={'Scene '+(i+1)} className="w-full h-24 object-cover zs-fade-in" /> : <div className="w-full h-24 shimmer bg-[color:var(--line)] flex items-center justify-center text-[11px] text-[color:var(--muted)]">{imgBusy ? 'rendering…' : 'no image'}</div>}
-                {s.image && isGodMode && <button className="chip text-[10px] px-2 py-0.5 m-1" onClick={()=>regenerateImageOne(s.id)} disabled={imgBusy} title="Regenerate image">{String.fromCharCode(8635)} regen</button>}
+                {s.image && !imgBusy && (
+                  <button
+                    type="button"
+                    onClick={()=>regenerateImageOne(s.id)}
+                    title="Regenerate image"
+                    aria-label="Regenerate image"
+                    className="absolute top-1 right-1 w-7 h-7 rounded-full bg-black/60 hover:bg-black/85 text-white text-sm leading-none flex items-center justify-center border border-white/10 backdrop-blur-sm transition-colors"
+                  >{String.fromCharCode(8635)}</button>
+                )}
                 <div className="px-2 py-1 text-[11px] text-[color:var(--muted)] truncate">{s.title || ('Scene '+(i+1))}</div>
               </div>
             ))}
