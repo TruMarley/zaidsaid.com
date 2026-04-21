@@ -2413,7 +2413,7 @@ function StepExport({ project, setProject }){
               </div>
               {_meta && <div className="text-[12px] text-[color:var(--muted)] tabular-nums">{_meta}</div>}
             </div>
-            <video src={renderUrl} controls autoPlay={false} className="w-full max-h-[360px] rounded-xl border border-[color:var(--line)] bg-black" />
+            <video src={renderUrl} controls autoPlay muted playsInline className="w-full max-h-[360px] rounded-xl border border-[color:var(--line)] bg-black" />
             <div className="flex flex-wrap items-center gap-2">
               <a href={renderUrl} download={(project.name||'zaidsaid')+'.webm'} className="btn btn-primary">{I.check({size:14})} Download .webm</a>
               <button type="button" onClick={()=>{ const _text = (project.logline || project.name || 'my short video').toString().slice(0, 180); const _url = 'https://twitter.com/intent/tweet?text=' + encodeURIComponent('Just made a short video with zaidsaid.com — "' + _text + '"') + '&url=' + encodeURIComponent('https://zaidsaid.com'); try { window.open(_url, '_blank', 'noopener,noreferrer,width=560,height=520'); } catch(_){} }} className="btn btn-ghost text-xs" title="Share a tweet about this video">Share on X</button>
