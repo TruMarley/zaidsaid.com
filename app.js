@@ -40,6 +40,29 @@ try {
 const isGodMode = (typeof window !== "undefined") && (function(){ try { return localStorage.getItem("zs_god") === "1"; } catch(e){ return false; } })();
 try { if (isGodMode) document.documentElement.classList.add("zs-god"); } catch(e){}
 
+/* ---------------- Default proxy seed (first-run MVP experience) ----------------
+ * Public users have no providers configured on first visit, so every Claude/
+ * ElevenLabs/Stability call falls back to local. Seed sensible defaults that
+ * route through the deployed Cloudflare Worker on first load. Users (and god
+ * mode) can still override in Settings > Providers.
+ */
+try {
+  const _ZS_WORKER = "https://zaidsaid-proxy.zaidsaid.workers.dev";
+  const _zsRaw = localStorage.getItem("zaidsaid.v2.providers");
+  const _zsPrev = _zsRaw ? JSON.parse(_zsRaw) : {};
+  const _zsDefaults = {
+    anthropic:  { proxyUrl: _ZS_WORKER + "/anthropic",  enabled: true },
+    elevenlabs: { proxyUrl: _ZS_WORKER + "/elevenlabs", enabled: true },
+    stability:  { proxyUrl: _ZS_WORKER + "/stability",  enabled: true },
+    grok:       { proxyUrl: _ZS_WORKER + "/grok",       enabled: true },
+  };
+  let _zsChanged = false;
+  for (const [_k, _v] of Object.entries(_zsDefaults)) {
+    if (!_zsPrev[_k] || !_zsPrev[_k].proxyUrl) { _zsPrev[_k] = _v; _zsChanged = true; }
+  }
+  if (_zsChanged) localStorage.setItem("zaidsaid.v2.providers", JSON.stringify(_zsPrev));
+} catch(e){}
+
 /* ---------------- Brand / tokens ---------------- */
 const BRAND = { name: "Zaidsaid", tagline: "The AI video platform for teams", version: "v2.0", domain: "zaidsaid.com" };
 
