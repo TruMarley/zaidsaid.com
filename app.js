@@ -1887,7 +1887,7 @@ function StepVoice({ project, setProject }){
                   <div className="text-[11px] text-[color:var(--muted)] truncate">{s.audioSource === 'elevenlabs' ? 'ElevenLabs audio' : (s.audioSource === 'local-speech' ? 'Local SpeechSynthesis' : (s.audioSource === 'error' ? ('Error: '+(s.audioError||'')) : (voiceBusy ? 'Generating voice…' : 'No audio yet')))}</div>
                 </div>
                 {s.audio ? <audio controls src={s.audio} className="max-w-[260px] zs-fade-in" /> : <button className="chip" onClick={()=>previewLocalForScene(s)}>{'preview locally'}</button>}
-                {isGodMode && <button className="chip shrink-0" onClick={()=>regenerateOne(s.id)} disabled={voiceBusy} title="Regenerate ElevenLabs voice for this scene">{String.fromCharCode(8635)}</button>}
+                {s.audioSource && s.audioSource !== 'skipped' && <button type="button" className="shrink-0 w-8 h-8 rounded-full border border-white/15 bg-white/5 hover:bg-white/15 text-white/80 hover:text-white flex items-center justify-center text-base leading-none disabled:opacity-50 disabled:cursor-not-allowed" onClick={()=>regenerateOne(s.id)} disabled={voiceBusy} title="Regenerate voice for this scene" aria-label="Regenerate voice">{String.fromCharCode(8635)}</button>}
               </div>
             ))}
           </div>
