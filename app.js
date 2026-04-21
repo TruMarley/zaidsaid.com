@@ -9,6 +9,15 @@ const NS = "zaidsaid.v2.";
 const SCHEMA_VERSION = 2;
 const safeGet = (k, fb) => { try { const v = localStorage.getItem(NS+k); return v==null?fb:JSON.parse(v); } catch(e){ return fb; } };
 const safeSet = (k, v) => { try { localStorage.setItem(NS+k, JSON.stringify(v)); } catch(e){} };
+const getAnthropicPath = () => {
+  try {
+    const a = safeGet("providers.cfg", {}) || {};
+    const b = safeGet("providers", {}) || {};
+    const anth = (a && a.anthropic) || (b && b.anthropic) || {};
+    if (anth.enabled === false) return "";
+    return String(anth.path || anth.proxyUrl || anth.url || "").trim();
+  } catch(_) { return ""; }
+};
 function useLocalState(key, initial){
   const [v, setV] = useState(() => safeGet(key, initial));
   useEffect(() => { safeSet(key, v); }, [key, v]);
@@ -1138,9 +1147,7 @@ function StepResearch({ project, setProject, setStudioStep }){ const toast = use
     console.log("[zs] source text length:", text.length);
     if (!text) { setResearchError("Paste or fetch source text first"); return; }
     setResearchBusy(true); setResearchSource(""); setResearchError("");
-    let providers = {}; try { providers = safeGet("providers.cfg", {}) || {}; } catch(e) { console.warn("[zs] providers.cfg read failed", e); }
-    const anth = providers && providers.anthropic;
-    const path = anth && anth.enabled && anth.path ? String(anth.path).trim() : "";
+    const path = getAnthropicPath();
     console.log("[zs] anthropic path configured:", !!path);
     try {
       let notes = null;
@@ -1225,8 +1232,7 @@ function StepScript({ project, setProject }){
     const scenes = (project && project.scenes) || [];
     if(!scenes.length){ toast.push('No scenes to polish.', 'error'); return; }
     setPolishing(true);
-    let providers = {}; try { providers = safeGet('providers', {}) || {}; } catch(e){}
-    const path = providers && providers.anthropic && providers.anthropic.proxyUrl;
+    const path = getAnthropicPath();
     const brief = (project && (project.brief || project.idea || project.title)) || '';
     const next = [];
     let usedClaude = 0, usedLocal = 0;
@@ -2268,9 +2274,7 @@ function RepurposeRealAnalyze({ project, setProject }){
     const text = (src || project.transcriptText || project.source || '').trim();
     if(!text){ setErr('Paste a transcript, description, or URL summary first.'); return; }
     setBusy(true); setErr(''); setInfo('');
-    let providers = {}; try { providers = safeGet('providers', {}) || {}; } catch(e){}
-    const anth = providers && providers.anthropic;
-    const path = anth && anth.url ? anth.url : '';
+    const path = getAnthropicPath();
     const target = Number(project.targetCount)||5;
     try {
       let clips;
@@ -2566,8 +2570,7 @@ function RepurposeTab(){
   const generateAllCaptions = async () => {
     if(captionsBusy) return;
     setCaptionsBusy(true); setCaptionsSource("");
-    const providers = safeGet("providers.cfg", {}) || {};
-    const anth = providers.anthropic; const path = anth && anth.enabled && anth.path ? anth.path : "";
+    const path = getAnthropicPath();
     let mode = "local";
     const updated = [];
     for(const clip of project.clips){
