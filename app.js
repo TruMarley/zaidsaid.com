@@ -2189,7 +2189,15 @@ function StepExport({ project, setProject }){
         context.shadowOffsetY = 2;
         context.fillStyle = '#fff'; context.font = 'bold 42px system-ui';
         const title = (sc.title||('Scene '+(idx+1))).slice(0,60);
-        context.fillText(title, 60, isMultiLine ? H-128 : H-100);
+        const _sceneDur = durations[idx] || 3;
+        const _titleInT = Math.min(1, Math.max(0, (p * _sceneDur) / 0.35));
+        const _titleEase = 1 - Math.pow(1 - _titleInT, 3);
+        const _titleBaseY = isMultiLine ? H-128 : H-100;
+        const _titleY = _titleBaseY + (1 - _titleEase) * 14;
+        const _prevAlpha = context.globalAlpha;
+        context.globalAlpha = _titleEase;
+        context.fillText(title, 60, _titleY);
+        context.globalAlpha = _prevAlpha;
         context.shadowBlur = 6;
         context.font = '24px system-ui'; context.fillStyle = 'rgba(255,255,255,0.92)';
         const _ab = audioBuffers[idx];
