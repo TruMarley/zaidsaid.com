@@ -1789,25 +1789,23 @@ function StepExport({ project, setProject }){
       const total = scenes.reduce((a,s) => a + Math.max(1, Number(s.duration)||3), 0);
       let elapsed = 0;
       for(let i=0; i<scenes.length; i++){
-        const s = scenes[i]; const dur = Math.max(1, Number(s.duration)||3); const frames = Math.round(dur * 30);
-        for(let f=0; f<frames; f++){
-          ctx.fillStyle = '#0a0a0a'; ctx.fillRect(0,0,W,H);
-          if(imgs[i]){
-            const r = Math.max(W/imgs[i].width, H/imgs[i].height);
-            const dw = imgs[i].width * r, dh = imgs[i].height * r;
-            ctx.drawImage(imgs[i], (W-dw)/2, (H-dh)/2, dw, dh);
-            ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(0, H-160, W, 160);
-          } else {
-            ctx.fillStyle = '#1a1a1a'; ctx.fillRect(40,40,W-80,H-80);
-          }
-          ctx.fillStyle = '#fff'; ctx.font = 'bold 42px system-ui'; ctx.textAlign='left';
-          const title = (s.title||('Scene '+(i+1))).slice(0,60);
-          ctx.fillText(title, 60, H-100);
-          ctx.font = '24px system-ui'; ctx.fillStyle = 'rgba(255,255,255,0.85)';
-          const vo = (s.voLine||'').slice(0,90);
-          ctx.fillText(vo, 60, H-50);
-          await new Promise(r => setTimeout(r, 1000/30));
+        const s = scenes[i]; const dur = Math.max(1, Number(s.duration)||3);
+        ctx.fillStyle = '#0a0a0a'; ctx.fillRect(0,0,W,H);
+        if(imgs[i]){
+          const r = Math.max(W/imgs[i].width, H/imgs[i].height);
+          const dw = imgs[i].width * r, dh = imgs[i].height * r;
+          ctx.drawImage(imgs[i], (W-dw)/2, (H-dh)/2, dw, dh);
+          ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(0, H-160, W, 160);
+        } else {
+          ctx.fillStyle = '#1a1a1a'; ctx.fillRect(40,40,W-80,H-80);
         }
+        ctx.fillStyle = '#fff'; ctx.font = 'bold 42px system-ui'; ctx.textAlign='left';
+        const title = (s.title||('Scene '+(i+1))).slice(0,60);
+        ctx.fillText(title, 60, H-100);
+        ctx.font = '24px system-ui'; ctx.fillStyle = 'rgba(255,255,255,0.85)';
+        const vo = (s.voLine||'').slice(0,90);
+        ctx.fillText(vo, 60, H-50);
+        await new Promise(r => setTimeout(r, dur * 1000));
         elapsed += dur;
         setRenderProgress(Math.min(99, Math.round((elapsed/total)*100)));
       }
