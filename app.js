@@ -1511,6 +1511,11 @@ function StepStoryboard({ project, setProject }){
   const [imgBusy, setImgBusy] = React.useState(false);
   const [imgErr, setImgErr] = React.useState('');
   const [imgInfo, setImgInfo] = React.useState('');
+  React.useEffect(() => {
+    if (isGodMode) return;
+    if (!imgInfo && !imgBusy) return;
+    try { window.dispatchEvent(new CustomEvent('zs:progress', { detail: { message: imgInfo || (imgBusy ? 'Generating images…' : ''), busy: imgBusy } })); } catch(_){}
+  }, [imgInfo, imgBusy]);
   const generateAllImages = async () => {
     if(imgBusy) return;
     const scenes = (project && project.scenes) || [];
@@ -1709,6 +1714,11 @@ function StepVoice({ project, setProject }){
   const [voiceBusy, setVoiceBusy] = React.useState(false);
   const [voiceErr, setVoiceErr] = React.useState('');
   const [voiceInfo, setVoiceInfo] = React.useState('');
+  React.useEffect(() => {
+    if (isGodMode) return;
+    if (!voiceInfo && !voiceBusy) return;
+    try { window.dispatchEvent(new CustomEvent('zs:progress', { detail: { message: voiceInfo || (voiceBusy ? 'Generating voices…' : ''), busy: voiceBusy } })); } catch(_){}
+  }, [voiceInfo, voiceBusy]);
   const generateAllVoices = async () => {
     if(voiceBusy) return;
     const scenes = (project && project.scenes) || [];
@@ -1977,6 +1987,14 @@ function StepExport({ project, setProject }){
     }
   }, []);
   const [renderProgress, setRenderProgress] = React.useState(0);
+  React.useEffect(() => {
+    if (isGodMode) return;
+    if (!renderBusy && !renderUrl) return;
+    const message = renderUrl && !renderBusy
+      ? 'Video ready — scroll down to preview & download.'
+      : ('Rendering video… ' + Math.max(1, renderProgress) + '%');
+    try { window.dispatchEvent(new CustomEvent('zs:progress', { detail: { message, busy: renderBusy } })); } catch(_){}
+  }, [renderBusy, renderProgress, renderUrl]);
   const renderRealVideo = async () => {
     if(renderBusy) return;
     const scenes = (project && project.scenes) || [];
@@ -2271,6 +2289,7 @@ function StudioTab({ setTab, studioStep, setStudioStep }){
   const step = visibleIds.includes(rawStep) ? rawStep : visibleIds[0];
   useEffect(() => { if (step !== rawStep) setStudioStep(step); }, [step, rawStep]);
   const goto = (id) => setStudioStep(id);
+  const [progress, setProgress] = React.useState({ message: '', busy: false });
   React.useEffect(() => {
     if (isGodMode) return;
     const h = (e) => {
@@ -2278,8 +2297,16 @@ function StudioTab({ setTab, studioStep, setStudioStep }){
       const map = { storyboard: 'voice', voice: 'export' };
       if (map[from]) setStudioStep(map[from]);
     };
+    const p = (e) => {
+      const d = (e && e.detail) || {};
+      setProgress({ message: d.message || '', busy: !!d.busy });
+    };
     window.addEventListener('zs:advance-step', h);
-    return () => window.removeEventListener('zs:advance-step', h);
+    window.addEventListener('zs:progress', p);
+    return () => {
+      window.removeEventListener('zs:advance-step', h);
+      window.removeEventListener('zs:progress', p);
+    };
   }, []);
   const renderStep = () => {
     switch(step){
@@ -2328,6 +2355,12 @@ function StudioTab({ setTab, studioStep, setStudioStep }){
         {isGodMode && <StudioCharacterRow project={project} setProject={setProject} />}
         {isGodMode && <StudioBrandKitSelect project={project} setProject={setProject} />}
       </div>
+      {!isGodMode && progress.message && (
+        <div className="mb-4 p-3 rounded-xl border border-indigo-500/40 bg-indigo-500/10 flex items-center gap-3">
+          <span className={"w-2.5 h-2.5 rounded-full " + (progress.busy ? "bg-indigo-300 animate-pulse" : "bg-emerald-400")} />
+          <div className="flex-1 min-w-0 text-sm text-indigo-100">{progress.message}</div>
+        </div>
+      )}
       <div>{renderStep()}</div>
       <div className="mt-6 flex items-center justify-between gap-2 flex-wrap">
         <button className="btn" onClick={()=>prev && goto(prev.id)} disabled={!prev}>← {prev ? prev.label : "Start"}</button>
