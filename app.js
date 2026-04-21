@@ -926,6 +926,14 @@ const generateImageViaStability = async (proxyUrl, prompt, opts) => {
   const blob = await res.blob();
   return await new Promise((resolve,reject)=>{ const r=new FileReader(); r.onload=()=>resolve(r.result); r.onerror=reject; r.readAsDataURL(blob); });
 };
+const generateImageViaPollinations = async (proxyUrl, prompt, opts) => {
+  const w = (opts && opts.w) || 1280; const h = (opts && opts.h) || 720;
+  const url = (proxyUrl||'').replace(/\/$/,'') + '/prompt/' + encodeURIComponent(String(prompt||'cinematic establishing shot').slice(0,400)) + '?width=' + w + '&height=' + h + '&nologo=true&model=flux';
+  const res = await fetch(url, { method:'GET', headers:{'accept':'image/*'} });
+  if(!res.ok){ const t = await res.text().catch(()=>''); throw new Error('Pollinations HTTP '+res.status+' '+t.slice(0,200)); }
+  const blob = await res.blob();
+  return await new Promise((resolve,reject)=>{ const r=new FileReader(); r.onload=()=>resolve(r.result); r.onerror=reject; r.readAsDataURL(blob); });
+};
 
 // MVP-C: Local SVG fallback (deterministic from prompt)
 const generateImageLocal = (prompt, opts) => {
@@ -1361,15 +1369,20 @@ function StepStoryboard({ project, setProject }){
     if(!scenes.length){ setImgErr('No scenes to render.'); return; }
     setImgBusy(true); setImgErr(''); setImgInfo('');
     let providers = {}; try { providers = safeGet('providers', {}) || {}; } catch(e){}
-    const path = providers && providers.stability && providers.stability.proxyUrl;
-    const next = []; let okClaude=0, okLocal=0;
+    const stabPath = providers && providers.stability && providers.stability.proxyUrl;
+    const polPath = providers && providers.pollinations && providers.pollinations.proxyUrl;
+    const next = []; let okStab=0, okPol=0, okLocal=0;
     for(const s of scenes){
       const prompt = (s.shot || s.title || s.voLine || 'cinematic establishing shot').slice(0,400);
       try {
-        if(path){
-          const dataUrl = await generateImageViaStability(path, prompt);
+        if(stabPath){
+          const dataUrl = await generateImageViaStability(stabPath, prompt);
           next.push({ ...s, image: dataUrl, imageSource: 'stability' });
-          okClaude++;
+          okStab++;
+        } else if(polPath){
+          const dataUrl = await generateImageViaPollinations(polPath, prompt);
+          next.push({ ...s, image: dataUrl, imageSource: 'pollinations' });
+          okPol++;
         } else {
           const dataUrl = generateImageLocal(prompt);
           next.push({ ...s, image: dataUrl, imageSource: 'local-svg' });
@@ -1382,7 +1395,7 @@ function StepStoryboard({ project, setProject }){
       }
     }
     setProject({ ...project, scenes: next });
-    setImgInfo('Generated ' + next.length + ' images (' + okClaude + ' via Stability, ' + okLocal + ' local SVG).');
+    setImgInfo('Generated ' + next.length + ' images (' + okStab + ' via Stability, ' + okPol + ' via Pollinations, ' + okLocal + ' local SVG).');
     setImgBusy(false);
   };
     return (
