@@ -2157,7 +2157,13 @@ function StepExport({ project, setProject }){
         context.fillText(title, 60, H-100);
         context.shadowBlur = 6;
         context.font = '24px system-ui'; context.fillStyle = 'rgba(255,255,255,0.92)';
-        const vo = (sc.voLine||'').slice(0,90);
+        const voFull = (sc.voLine||'').slice(0,90);
+        const _ab = audioBuffers[idx];
+        const _audibleRatio = _ab ? Math.min(1, Math.min(_ab.duration, durations[idx]) / durations[idx]) : 0.9;
+        const _wordProgress = Math.min(1, p / Math.max(0.3, _audibleRatio * 0.95));
+        const _words = voFull.split(/\s+/).filter(Boolean);
+        const _revealed = _words.length ? Math.min(_words.length, Math.max(1, Math.floor(_words.length * _wordProgress))) : 0;
+        const vo = _words.slice(0, _revealed).join(' ');
         context.fillText(vo, 60, H-50);
         context.shadowColor = 'transparent';
         context.shadowBlur = 0;
