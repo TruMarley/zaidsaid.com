@@ -2072,7 +2072,8 @@ function StepExport({ project, setProject }){
         const audioLen = audioBuffers[i] ? audioBuffers[i].duration : 0;
         return Math.max(configured, Math.ceil(audioLen * 10)/10);
       });
-      const total = durations.reduce((a,b)=>a+b, 0);
+      const INTRO_S = 1.0;
+      const total = INTRO_S + durations.reduce((a,b)=>a+b, 0);
       const stream = canvas.captureStream(30);
       if(audioDest){ audioDest.stream.getAudioTracks().forEach(t => stream.addTrack(t)); }
       const mimeCandidates = ['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm;codecs=vp9','video/webm'];
@@ -2093,7 +2094,7 @@ function StepExport({ project, setProject }){
       rec.start();
       const recStart = audioCtx ? audioCtx.currentTime + 0.05 : 0;
       if(audioCtx && audioDest){
-        let cum = 0;
+        let cum = INTRO_S;
         for(let i=0; i<scenes.length; i++){
           const ab = audioBuffers[i];
           if(ab){
@@ -2138,7 +2139,41 @@ function StepExport({ project, setProject }){
       const offscreen = document.createElement('canvas'); offscreen.width = W; offscreen.height = H;
       const offCtx = offscreen.getContext('2d');
       const FADE_S = 0.4;
-      let elapsed = 0;
+      const projectTitle = ((project.name && String(project.name).trim()) || (project.logline && String(project.logline).trim()) || 'Your AI-generated video').slice(0, 70);
+      const drawIntro = (alpha, scaleProgress) => {
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = '#0a0a0a'; ctx.fillRect(0, 0, W, H);
+        const grad = ctx.createRadialGradient(W/2, H/2, 50, W/2, H/2, Math.max(W, H)*0.7);
+        grad.addColorStop(0, 'rgba(99,102,241,0.18)');
+        grad.addColorStop(1, 'rgba(10,10,10,0)');
+        ctx.fillStyle = grad; ctx.fillRect(0, 0, W, H);
+        ctx.globalAlpha = alpha;
+        ctx.textAlign = 'center';
+        const scale = 0.96 + 0.04 * scaleProgress;
+        ctx.save();
+        ctx.translate(W/2, H/2);
+        ctx.scale(scale, scale);
+        ctx.fillStyle = '#fff'; ctx.font = 'bold 52px system-ui, -apple-system, Segoe UI, sans-serif';
+        ctx.fillText(projectTitle, 0, -6);
+        ctx.fillStyle = 'rgba(255,255,255,0.55)'; ctx.font = '20px system-ui';
+        ctx.fillText('zaidsaid.com', 0, 44);
+        ctx.restore();
+        ctx.globalAlpha = 1;
+      };
+      const introStart = audioCtx ? audioCtx.currentTime : performance.now()/1000;
+      while(true){
+        const now = audioCtx ? audioCtx.currentTime : performance.now()/1000;
+        const p = Math.min(1, (now - introStart) / INTRO_S);
+        const fadeIn = 0.3, fadeOut = 0.25;
+        let a = 1;
+        if (p < fadeIn) a = p / fadeIn;
+        else if (p > 1 - fadeOut) a = Math.max(0, (1 - p) / fadeOut);
+        drawIntro(a, Math.min(1, p / 0.4));
+        if (p >= 1) break;
+        await new Promise(r => requestAnimationFrame(r));
+      }
+      let elapsed = INTRO_S;
+      setRenderProgress(Math.min(99, Math.round((elapsed/total)*100)));
       for(let i=0; i<scenes.length; i++){
         const dur = durations[i];
         const isLast = (i === scenes.length - 1);
