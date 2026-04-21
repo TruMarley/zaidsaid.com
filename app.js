@@ -2104,28 +2104,55 @@ function StepExport({ project, setProject }){
           cum += durations[i];
         }
       }
+      const drawSceneToCtx = (context, idx) => {
+        context.globalAlpha = 1;
+        context.fillStyle = '#0a0a0a'; context.fillRect(0,0,W,H);
+        const sc = scenes[idx];
+        if(imgs[idx]){
+          const r = Math.max(W/imgs[idx].width, H/imgs[idx].height);
+          const dw = imgs[idx].width * r, dh = imgs[idx].height * r;
+          context.drawImage(imgs[idx], (W-dw)/2, (H-dh)/2, dw, dh);
+          context.fillStyle = 'rgba(0,0,0,0.45)'; context.fillRect(0, H-160, W, 160);
+        } else {
+          context.fillStyle = '#1a1a1a'; context.fillRect(40,40,W-80,H-80);
+        }
+        context.fillStyle = '#fff'; context.font = 'bold 42px system-ui'; context.textAlign='left';
+        const title = (sc.title||('Scene '+(idx+1))).slice(0,60);
+        context.fillText(title, 60, H-100);
+        context.font = '24px system-ui'; context.fillStyle = 'rgba(255,255,255,0.85)';
+        const vo = (sc.voLine||'').slice(0,90);
+        context.fillText(vo, 60, H-50);
+      };
+      const offscreen = document.createElement('canvas'); offscreen.width = W; offscreen.height = H;
+      const offCtx = offscreen.getContext('2d');
+      const FADE_S = 0.4;
       let elapsed = 0;
       for(let i=0; i<scenes.length; i++){
-        const s = scenes[i]; const dur = durations[i];
-        ctx.fillStyle = '#0a0a0a'; ctx.fillRect(0,0,W,H);
-        if(imgs[i]){
-          const r = Math.max(W/imgs[i].width, H/imgs[i].height);
-          const dw = imgs[i].width * r, dh = imgs[i].height * r;
-          ctx.drawImage(imgs[i], (W-dw)/2, (H-dh)/2, dw, dh);
-          ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(0, H-160, W, 160);
-        } else {
-          ctx.fillStyle = '#1a1a1a'; ctx.fillRect(40,40,W-80,H-80);
+        const dur = durations[i];
+        const isLast = (i === scenes.length - 1);
+        const fadeS = isLast ? 0 : Math.min(FADE_S, dur * 0.3);
+        const holdS = Math.max(0, dur - fadeS);
+        drawSceneToCtx(ctx, i);
+        if(holdS > 0){
+          const holdTarget = (audioCtx ? audioCtx.currentTime : performance.now()/1000) + holdS;
+          await new Promise(r => setTimeout(r, holdS * 1000));
+          if(audioCtx){
+            while(audioCtx.currentTime < holdTarget){ await new Promise(r => setTimeout(r, 50)); }
+          }
         }
-        ctx.fillStyle = '#fff'; ctx.font = 'bold 42px system-ui'; ctx.textAlign='left';
-        const title = (s.title||('Scene '+(i+1))).slice(0,60);
-        ctx.fillText(title, 60, H-100);
-        ctx.font = '24px system-ui'; ctx.fillStyle = 'rgba(255,255,255,0.85)';
-        const vo = (s.voLine||'').slice(0,90);
-        ctx.fillText(vo, 60, H-50);
-        const target = (audioCtx ? audioCtx.currentTime : performance.now()/1000) + dur;
-        await new Promise(r => setTimeout(r, dur * 1000));
-        if(audioCtx){
-          while(audioCtx.currentTime < target){ await new Promise(r => setTimeout(r, 50)); }
+        if(!isLast && fadeS > 0){
+          drawSceneToCtx(offCtx, i);
+          const fadeStart = audioCtx ? audioCtx.currentTime : performance.now()/1000;
+          while(true){
+            const now = audioCtx ? audioCtx.currentTime : performance.now()/1000;
+            const t = Math.min(1, (now - fadeStart) / fadeS);
+            drawSceneToCtx(ctx, i+1);
+            ctx.globalAlpha = 1 - t;
+            ctx.drawImage(offscreen, 0, 0);
+            ctx.globalAlpha = 1;
+            if(t >= 1) break;
+            await new Promise(r => requestAnimationFrame(r));
+          }
         }
         elapsed += dur;
         setRenderProgress(Math.min(99, Math.round((elapsed/total)*100)));
