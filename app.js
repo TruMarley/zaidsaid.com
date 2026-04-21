@@ -1519,31 +1519,24 @@ function StepStoryboard({ project, setProject }){
     let providers = {}; try { providers = safeGet('providers', {}) || {}; } catch(e){}
     const stabPath = providers && providers.stability && providers.stability.proxyUrl;
     const polPath = providers && providers.pollinations && providers.pollinations.proxyUrl;
-    const next = []; let okStab=0, okPol=0, okLocal=0;
-    for(const s of scenes){
+    let okStab=0, okPol=0, okLocal=0;
+    for(let i = 0; i < scenes.length; i++){
+      const s = scenes[i];
       const prompt = (s.shot || s.title || s.voLine || 'cinematic establishing shot').slice(0,400);
+      let dataUrl, source;
       try {
-        if(stabPath){
-          const dataUrl = await generateImageViaStability(stabPath, prompt);
-          next.push({ ...s, image: dataUrl, imageSource: 'stability' });
-          okStab++;
-        } else if(polPath){
-          const dataUrl = await generateImageViaPollinations(polPath, prompt);
-          next.push({ ...s, image: dataUrl, imageSource: 'pollinations' });
-          okPol++;
-        } else {
-          const dataUrl = generateImageLocal(prompt);
-          next.push({ ...s, image: dataUrl, imageSource: 'local-svg' });
-          okLocal++;
-        }
+        if(stabPath){ dataUrl = await generateImageViaStability(stabPath, prompt); source='stability'; okStab++; }
+        else if(polPath){ dataUrl = await generateImageViaPollinations(polPath, prompt); source='pollinations'; okPol++; }
+        else { dataUrl = generateImageLocal(prompt); source='local-svg'; okLocal++; }
       } catch(e){
-        const dataUrl = generateImageLocal(prompt);
-        next.push({ ...s, image: dataUrl, imageSource: 'local-svg-fallback' });
+        dataUrl = generateImageLocal(prompt);
+        source = 'local-svg-fallback';
         okLocal++;
       }
+      setProject(prev => ({ ...prev, scenes: prev.scenes.map((x, idx) => idx === i ? { ...x, image: dataUrl, imageSource: source } : x) }));
+      setImgInfo('Generated ' + (i+1) + '/' + scenes.length + ' images…');
     }
-    setProject({ ...project, scenes: next });
-    setImgInfo('Generated ' + next.length + ' images (' + okStab + ' via Stability, ' + okPol + ' via Pollinations, ' + okLocal + ' local SVG).');
+    setImgInfo('Generated ' + scenes.length + ' images (' + okStab + ' via Stability, ' + okPol + ' via Pollinations, ' + okLocal + ' local SVG).');
     setImgBusy(false);
     if (!isGodMode) { try { window.dispatchEvent(new CustomEvent('zs:advance-step', { detail: { from: 'storyboard' } })); } catch(_){} }
   };
@@ -1592,11 +1585,11 @@ function StepStoryboard({ project, setProject }){
         </div>
         {imgErr && <div className="mt-2 text-[12px] text-red-400">{imgErr}</div>}
         {imgInfo && <div className="mt-2 text-[12px] text-emerald-400">{imgInfo}</div>}
-        {(project.scenes||[]).some(s => s.image) && (
+        {((project.scenes||[]).some(s => s.image) || imgBusy) && (
           <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-2">
             {(project.scenes||[]).map((s, i) => (
               <div key={s.id||i} className="rounded-xl overflow-hidden border border-[color:var(--line)]">
-                {s.image ? <img src={s.image} alt={'Scene '+(i+1)} className="w-full h-24 object-cover" /> : <div className="w-full h-24 bg-[color:var(--line)] flex items-center justify-center text-[11px] text-[color:var(--muted)]">no image</div>}
+                {s.image ? <img src={s.image} alt={'Scene '+(i+1)} className="w-full h-24 object-cover" /> : <div className="w-full h-24 bg-[color:var(--line)] flex items-center justify-center text-[11px] text-[color:var(--muted)] animate-pulse">{imgBusy ? 'rendering…' : 'no image'}</div>}
                 {s.image && isGodMode && <button className="chip text-[10px] px-2 py-0.5 m-1" onClick={()=>regenerateImageOne(s.id)} disabled={imgBusy} title="Regenerate image">{String.fromCharCode(8635)} regen</button>}
                 <div className="px-2 py-1 text-[11px] text-[color:var(--muted)] truncate">{s.title || ('Scene '+(i+1))}</div>
               </div>
@@ -1723,26 +1716,28 @@ function StepVoice({ project, setProject }){
     setVoiceBusy(true); setVoiceErr(''); setVoiceInfo('');
     let providers = {}; try { providers = safeGet('providers', {}) || {}; } catch(e){}
     const path = providers && providers.elevenlabs && providers.elevenlabs.proxyUrl;
-    const next = []; let okEl=0, okLocal=0, errs=0;
-    for(const s of scenes){
+    let okEl=0, okLocal=0, errs=0;
+    for(let i = 0; i < scenes.length; i++){
+      const s = scenes[i];
       const text = (s.voLine || s.script || s.title || '').toString();
-      if(!text.trim()){ next.push(s); continue; }
+      if(!text.trim()){ continue; }
+      let patch = null;
       try {
         if(path){
           const dataUrl = await ttsViaElevenLabs(path, text);
-          next.push({ ...s, audio: dataUrl, audioSource: 'elevenlabs' });
+          patch = { audio: dataUrl, audioSource: 'elevenlabs' };
           okEl++;
         } else {
-          // local fallback plays in-browser; persist a marker only
-          next.push({ ...s, audio: null, audioSource: 'local-speech' });
+          patch = { audio: null, audioSource: 'local-speech' };
           okLocal++;
         }
       } catch(e){
-        next.push({ ...s, audio: null, audioSource: 'error', audioError: String(e && e.message || e).slice(0,140) });
+        patch = { audio: null, audioSource: 'error', audioError: String(e && e.message || e).slice(0,140) };
         errs++;
       }
+      setProject(prev => ({ ...prev, scenes: prev.scenes.map((x, idx) => idx === i ? { ...x, ...patch } : x) }));
+      setVoiceInfo('Voiced ' + (i+1) + '/' + scenes.length + ' scenes…');
     }
-    setProject({ ...project, scenes: next });
     setVoiceInfo('Voices: ' + okEl + ' via ElevenLabs · ' + okLocal + ' marked for local playback · ' + errs + ' errors.');
     setVoiceBusy(false);
     if (!isGodMode) { try { window.dispatchEvent(new CustomEvent('zs:advance-step', { detail: { from: 'voice' } })); } catch(_){} }
