@@ -1787,29 +1787,69 @@ function StepExport({ project, setProject }){
     const scenes = (project && project.scenes) || [];
     if(!scenes.length){ setRenderErr('No scenes to render.'); return; }
     if(typeof MediaRecorder === 'undefined' || !HTMLCanvasElement.prototype.captureStream){ setRenderErr('Your browser does not support MediaRecorder + canvas.captureStream.'); return; }
+    if(document.visibilityState !== 'visible'){ setRenderErr('Keep this tab visible during render â Chromium throttles background tabs and corrupts WebM output.'); return; }
     setRenderBusy(true); setRenderErr(''); setRenderUrl(''); setRenderProgress(0);
+    let audioCtx = null; let onVis = null;
     try {
       const W = 1280, H = 720;
       const canvas = document.createElement('canvas'); canvas.width = W; canvas.height = H;
       const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#0a0a0a'; ctx.fillRect(0,0,W,H);
+      const AC = window.AudioContext || window.webkitAudioContext;
+      let audioDest = null; let audioBuffers = [];
+      if(AC){
+        audioCtx = new AC();
+        try { await audioCtx.resume(); } catch(_){}
+        audioDest = audioCtx.createMediaStreamDestination();
+        audioBuffers = await Promise.all(scenes.map(async (s) => {
+          if(!s.audio) return null;
+          try {
+            const res = await fetch(s.audio);
+            const buf = await res.arrayBuffer();
+            return await new Promise((resolve, reject) => { audioCtx.decodeAudioData(buf, resolve, reject); });
+          } catch(err){ console.warn('[zs] audio decode failed', err); return null; }
+        }));
+      }
+      const durations = scenes.map((s,i) => {
+        const configured = Math.max(1, Number(s.duration)||3);
+        const audioLen = audioBuffers[i] ? audioBuffers[i].duration : 0;
+        return Math.max(configured, Math.ceil(audioLen * 10)/10);
+      });
+      const total = durations.reduce((a,b)=>a+b, 0);
       const stream = canvas.captureStream(30);
-      const mime = (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported('video/webm;codecs=vp9')) ? 'video/webm;codecs=vp9' : 'video/webm';
-      const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 4_000_000 });
+      if(audioDest){ audioDest.stream.getAudioTracks().forEach(t => stream.addTrack(t)); }
+      const mimeCandidates = ['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm;codecs=vp9','video/webm'];
+      const mime = mimeCandidates.find(m => MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(m)) || 'video/webm';
+      const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 4_000_000, audioBitsPerSecond: 128_000 });
       const chunks = [];
       rec.ondataavailable = (e) => { if(e.data && e.data.size) chunks.push(e.data); };
       const stopped = new Promise((resolve) => { rec.onstop = () => resolve(); });
-      rec.start(250);
-      // Pre-load images
       const imgs = await Promise.all(scenes.map(s => new Promise((res) => {
         if(!s.image){ res(null); return; }
         const im = new Image(); im.crossOrigin = 'anonymous';
         im.onload = () => res(im); im.onerror = () => res(null);
         im.src = s.image;
       })));
-      const total = scenes.reduce((a,s) => a + Math.max(1, Number(s.duration)||3), 0);
+      let tabWasHidden = false;
+      onVis = () => { if(document.visibilityState !== 'visible'){ tabWasHidden = true; console.warn('[zs] tab hidden mid-render â playback may stutter'); } };
+      document.addEventListener('visibilitychange', onVis);
+      rec.start();
+      const recStart = audioCtx ? audioCtx.currentTime + 0.05 : 0;
+      if(audioCtx && audioDest){
+        let cum = 0;
+        for(let i=0; i<scenes.length; i++){
+          const ab = audioBuffers[i];
+          if(ab){
+            const src = audioCtx.createBufferSource();
+            src.buffer = ab; src.connect(audioDest);
+            try { src.start(recStart + cum); } catch(_){}
+          }
+          cum += durations[i];
+        }
+      }
       let elapsed = 0;
       for(let i=0; i<scenes.length; i++){
-        const s = scenes[i]; const dur = Math.max(1, Number(s.duration)||3);
+        const s = scenes[i]; const dur = durations[i];
         ctx.fillStyle = '#0a0a0a'; ctx.fillRect(0,0,W,H);
         if(imgs[i]){
           const r = Math.max(W/imgs[i].width, H/imgs[i].height);
@@ -1825,20 +1865,29 @@ function StepExport({ project, setProject }){
         ctx.font = '24px system-ui'; ctx.fillStyle = 'rgba(255,255,255,0.85)';
         const vo = (s.voLine||'').slice(0,90);
         ctx.fillText(vo, 60, H-50);
+        const target = (audioCtx ? audioCtx.currentTime : performance.now()/1000) + dur;
         await new Promise(r => setTimeout(r, dur * 1000));
+        if(audioCtx){
+          while(audioCtx.currentTime < target){ await new Promise(r => setTimeout(r, 50)); }
+        }
         elapsed += dur;
         setRenderProgress(Math.min(99, Math.round((elapsed/total)*100)));
       }
       rec.stop();
       await stopped;
-      const blob = new Blob(chunks, { type: 'video/webm' });
+      const blob = new Blob(chunks, { type: mime });
       const url = URL.createObjectURL(blob);
       setRenderUrl(url);
       setRenderProgress(100);
+      if(tabWasHidden){ console.warn('[zs] tab was hidden at least once during render'); }
     } catch(e){
       console.warn('[zs] render error', e);
       setRenderErr('Render failed: ' + (e && e.message || e));
-    } finally { setRenderBusy(false); }
+    } finally {
+      setRenderBusy(false);
+      if(onVis){ try { document.removeEventListener('visibilitychange', onVis); } catch(_){} }
+      if(audioCtx){ try { audioCtx.close(); } catch(_){} }
+    }
   };
     return (
     <div className="flex flex-col gap-4">
