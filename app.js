@@ -1,4 +1,4 @@
-/* Zaidsaid — app.js v2.0 — x68: wire Re-title/Re-hook/Re-score chips to Claude (fallback to canned pool when no provider)
+/* Zaidsaid — app.js v2.0 — x69: Copy-post button — Claude generates platform-tuned post + hashtags per clip
  * Security: localStorage namespaced as zaidsaid.v2.*, error boundary, no innerHTML, no eval, no fetch.
  * Archived v1 seed data preserved under ARCHIVE_* for later reuse.
  */
@@ -3162,7 +3162,7 @@ function RepurposeTranscriptStrip({ project }){
   );
 }
 
-function RepurposeClipCard({ clip, onField, onRegen, regenBusy, onRemove, onExplain, explainBusy, onHookAlts, hookAltsBusy, onThumbConcept, thumbConceptBusy, onHookScore, hookScoreBusy, onObjAnswer, objAnswerBusy, onCommentSeeds, commentSeedsBusy }){
+function RepurposeClipCard({ clip, onField, onRegen, regenBusy, onRemove, onExplain, explainBusy, onHookAlts, hookAltsBusy, onThumbConcept, thumbConceptBusy, onHookScore, hookScoreBusy, onObjAnswer, objAnswerBusy, onCommentSeeds, commentSeedsBusy, onCopyPost, copyPostBusy }){
   const band = viralityBand(clip.virality);
   const preset = REPURPOSE_PRESETS.find(p => p.id === clip.preset) || REPURPOSE_PRESETS[0];
   const previewW = preset.id === "vertical" ? 72 : (preset.id === "square" ? 90 : 128);
@@ -3325,6 +3325,7 @@ function RepurposeClipCard({ clip, onField, onRegen, regenBusy, onRemove, onExpl
           >
             {I.arrow({size:12})} .txt
           </button>
+          <button className="chip" onClick={onCopyPost} disabled={!!copyPostBusy}>{copyPostBusy ? I.refresh({size:12,className:"opacity-40"}) : I.copy({size:12})} {copyPostBusy ? "Copying…" : "Copy post"}</button>
           <span className="chip">Status: {clip.status || "draft"}</span>
           <button className="chip" onClick={onRemove} aria-label="Remove clip">{I.x({size:12})}</button>
         </div>
@@ -3572,6 +3573,58 @@ async function regenFieldViaClaude(proxyUrl, clip, project, field){
   return block.input.value;
 }
 /* ---- end Re-title / Re-hook / Re-score Claude helper ---- */
+
+/* ---- Copy-post Claude helper (x69) ---- */
+async function generateSocialPostViaClaude(proxyUrl, clip, project){
+  const url = (proxyUrl||"").replace(/\/$/, "") + "/v1/messages";
+  const tool = {
+    name: "emit_post",
+    description: "Return a ready-to-paste social post caption and hashtag array for the given clip.",
+    input_schema: {
+      type: "object",
+      properties: {
+        caption:  { type: "string", description: "1-2 sentence caption under 220 chars, platform-tuned, no emoji spam." },
+        hashtags: { type: "array", items: { type: "string" }, description: "5-8 lowercase alphanumeric hashtags, no # prefix, no spaces." },
+      },
+      required: ["caption", "hashtags"],
+    },
+  };
+  const preset = clip.preset || "vertical";
+  const platformLabel = preset === "square" ? "X (Twitter) / LinkedIn" : preset === "landscape" ? "YouTube / LinkedIn" : "TikTok / Reels / Shorts";
+  const systemMsgs = {
+    vertical:  "You're writing a ready-to-paste TikTok / Reels / Shorts post. Refine the caption for this platform's tone, 1-2 sentences under 220 chars, no emoji spam. Then return 5-8 relevant hashtags (lowercase, alphanumeric, no '#' prefix). Return ONE caption variant via the emit_post tool.",
+    square:    "You're writing a ready-to-paste X (Twitter) / LinkedIn post. Refine the caption for this platform's tone, 1-2 sentences under 220 chars, no emoji spam. Then return 5-8 relevant hashtags (lowercase, alphanumeric, no '#' prefix). Return ONE caption variant via the emit_post tool.",
+    landscape: "You're writing a ready-to-paste YouTube / LinkedIn post. Refine the caption for this platform's tone, 1-2 sentences under 220 chars, no emoji spam. Then return 5-8 relevant hashtags (lowercase, alphanumeric, no '#' prefix). Return ONE caption variant via the emit_post tool.",
+  };
+  const brand = (project && project.brand) || "";
+  const userMsg = JSON.stringify({
+    title:    clip.title || "",
+    hook:     clip.hook || "",
+    caption:  clip.caption || "",
+    brand:    brand || undefined,
+    preset,
+    platform: platformLabel,
+  });
+  const r = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 512,
+      system: systemMsgs[preset] || systemMsgs.vertical,
+      tools: [tool],
+      tool_choice: { type: "tool", name: "emit_post" },
+      messages: [{ role: "user", content: userMsg }],
+    }),
+  });
+  if(!r.ok) throw new Error("HTTP " + r.status);
+  const j = await r.json();
+  const block = Array.isArray(j.content) ? j.content.find(b => b && b.type === "tool_use" && b.name === "emit_post") : null;
+  if(!block || !block.input || !block.input.caption) throw new Error("no tool_use");
+  const hashtags = Array.isArray(block.input.hashtags) ? block.input.hashtags : [];
+  return { caption: block.input.caption, hashtags };
+}
+/* ---- end Copy-post Claude helper ---- */
 
 /* ---- Hook Breakdown Panel helpers (x58) ---- */
 async function generateHookBreakdownViaClaude(proxyUrl, clip, project){
@@ -4038,6 +4091,8 @@ function RepurposeTab(){
   const [explainBusyId, setExplainBusyId] = useState(null);
   const [explainAllBusy, setExplainAllBusy] = useState(false);
   const [regenBusyId, setRegenBusyId] = useState(null);
+  const [copyPostBusyId, setCopyPostBusyId] = useState(null);
+  const toast = useToast();
   const [hookAltsBusyId, setHookAltsBusyId] = useState(null);
 
   const clipField = (clipId, field, value) => {
@@ -4057,6 +4112,25 @@ function RepurposeTab(){
     if(v === null || v === undefined){ setRegenBusyId(null); return; }
     clipField(clipId, field, v);
     setRegenBusyId(null);
+  };
+  const copyPost = async (clipId) => {
+    if(copyPostBusyId) return;
+    const clip = project.clips.find(c => c.id === clipId);
+    if(!clip) return;
+    setCopyPostBusyId(clipId);
+    let post = null;
+    try {
+      const path = getAnthropicPath();
+      if(path){
+        try { post = await generateSocialPostViaClaude(path, clip, project); } catch(e){ post = null; }
+      }
+      if(!post) post = { caption: (clip.hook || "") + "\n\n" + (clip.caption || ""), hashtags: ["shorts","fyp","viralvideo"] };
+      const text = post.caption + "\n\n" + post.hashtags.map(h => "#" + h.replace(/^#/, "")).join(" ");
+      try { await navigator.clipboard.writeText(text); } catch(e){}
+      toast("Copied post \u2014 paste into your social", "success");
+    } finally {
+      setCopyPostBusyId(null);
+    }
   };
   const explainClip = async (clipId) => {
     if(explainBusyId || explainAllBusy) return;
@@ -4342,6 +4416,8 @@ const removeClip = (clipId) => {
                     objAnswerBusy={objAnswerBusyId === c.id}
                     onCommentSeeds={()=>generateCommentSeeds(c.id)}
                     commentSeedsBusy={commentSeedsBusyId === c.id}
+                    onCopyPost={()=>copyPost(c.id)}
+                    copyPostBusy={copyPostBusyId === c.id}
                   />
                 </div>
               );
