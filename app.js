@@ -1,4 +1,4 @@
-/* Zaidsaid — app.js v2.0 — x77: Per-clip preview video on card right — uploaded <video> with start/end clamp + play/pause, or YouTube embed with start/end params, gradient fallback otherwise
+/* Zaidsaid — app.js v2.0 — x78: Manual-paste transcript as primary flow — collapsible textarea, explicit feedback when YT auto-fetch falls back to description, pasted transcript takes priority over auto-fetch
  * Security: localStorage namespaced as zaidsaid.v2.*, error boundary, no innerHTML, no eval, no fetch.
  * Archived v1 seed data preserved under ARCHIVE_* for later reuse.
  */
@@ -2909,6 +2909,24 @@ function RepurposeIntake({ project, setProject, onProcessSource, processBusy, pr
           {!processBusy && processStatus && (
             <div className="mt-1 text-[11px] text-[color:var(--muted)]">{processStatus}</div>
           )}
+          <details className="mt-2 rounded-xl border border-[color:var(--line)] bg-white/[0.02]">
+            <summary className="cursor-pointer px-3 py-2 text-[12px] text-[color:var(--muted)] hover:text-white select-none">
+              Paste full transcript (recommended for YouTube — sharper clips)
+            </summary>
+            <div className="px-3 pb-3">
+              <textarea
+                value={project.transcriptText || ""}
+                onChange={(e)=>setProject({ ...project, transcriptText: e.target.value })}
+                placeholder="Paste the full transcript here. We'll use it to cut clips precisely with real timestamps when possible."
+                className="w-full bg-transparent border border-[color:var(--line)] rounded-lg px-3 py-2 text-[12px] focus:outline-none focus:border-white/20 min-h-[120px]"
+              />
+              <div className="mt-1 text-[11px] text-[color:var(--muted)]">
+                {(project.transcriptText || "").trim().length > 0
+                  ? ((project.transcriptText || "").trim().length + " chars — Enter / Generate will use this")
+                  : "Tip: open the video on YouTube → ••• → Show transcript → copy/paste here."}
+              </div>
+            </div>
+          </details>
           <div className="mt-2 flex items-center gap-2 flex-wrap">
             <label className="block flex-1 min-w-[200px]">
               <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Project name</span>
@@ -4395,8 +4413,9 @@ function RepurposeTab(){
     setProcessBusy(true); setProcessStatus("Starting…");
     try {
       let text = (project.transcriptText || "").trim();
+      const hasPastedTranscript = text.length > 0;
       const isYT = /youtu\.?be/i.test(sourceUrl);
-      if(isYT){
+      if(isYT && !hasPastedTranscript){
         setProcessStatus("Fetching transcript…");
         try {
           const path = getAnthropicPath();
@@ -4413,7 +4432,14 @@ function RepurposeTab(){
                 name: p.name || data.title || "",
                 durationSec: (!p.durationSec || p.durationSec === 5520) && data.lengthSeconds ? data.lengthSeconds : p.durationSec
               }));
+              if(data.source === "description" || data.fallback){
+                toast("YouTube transcript unavailable — using description. For sharper clips, paste the full transcript below and re-run.", "warn");
+              }
+            } else {
+              toast("No transcript available from YouTube. Paste the transcript below and press Enter for best clips.", "warn");
             }
+          } else {
+            toast("Transcript fetch failed. Paste the transcript below and press Enter.", "warn");
           }
         } catch(e){ /* continue with whatever text we have */ }
       }
