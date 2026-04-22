@@ -1,4 +1,4 @@
-/* Zaidsaid — app.js v2.0 — x94: clear stale clips at Generate start + narrow reseed effect so demo doesn't overwrite a user's upload on refresh. | x93: Repurpose — real per-clip mp4 cuts + thumbnail frames. cutClipFromSource (ffmpeg.wasm, -ss after -i, -c copy with libx264 fallback <5 min) + grabFrameThumb (off-DOM canvas) + generateClipAssets (sequential, IDB-backed). processSource fires generateClipAssets after setProject for upload flows. RepurposeTab hydrates clipBlobUrls Map from IDB on mount; RepurposeClipPreview shows pre-cut <video controls> when blob ready. removeClip deletes IDB entries + revokes URLs. | x92: Repurpose — big videos extract audio client-side before transcribing. Lazy-loads ffmpeg.wasm (@ffmpeg/ffmpeg@0.12.10 + @ffmpeg/core@0.12.6 from unpkg, ~30 MB one-time); any uploaded video >50 MB is reduced to mono 16 kHz 32 kbps MP3 (~14 MB/hr) before POSTing to /elevenlabs/v1/speech-to-text. Fixes 700+ MB uploads hanging on the Cloudflare Worker 500 MiB body limit. CSP widened for wasm-unsafe-eval, blob: workers, and unpkg connect. | x91: Repurpose — uploaded files now survive page refreshes. New IndexedDB blob store (zaidsaid/uploads, key repurpose:current) persists the File on upload; RepurposeTab useEffect on mount HEAD-checks the existing blob URL and rehydrates from IDB when it's dead, or clears the dangling reference + toasts "please re-upload" when IDB is empty too. processSource now reads the blob from IDB first, falling back to the blob URL. Remove button deletes the IDB entry. | x90: Repurpose — uploads now actually clip. processSource gate no longer bails on empty source when an uploaded video is present; on new file upload we clear stale transcript/chapters/clips/name; uploaded videos without a transcript auto-transcribe via ElevenLabs Scribe (/elevenlabs/v1/speech-to-text with model_id=scribe_v1, word-level timestamps grouped into ~6s segments) and feed the existing two-stage viral analyzer. New fuchsia "ElevenLabs Scribe (auto-transcribed)" source chip. | x89: Repurpose — YouTube downloader tool (paste URL → fetch progressive formats via worker InnerTube → quality dropdown → File System Access folder picker with streamed writable, falls back to <a download> when unsupported). Worker: /youtube-formats, /youtube-media. | x88: batch export respects selection + preset-aware video render — "Export selected as video" renders .webm per selected clip at its preset aspect ratio (9:16/1:1/16:9); fallback selection→approved→all; metadata (.txt) export kept as secondary. Fix stray /span> text below batch-export button. | x87: clip length range widened — 5s floor (viral reactions, one-liners) to 1800s / 30min ceiling (full topic arcs); removed rigid length-mix prompt in favor of idea-first sizing | x86: clip preview no-autoplay — remove YouTube loop=1&playlist (fixes whole-video loop), remove autoPlay on uploaded video, preview now shows clip-only paused state until user clicks play | x85: Phase B.1 — persist chapters on description-fallback, surface worker errors, transcript-source chip, length-variance prompt, analyzeLocal intro-skip, **remove dead RepurposeAnalyzer + RepurposeRealAnalyze god-mode components** | x84: Phase B — YT chapter-boundary detection (parseYouTubeChapters in worker; analyzeLocal uses chapter spans as candidate windows when ≥3 chapters; Claude receives chapter list for boundary alignment) + Web Audio energy analyzer (analyzeUploadedVideoAudio: 8x scrub AudioContext RMS scan on uploaded files; peaks boost analyzeLocal virality by +5*peakDensity) | x83: Smart Clipping v2 — two-stage viral detection + topic-boundary awareness + variable 30-180s clip length + unified Generate flow + target default 10 (range 3-20) | x82: preview fix — CSP frame-src, youtube-nocookie embed, thumbnail fallback | x80: Smart Clipping — viral moment detection. Worker /youtube-transcript returns segments[{t,d,text}]. analyzeViaClaude uses timestamped transcript with 4-dimension scoring (hook_power/emotional_impact/quotability/surprise_drama). analyzeLocal scores ~45-75s windows, picks top N with spatial diversity across full duration. YT iframe autoplay+loop within clip range; uploaded video autoplay muted with loop-on-end.
+/* Zaidsaid — app.js v2.0 — x95: Phase B UI cleanup: collapsed intake to URL/File, folded YT downloader into URL expandable, per-clip actions 9→3, removed fake waveform, toolbar pruned. | x94: clear stale clips at Generate start + narrow reseed effect so demo doesn't overwrite a user's upload on refresh. | x93: Repurpose — real per-clip mp4 cuts + thumbnail frames. cutClipFromSource (ffmpeg.wasm, -ss after -i, -c copy with libx264 fallback <5 min) + grabFrameThumb (off-DOM canvas) + generateClipAssets (sequential, IDB-backed). processSource fires generateClipAssets after setProject for upload flows. RepurposeTab hydrates clipBlobUrls Map from IDB on mount; RepurposeClipPreview shows pre-cut <video controls> when blob ready. removeClip deletes IDB entries + revokes URLs. | x92: Repurpose — big videos extract audio client-side before transcribing. Lazy-loads ffmpeg.wasm (@ffmpeg/ffmpeg@0.12.10 + @ffmpeg/core@0.12.6 from unpkg, ~30 MB one-time); any uploaded video >50 MB is reduced to mono 16 kHz 32 kbps MP3 (~14 MB/hr) before POSTing to /elevenlabs/v1/speech-to-text. Fixes 700+ MB uploads hanging on the Cloudflare Worker 500 MiB body limit. CSP widened for wasm-unsafe-eval, blob: workers, and unpkg connect. | x91: Repurpose — uploaded files now survive page refreshes. New IndexedDB blob store (zaidsaid/uploads, key repurpose:current) persists the File on upload; RepurposeTab useEffect on mount HEAD-checks the existing blob URL and rehydrates from IDB when it's dead, or clears the dangling reference + toasts "please re-upload" when IDB is empty too. processSource now reads the blob from IDB first, falling back to the blob URL. Remove button deletes the IDB entry. | x90: Repurpose — uploads now actually clip. processSource gate no longer bails on empty source when an uploaded video is present; on new file upload we clear stale transcript/chapters/clips/name; uploaded videos without a transcript auto-transcribe via ElevenLabs Scribe (/elevenlabs/v1/speech-to-text with model_id=scribe_v1, word-level timestamps grouped into ~6s segments) and feed the existing two-stage viral analyzer. New fuchsia "ElevenLabs Scribe (auto-transcribed)" source chip. | x89: Repurpose — YouTube downloader tool (paste URL → fetch progressive formats via worker InnerTube → quality dropdown → File System Access folder picker with streamed writable, falls back to <a download> when unsupported). Worker: /youtube-formats, /youtube-media. | x88: batch export respects selection + preset-aware video render — "Export selected as video" renders .webm per selected clip at its preset aspect ratio (9:16/1:1/16:9); fallback selection→approved→all; metadata (.txt) export kept as secondary. Fix stray /span> text below batch-export button. | x87: clip length range widened — 5s floor (viral reactions, one-liners) to 1800s / 30min ceiling (full topic arcs); removed rigid length-mix prompt in favor of idea-first sizing | x86: clip preview no-autoplay — remove YouTube loop=1&playlist (fixes whole-video loop), remove autoPlay on uploaded video, preview now shows clip-only paused state until user clicks play | x85: Phase B.1 — persist chapters on description-fallback, surface worker errors, transcript-source chip, length-variance prompt, analyzeLocal intro-skip, **remove dead RepurposeAnalyzer + RepurposeRealAnalyze god-mode components** | x84: Phase B — YT chapter-boundary detection (parseYouTubeChapters in worker; analyzeLocal uses chapter spans as candidate windows when ≥3 chapters; Claude receives chapter list for boundary alignment) + Web Audio energy analyzer (analyzeUploadedVideoAudio: 8x scrub AudioContext RMS scan on uploaded files; peaks boost analyzeLocal virality by +5*peakDensity) | x83: Smart Clipping v2 — two-stage viral detection + topic-boundary awareness + variable 30-180s clip length + unified Generate flow + target default 10 (range 3-20) | x82: preview fix — CSP frame-src, youtube-nocookie embed, thumbnail fallback | x80: Smart Clipping — viral moment detection. Worker /youtube-transcript returns segments[{t,d,text}]. analyzeViaClaude uses timestamped transcript with 4-dimension scoring (hook_power/emotional_impact/quotability/surprise_drama). analyzeLocal scores ~45-75s windows, picks top N with spatial diversity across full duration. YT iframe autoplay+loop within clip range; uploaded video autoplay muted with loop-on-end.
  * Security: localStorage namespaced as zaidsaid.v2.*, error boundary, no innerHTML, no eval, no fetch.
  * Archived v1 seed data preserved under ARCHIVE_* for later reuse.
  */
@@ -3480,8 +3480,6 @@ function StudioTab({ setTab, studioStep, setStudioStep }){
 const REPURPOSE_INTAKE_KINDS = [
   { k:"url",     label:"URL",         hint:"YouTube, Vimeo, podcast feed, webinar link." },
   { k:"upload",  label:"File",        hint:"MP4 / MOV / MP3 / WAV." },
-  { k:"rss",     label:"RSS",         hint:"Podcast or video feed." },
-  { k:"transcript", label:"Transcript", hint:"Paste a time-coded transcript." },
 ];
 const REPURPOSE_PRESETS = [
   { id:"vertical",  ratio:"9:16", label:"Vertical",  platforms:["TikTok","Reels","Shorts"] },
@@ -3612,7 +3610,7 @@ function buildClipExportText(clip, project){
   return out.join("\n");
 }
 
-function RepurposeIntake({ project, setProject, onProcessSource, processBusy, processStatus, onFileUpload }){
+function RepurposeIntake({ project, setProject, onProcessSource, processBusy, processStatus, onFileUpload, toast }){
   return (
     <div className="card p-5">
       <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -3684,6 +3682,14 @@ function RepurposeIntake({ project, setProject, onProcessSource, processBusy, pr
                   ? ((project.transcriptText || "").trim().length + " chars — Enter / Generate will use this")
                   : "Tip: open the video on YouTube → ••• → Show transcript → copy/paste here."}
               </div>
+            </div>
+          </details>
+          <details className="mt-2 rounded-xl border border-[color:var(--line)] bg-white/[0.02]">
+            <summary className="cursor-pointer px-3 py-2 text-[12px] text-[color:var(--muted)] hover:text-white select-none">
+              <strong>Need a local copy of this video? Download it →</strong>
+            </summary>
+            <div className="px-3 pb-3">
+              <YouTubeDownloaderCard toast={toast} />
             </div>
           </details>
           <div className="mt-2 flex items-center gap-2 flex-wrap">
@@ -3772,16 +3778,7 @@ function RepurposeIntake({ project, setProject, onProcessSource, processBusy, pr
 
 function RepurposeTranscriptStrip({ project }){
   const dur = Math.max(1, project.durationSec || 1);
-  // Seed a deterministic waveform from the project id so it feels real but doesn't jitter
-  const bars = useMemo(() => {
-    const arr = [];
-    const seedStr = (project.name||"zaidsaid") + "|" + dur;
-    let h = 2166136261;
-    for(let i = 0; i < seedStr.length; i++){ h ^= seedStr.charCodeAt(i); h = Math.imul(h, 16777619); }
-    const rand = () => { h ^= h << 13; h ^= h >>> 17; h ^= h << 5; return ((h>>>0) % 1000) / 1000; };
-    for(let i = 0; i < 120; i++){ arr.push(0.15 + rand() * 0.85); }
-    return arr;
-  }, [project.name, dur]);
+  const peaks = Array.isArray(project.audioMap && project.audioMap.peaks) ? project.audioMap.peaks : null;
   return (
     <div className="card p-5">
       <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -3795,10 +3792,14 @@ function RepurposeTranscriptStrip({ project }){
         </div>
       </div>
       <div className="mt-4 relative rounded-xl border border-[color:var(--line)] p-3" style={{background:"rgba(255,255,255,0.02)"}}>
-        <div className="flex items-end gap-[2px] h-20">
-          {bars.map((v, i) => (
-            <div key={i} className="flex-1 rounded-[2px]" style={{ height: (v*100)+"%", background:"linear-gradient(180deg, rgba(99,102,241,0.7), rgba(34,211,238,0.4))" }} aria-hidden />
-          ))}
+        <div className="relative h-6 rounded-lg overflow-hidden" style={{background:"linear-gradient(90deg, rgba(99,102,241,0.25), rgba(34,211,238,0.15))"}}>
+          {peaks && peaks.map((v, i) => {
+            const leftPct = (i / Math.max(1, peaks.length - 1)) * 100;
+            const h = Math.max(20, Math.min(100, Math.round((v || 0) * 100)));
+            return (
+              <div key={i} aria-hidden className="absolute bottom-0 w-px" style={{left: leftPct + "%", height: h + "%", background:"rgba(99,102,241,0.5)"}} />
+            );
+          })}
         </div>
         <div className="relative h-8 mt-1">
           {project.clips.map(c => {
@@ -4090,32 +4091,42 @@ function RepurposeClipCard({ clip, onField, onRegen, regenBusy, onRemove, onExpl
       </div>
       <div className="mt-3 flex items-center justify-between gap-2 flex-wrap">
         <div className="flex items-center gap-1">
-          <button className="chip" onClick={()=>onRegen("title")} disabled={!!regenBusy}>{regenBusy==="title" ? I.refresh({size:12,className:"opacity-40"}) : I.refresh({size:12})} {regenBusy==="title" ? "Working…" : "Re-title"}</button>
-          <button className="chip" onClick={()=>onRegen("hook")} disabled={!!regenBusy}>{regenBusy==="hook" ? I.refresh({size:12,className:"opacity-40"}) : I.refresh({size:12})} {regenBusy==="hook" ? "Working…" : "Re-hook"}</button>
-          <button className="chip" onClick={()=>onRegen("virality")} disabled={!!regenBusy}>{regenBusy==="virality" ? I.flame({size:12,className:"opacity-40"}) : I.flame({size:12})} {regenBusy==="virality" ? "Scoring…" : "Re-score"}</button>
+          {/* Regenerate — collapsed menu */}
+          <details className="relative inline-block">
+            <summary className="chip cursor-pointer select-none list-none">
+              {regenBusy ? I.refresh({size:12,className:"opacity-40"}) : I.refresh({size:12})}
+              {" "}{regenBusy ? "Working…" : "Regenerate"}
+            </summary>
+            <div className="absolute left-0 top-full mt-1 z-20 rounded-xl border border-[color:var(--line)] bg-[color:var(--panel)] shadow-lg p-2 flex flex-col gap-1 min-w-[150px]">
+              <button className="chip w-full text-left" onClick={()=>onRegen("title")} disabled={!!regenBusy}>{I.refresh({size:12})} Re-title</button>
+              <button className="chip w-full text-left" onClick={()=>onRegen("hook")} disabled={!!regenBusy}>{I.refresh({size:12})} Re-hook</button>
+              <button className="chip w-full text-left" onClick={()=>onRegen("virality")} disabled={!!regenBusy}>{I.flame({size:12})} Re-score</button>
+              <div className="border-t border-[color:var(--line)] my-1" />
+              <button className="chip w-full text-left" onClick={onHookAlts} disabled={!!hookAltsBusy}>{clip.hookAlts ? I.refresh({size:12}) : I.edit({size:12})} {hookAltsBusy ? "Generating…" : (clip.hookAlts ? "New alts" : "Hook A/B")}</button>
+              <button className="chip w-full text-left" onClick={onThumbConcept} disabled={!!thumbConceptBusy}>{clip.thumbConcept ? I.refresh({size:12}) : I.spark({size:12})} {thumbConceptBusy ? "Generating…" : (clip.thumbConcept ? "New thumb" : "Thumbnail")}</button>
+              <button className="chip w-full text-left" onClick={onHookScore} disabled={!!hookScoreBusy}>{clip.hookScore ? I.refresh({size:12}) : I.clock({size:12})} {hookScoreBusy ? "Scoring…" : (clip.hookScore ? "Re-score" : "Hook speed")}</button>
+              <button className="chip w-full text-left" onClick={onObjAnswer} disabled={!!objAnswerBusy}>{clip.objections ? I.refresh({size:12}) : I.shield({size:12})} {objAnswerBusy ? "Predicting…" : (clip.objections ? "Refresh" : "Objections")}</button>
+              <button className="chip w-full text-left" onClick={onCommentSeeds} disabled={!!commentSeedsBusy}>{clip.commentSeeds ? I.refresh({size:12}) : I.comment({size:12})} {commentSeedsBusy ? "Seeding…" : (clip.commentSeeds ? "Re-seed" : "Seed comments")}</button>
+            </div>
+          </details>
           <button className="chip" onClick={onExplain} disabled={!!explainBusy} aria-label="Explain why this clip scores high">
             {explainBusy ? "Analyzing…" : (clip.hookBreakdown ? I.refresh({size:12}) : I.spark({size:12}))}
             {" "}{explainBusy ? "" : (clip.hookBreakdown ? "Re-explain" : "Why this works")}
           </button>
-          <button className="chip" onClick={onHookAlts} disabled={!!hookAltsBusy} aria-label="Generate 3 alternative hooks">
-            {hookAltsBusy ? "Generating…" : (clip.hookAlts ? I.refresh({size:12}) : I.edit({size:12}))}
-            {" "}{hookAltsBusy ? "" : (clip.hookAlts ? "New alts" : "Hook A/B")}
-          </button>
-          <button className="chip" onClick={onThumbConcept} disabled={!!thumbConceptBusy} aria-label="Generate thumbnail concept">
-            {thumbConceptBusy ? "Generating…" : (clip.thumbConcept ? I.refresh({size:12}) : I.spark({size:12}))}
-            {" "}{thumbConceptBusy ? "" : (clip.thumbConcept ? "New thumb" : "Thumbnail")}
-          </button>
-          <button className="chip" onClick={onHookScore} disabled={!!hookScoreBusy} aria-label="Score hook speed">
-            {hookScoreBusy ? "Scoring..." : (clip.hookScore ? I.refresh({size:12}) : I.clock({size:12}))}
-            {" "}{hookScoreBusy ? "" : (clip.hookScore ? "Re-score" : "Hook speed")}
-          </button>
-          <button className="chip" onClick={onObjAnswer} disabled={!!objAnswerBusy} aria-label="Predict viewer objections and preemptive lines">
-            {objAnswerBusy ? "Predicting…" : (clip.objections ? I.refresh({size:12}) : I.shield({size:12}))}
-            {" "}{objAnswerBusy ? "" : (clip.objections ? "Refresh" : "Objections")}
-          </button>
-          <button className="chip" onClick={onCommentSeeds} disabled={!!commentSeedsBusy} aria-label="Generate seed comments to post on your own clip">
-            {commentSeedsBusy ? "Seeding…" : (clip.commentSeeds ? I.refresh({size:12}) : I.comment({size:12}))}
-            {" "}{commentSeedsBusy ? "" : (clip.commentSeeds ? "Re-seed" : "Seed comments")}
+          {/* Download — blob if available, else render */}
+          <button className="chip" aria-label="Download clip" onClick={()=>{
+            if(clipBlobUrl){
+              const a = document.createElement("a");
+              a.href = clipBlobUrl;
+              a.download = slugifyClipTitle(clip.title) + ".mp4";
+              document.body.appendChild(a); a.click();
+              setTimeout(()=>{ try{ a.remove(); } catch(e){} }, 250);
+            } else if(onRenderVideo){
+              onRenderVideo();
+            }
+          }} disabled={!!renderVideoBusy}>
+            {renderVideoBusy ? I.refresh({size:12,className:"opacity-40"}) : I.arrow({size:12})}
+            {renderVideoBusy ? ("Rendering " + Math.round((renderVideoProgress||0)*100) + "%") : "Download"}
           </button>
         </div>
         <div className="flex items-center gap-1">
@@ -4137,12 +4148,6 @@ function RepurposeClipCard({ clip, onField, onRegen, regenBusy, onRemove, onExpl
             {I.arrow({size:12})} .txt
           </button>
           <button className="chip" onClick={onCopyPost} disabled={!!copyPostBusy}>{copyPostBusy ? I.refresh({size:12,className:"opacity-40"}) : I.copy({size:12})} {copyPostBusy ? "Copying…" : "Copy post"}</button>
-          {uploadEnabled && (
-            <button className="chip" onClick={onRenderVideo} disabled={!!renderVideoBusy} title="Render this clip to .webm">
-              {renderVideoBusy ? I.refresh({size:12,className:"opacity-40"}) : I.arrow({size:12})}
-              {renderVideoBusy ? ("Rendering " + Math.round((renderVideoProgress||0)*100) + "%") : "Render video"}
-            </button>
-          )}
           {onShare && (
             <button className="chip" onClick={()=>setShareOpen(v=>!v)} aria-expanded={shareOpen} aria-label="Share clip">
               {I.share ? I.share({size:12}) : I.arrow({size:12})} Share
@@ -5995,20 +6000,10 @@ const removeClip = (clipId) => {
           <h1 className="text-3xl font-bold">Repurpose</h1>
           <p className="text-[color:var(--muted)] mt-1">Long-form in. Ranked, branded, platform-native shorts out.</p>
         </div>
-        <div className="flex items-center gap-2">
-                    <button className="btn" onClick={generateAllCaptions} disabled={captionsBusy || !project.clips || project.clips.length===0}>{captionsBusy ? "Generating…" : "Generate captions"}</button>
-          <button className="btn btn-outline" onClick={downloadCaptionsJson} disabled={!project.clips || project.clips.length===0 || !project.clips.some(c=>c.platformCaptions)}>Download captions.json</button>
-                    {captionsSource && (
-            <span className={"chip " + (captionsSource === "claude" ? "text-emerald-200 !border-emerald-400/30 bg-emerald-500/10" : "text-sky-200 !border-sky-400/30 bg-sky-500/10")}>{captionsSource === "claude" ? "Claude" : "Local"}</span>
-          )}
-          <button className="btn btn-outline" onClick={explainAllClips} disabled={explainAllBusy || !!explainBusyId || !project.clips || project.clips.length===0}>{explainAllBusy ? "Analyzing…" : (I.spark({size:14}))} {explainAllBusy ? "" : "Explain all"}</button>
-<button className="btn btn-ghost" onClick={resetSeed}>{I.refresh({size:14})} Reset to example</button>
-        </div>
       </div>
 
       <div className="grid gap-4">
-        <YouTubeDownloaderCard toast={toast} />
-        <RepurposeIntake project={project} setProject={setProject} onProcessSource={processSource} processBusy={processBusy} processStatus={processStatus} onFileUpload={handleFileUpload} />
+        <RepurposeIntake project={project} setProject={setProject} onProcessSource={processSource} processBusy={processBusy} processStatus={processStatus} onFileUpload={handleFileUpload} toast={toast} />
         <RepurposeTranscriptStrip project={project} />
 
         <div className="card p-5">
@@ -6018,6 +6013,11 @@ const removeClip = (clipId) => {
               <div className="text-lg font-semibold">{project.clips.length} clips · top pick {Math.max(...project.clips.map(c=>c.virality))} virality</div>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
+              <button className="chip" onClick={generateAllCaptions} disabled={captionsBusy || !project.clips || project.clips.length===0}>{captionsBusy ? "Generating…" : "Generate captions"}</button>
+              {captionsSource && (
+                <span className={"chip " + (captionsSource === "claude" ? "text-emerald-200 !border-emerald-400/30 bg-emerald-500/10" : "text-sky-200 !border-sky-400/30 bg-sky-500/10")}>{captionsSource === "claude" ? "Claude" : "Local"}</span>
+              )}
+              <button className="chip" onClick={explainAllClips} disabled={explainAllBusy || !!explainBusyId || !project.clips || project.clips.length===0}>{explainAllBusy ? "Analyzing…" : (I.spark({size:12}))} {explainAllBusy ? "" : "Explain all"}</button>
               <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Sort by</span>
               {REPURPOSE_SORTS.map(s => (
                 <button key={s.k}
