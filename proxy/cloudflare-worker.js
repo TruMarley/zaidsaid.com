@@ -536,6 +536,173 @@ export default {
       }
     }
 
+    // Phase D — trending context routes
+    if (url.pathname === "/trends/google") {
+      const q = url.searchParams.get("q") || "";
+      const keywords = q.split(",").map(k => k.trim().toLowerCase()).filter(Boolean);
+      if (!keywords.length) {
+        return new Response(JSON.stringify({ results: [], error: "q required" }), {
+          status: 400, headers: { ...cors, "Content-Type": "application/json" }
+        });
+      }
+      try {
+        const trendUrl = "https://trends.google.com/trends/api/dailytrends?hl=en-US&geo=US&ns=15";
+        const res = await fetch(trendUrl, {
+          headers: { "User-Agent": "Mozilla/5.0 (compatible; zaidsaid-trends/1.0)" }
+        });
+        if (!res.ok) throw new Error("Google Trends HTTP " + res.status);
+        const raw = await res.text();
+        // Strip the )]}', prefix Google adds
+        const jsonStart = raw.indexOf("{");
+        if (jsonStart < 0) throw new Error("Unexpected Google Trends response");
+        const data = JSON.parse(raw.slice(jsonStart));
+        const trendingStories = ((data.default || {}).trendingSearchesDays || [])
+          .flatMap(day => day.trendingSearches || []);
+        const results = [];
+        for (const story of trendingStories) {
+          const title = String((story.title || {}).query || "").toLowerCase();
+          const matched = keywords.find(kw => title.includes(kw));
+          if (matched) {
+            results.push({
+              keyword: matched,
+              source: "google",
+              volume: Number((story.formattedTraffic || "").replace(/[^0-9]/g, "")) || 0,
+              title: String((story.title || {}).query || ""),
+              url: String((story.title || {}).exploreLink || "")
+            });
+          }
+          // Also check related queries
+          for (const rel of (story.relatedQueries || [])) {
+            const relQuery = String((rel.query || {}).query || "").toLowerCase();
+            const relMatched = keywords.find(kw => relQuery.includes(kw));
+            if (relMatched && !results.find(r => r.keyword === relMatched && r.source === "google")) {
+              results.push({
+                keyword: relMatched,
+                source: "google",
+                volume: 0,
+                title: String((rel.query || {}).query || ""),
+                url: String((rel.query || {}).exploreLink || "")
+              });
+            }
+          }
+        }
+        return new Response(JSON.stringify({ results }), {
+          headers: { ...cors, "Content-Type": "application/json" }
+        });
+      } catch (err) {
+        return new Response(JSON.stringify({ results: [], error: String((err && err.message) || err) }), {
+          headers: { ...cors, "Content-Type": "application/json" }
+        });
+      }
+    }
+
+    if (url.pathname === "/trends/reddit") {
+      const q = url.searchParams.get("q") || "";
+      if (!q) {
+        return new Response(JSON.stringify({ results: [], error: "q required" }), {
+          status: 400, headers: { ...cors, "Content-Type": "application/json" }
+        });
+      }
+      try {
+        const searchUrl = "https://www.reddit.com/search.json?q=" + encodeURIComponent(q) + "&sort=hot&limit=10&t=week";
+        const res = await fetch(searchUrl, {
+          headers: { "User-Agent": "zaidsaid-trends/1.0" }
+        });
+        if (!res.ok) throw new Error("Reddit HTTP " + res.status);
+        const data = await res.json();
+        const posts = ((data.data || {}).children || []).map((child, idx) => {
+          const p = child.data || {};
+          return {
+            keyword: q,
+            source: "reddit",
+            rank: idx + 1,
+            title: String(p.title || ""),
+            url: "https://reddit.com" + String(p.permalink || "")
+          };
+        });
+        return new Response(JSON.stringify({ results: posts }), {
+          headers: { ...cors, "Content-Type": "application/json" }
+        });
+      } catch (err) {
+        return new Response(JSON.stringify({ results: [], error: String((err && err.message) || err) }), {
+          headers: { ...cors, "Content-Type": "application/json" }
+        });
+      }
+    }
+
+    if (url.pathname === "/trends/hn") {
+      const q = url.searchParams.get("q") || "";
+      if (!q) {
+        return new Response(JSON.stringify({ results: [], error: "q required" }), {
+          status: 400, headers: { ...cors, "Content-Type": "application/json" }
+        });
+      }
+      try {
+        const weekAgo = Math.floor(Date.now() / 1000) - 7 * 24 * 3600;
+        const hnUrl = "https://hn.algolia.com/api/v1/search?query=" + encodeURIComponent(q) + "&tags=story&numericFilters=created_at_i%3E" + weekAgo;
+        const res = await fetch(hnUrl, {
+          headers: { "User-Agent": "zaidsaid-trends/1.0" }
+        });
+        if (!res.ok) throw new Error("HN Algolia HTTP " + res.status);
+        const data = await res.json();
+        const results = (data.hits || []).slice(0, 10).map((hit, idx) => ({
+          keyword: q,
+          source: "hn",
+          rank: idx + 1,
+          title: String(hit.title || ""),
+          url: hit.url || ("https://news.ycombinator.com/item?id=" + hit.objectID)
+        }));
+        return new Response(JSON.stringify({ results }), {
+          headers: { ...cors, "Content-Type": "application/json" }
+        });
+      } catch (err) {
+        return new Response(JSON.stringify({ results: [], error: String((err && err.message) || err) }), {
+          headers: { ...cors, "Content-Type": "application/json" }
+        });
+      }
+    }
+
+    if (url.pathname === "/trends/x") {
+      if (!env.APIFY_TOKEN) {
+        return new Response(JSON.stringify({ disabled: true, reason: "APIFY_TOKEN not configured", results: [] }), {
+          headers: { ...cors, "Content-Type": "application/json" }
+        });
+      }
+      const q = url.searchParams.get("q") || "";
+      try {
+        const apifyUrl = "https://api.apify.com/v2/acts/karamelo~twitter-trends-scraper/run-sync-get-dataset-items?token=" + env.APIFY_TOKEN;
+        const res = await fetch(apifyUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ country: "US", maxTrends: 30 })
+        });
+        if (!res.ok) throw new Error("Apify HTTP " + res.status);
+        const items = await res.json();
+        const keyword = (q || "").toLowerCase();
+        const results = [];
+        for (const item of (Array.isArray(items) ? items : [])) {
+          const trend = String(item.trend || item.name || item.hashtag || "");
+          const trendLower = trend.toLowerCase();
+          if (!keyword || trendLower.includes(keyword) || keyword.includes(trendLower.replace(/^#/, ""))) {
+            results.push({
+              keyword: q || trend,
+              source: "x",
+              rank: Number(item.rank) || results.length + 1,
+              title: trend,
+              url: "https://x.com/search?q=" + encodeURIComponent(trend)
+            });
+          }
+        }
+        return new Response(JSON.stringify({ results }), {
+          headers: { ...cors, "Content-Type": "application/json" }
+        });
+      } catch (err) {
+        return new Response(JSON.stringify({ results: [], error: String((err && err.message) || err) }), {
+          headers: { ...cors, "Content-Type": "application/json" }
+        });
+      }
+    }
+
     const parts = url.pathname.replace(/^\//, "").split("/");
     const vendor = parts.shift();
     const v = VENDORS[vendor];
