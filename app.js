@@ -1,4 +1,4 @@
-/* Zaidsaid — app.js v2.0 — x84: Phase B — YT chapter-boundary detection (parseYouTubeChapters in worker; analyzeLocal uses chapter spans as candidate windows when ≥3 chapters; Claude receives chapter list for boundary alignment) + Web Audio energy analyzer (analyzeUploadedVideoAudio: 8x scrub AudioContext RMS scan on uploaded files; peaks boost analyzeLocal virality by +5*peakDensity) | x83: Smart Clipping v2 — two-stage viral detection + topic-boundary awareness + variable 30-180s clip length + unified Generate flow + target default 10 (range 3-20) | x82: preview fix — CSP frame-src, youtube-nocookie embed, thumbnail fallback | x80: Smart Clipping — viral moment detection. Worker /youtube-transcript returns segments[{t,d,text}]. analyzeViaClaude uses timestamped transcript with 4-dimension scoring (hook_power/emotional_impact/quotability/surprise_drama). analyzeLocal scores ~45-75s windows, picks top N with spatial diversity across full duration. YT iframe autoplay+loop within clip range; uploaded video autoplay muted with loop-on-end.
+/* Zaidsaid — app.js v2.0 — x85: Phase B.1 — persist chapters on description-fallback, surface worker errors, transcript-source chip, length-variance prompt, analyzeLocal intro-skip | x84: Phase B — YT chapter-boundary detection (parseYouTubeChapters in worker; analyzeLocal uses chapter spans as candidate windows when ≥3 chapters; Claude receives chapter list for boundary alignment) + Web Audio energy analyzer (analyzeUploadedVideoAudio: 8x scrub AudioContext RMS scan on uploaded files; peaks boost analyzeLocal virality by +5*peakDensity) | x83: Smart Clipping v2 — two-stage viral detection + topic-boundary awareness + variable 30-180s clip length + unified Generate flow + target default 10 (range 3-20) | x82: preview fix — CSP frame-src, youtube-nocookie embed, thumbnail fallback | x80: Smart Clipping — viral moment detection. Worker /youtube-transcript returns segments[{t,d,text}]. analyzeViaClaude uses timestamped transcript with 4-dimension scoring (hook_power/emotional_impact/quotability/surprise_drama). analyzeLocal scores ~45-75s windows, picks top N with spatial diversity across full duration. YT iframe autoplay+loop within clip range; uploaded video autoplay muted with loop-on-end.
  * Security: localStorage namespaced as zaidsaid.v2.*, error boundary, no innerHTML, no eval, no fetch.
  * Archived v1 seed data preserved under ARCHIVE_* for later reuse.
  */
@@ -1133,11 +1133,12 @@ const analyzeViaClaude = async (proxyUrl, sourceText, targetCount, segments, met
     : '';
   const sys = 'You are a viral short-form video strategist extracting TikTok/Reels/Shorts clips from long-form content. For each clip you pick:\n\n' +
     '(a) TOPIC BOUNDARY — Identify the EXACT transcript segment where the viral moment\'s conversation/thought begins (usually a hook line, topic shift, or question). Identify where the thought concludes (answer, punchline, resolution, or topic change). Set clip.start and clip.end to those exact timestamps so the clip captures the COMPLETE thought — never cut mid-sentence, never start mid-answer.\n\n' +
-    '(b) LENGTH — clips are typically 30-90s, but extend to 180s if the topic genuinely requires it (e.g. a 2-minute story with a payoff). Do NOT truncate just to hit a length target. A complete 2-minute clip beats a chopped 45s one.\n\n' +
+    '(b) LENGTH — vary deliberately. Typical mix for 10 clips: roughly 3 at 30-60s, 4 at 60-90s, 2 at 90-120s, at most 1 at 120-180s. Pick length to match the idea; do NOT pad. At most 2 clips may exceed 120s across the full set.\n\n' +
     '(c) SELF-CONTAINED — the viewer sees this cold. It must make sense without any prior context.\n\n' +
     '(d) HOOK + PAYOFF — opens with a hook (question, bold claim, conflict, or surprising fact) and closes on a payoff (answer, punchline, or resolution).\n\n' +
     '(e) DISTRIBUTE — clips must span DIFFERENT moments across the full video. Do not cluster near the start.\n\n' +
-    'Score each clip 0-10 on: hook_power, emotional_impact, quotability, surprise_drama. Return ONLY via emit_clips tool.' +
+    'Score each clip 0-10 on: hook_power, emotional_impact, quotability, surprise_drama. Return ONLY via emit_clips tool.\n\n' +
+    '(g) SKIP INTROS — Never set clip.start before the first substantive content. Skip boilerplate intros, sponsor reads, \'welcome back\', table of contents, and podcast cold-opens. If chapter[0] title contains intro/welcome/sponsor/start, begin picks from chapter[1].' +
     chapSysAddendum;
   let userMsg;
   if(hasSegments){
@@ -1263,10 +1264,12 @@ const analyzeLocal = (sourceText, targetCount, segments, chapters, audioMap) => 
     const windowMin = 30, windowMax = 180;
     const candidates = [];
 
+    const INTRO_CHAP_KW = /\b(intro|introduction|welcome|sponsor|cold[- ]open)\b/i;
     if(chaps.length >= 3){
-      // x84: use chapter spans as candidate windows
+      // x84: use chapter spans as candidate windows; x85: skip intro chapters
       let i = 0;
       while(i < chaps.length){
+        if(INTRO_CHAP_KW.test(chaps[i].title || '')){ i++; continue; }
         const chapStart = chaps[i].t;
         const chapEnd = i + 1 < chaps.length ? chaps[i+1].t : totalDur;
         const span = chapEnd - chapStart;
@@ -1328,7 +1331,9 @@ const analyzeLocal = (sourceText, targetCount, segments, chapters, audioMap) => 
         if(winText.length < 60) continue;
         const score = scoreSegmentViral(winText, winDur);
         const actualEnd = Math.min(totalDur, actualStart + Math.max(windowMin, Math.min(windowMax, winDur)));
-        const boostedVirality = applyAudioBoost(score.virality, actualStart, actualEnd);
+        const rawVirality = applyAudioBoost(score.virality, actualStart, actualEnd);
+        // x85: down-weight early windows (likely intro/sponsor) when no chapters available
+        const boostedVirality = (!chaps.length && actualStart < 45) ? Math.round(rawVirality * 0.7) : rawVirality;
         candidates.push({ start: actualStart, end: actualEnd, text: winText, ...score, virality: boostedVirality });
       }
     }
@@ -3378,6 +3383,15 @@ function RepurposeIntake({ project, setProject, onProcessSource, processBusy, pr
           {!processBusy && processStatus && (
             <div className="mt-1 text-[11px] text-[color:var(--muted)]">{processStatus}</div>
           )}
+          {project.transcriptSource === 'real' && (
+            <span className="mt-1 inline-block rounded-full px-2 py-0.5 text-[10px] border border-emerald-400/30 bg-emerald-500/10 text-emerald-300">Source: YouTube transcript</span>
+          )}
+          {project.transcriptSource === 'pasted' && (
+            <span className="mt-1 inline-block rounded-full px-2 py-0.5 text-[10px] border border-sky-400/30 bg-sky-500/10 text-sky-300">Source: pasted transcript</span>
+          )}
+          {project.transcriptSource === 'description' && (
+            <span className="mt-1 inline-block rounded-full px-2 py-0.5 text-[10px] border border-amber-400/30 bg-amber-500/10 text-amber-300">Source: description fallback — paste transcript below for sharper clips</span>
+          )}
           <details className="mt-2 rounded-xl border border-[color:var(--line)] bg-white/[0.02]">
             <summary className="cursor-pointer px-3 py-2 text-[12px] text-[color:var(--muted)] hover:text-white select-none">
               Paste full transcript (recommended for YouTube — sharper clips)
@@ -4962,6 +4976,7 @@ function RepurposeTab(){
       let text = (project.transcriptText || "").trim();
       let segments = Array.isArray(project.transcriptSegments) ? project.transcriptSegments : [];
       let meta = { title: project.name || "", author: project.author || "" };
+      let fetchedChaps = [];
       const hasPastedTranscript = text.length > 0 && segments.length === 0;
       const isYT = /youtu\.?be/i.test(sourceUrl);
       if(isYT){
@@ -4975,6 +4990,7 @@ function RepurposeTab(){
             const tx = (data.transcript || data.description || "").trim();
             const segs = Array.isArray(data.segments) ? data.segments : [];
             const chaps = Array.isArray(data.chapters) ? data.chapters : [];
+            fetchedChaps = chaps;
             // If user already pasted text but we got real segments from YT, use the segments for timing.
             if(segs.length > 0){
               segments = segs;
@@ -4985,23 +5001,34 @@ function RepurposeTab(){
                 transcriptText: hasPastedTranscript ? p.transcriptText : tx,
                 transcriptSegments: segs,
                 chapters: chaps,
+                transcriptSource: 'real',
                 name: p.name || data.title || "",
                 author: p.author || data.author || "",
                 durationSec: (!p.durationSec || p.durationSec === 5520) && data.lengthSeconds ? data.lengthSeconds : (p.durationSec || data.lengthSeconds || p.durationSec)
               }));
             } else if(tx && !hasPastedTranscript){
               text = tx;
+              const errs = Array.isArray(data.errors) ? data.errors : [];
+              if(errs.length > 0){
+                toast('Transcript fetch issues: ' + errs.length + ' — using description fallback. Paste transcript below for sharper clips.', 'warn');
+              } else if(data.source === "description" || data.fallback){
+                toast("YouTube transcript unavailable — using description. For sharper clips, paste the full transcript below and re-run.", "warn");
+              }
               setProject(p => ({
                 ...p,
                 transcriptText: tx,
+                chapters: chaps,
+                transcriptSource: 'description',
                 name: p.name || data.title || "",
                 author: p.author || data.author || "",
                 durationSec: (!p.durationSec || p.durationSec === 5520) && data.lengthSeconds ? data.lengthSeconds : p.durationSec
               }));
-              if(data.source === "description" || data.fallback){
-                toast("YouTube transcript unavailable — using description. For sharper clips, paste the full transcript below and re-run.", "warn");
-              }
             } else if(!tx && !hasPastedTranscript){
+              if(chaps.length > 0){
+                setProject(p => ({ ...p, chapters: chaps, transcriptSource: 'none' }));
+              } else {
+                setProject(p => ({ ...p, transcriptSource: 'none' }));
+              }
               toast("No transcript available from YouTube. Paste the transcript below and press Enter for best clips.", "warn");
             }
           } else {
@@ -5018,8 +5045,11 @@ function RepurposeTab(){
           setProject(p => ({ ...p, transcriptSegments: pasted }));
         }
       }
+      if(hasPastedTranscript && segments.length === 0){
+        setProject(p => ({ ...p, transcriptSource: 'pasted' }));
+      }
       const target = Number(project.targetCount) || 10;
-      const chapters = Array.isArray(project.chapters) ? project.chapters : [];
+      const chapters = fetchedChaps.length > 0 ? fetchedChaps : (Array.isArray(project.chapters) ? project.chapters : []);
       const audioMap = project.audioMap || null;
       setProcessStatus(segments.length > 0 ? ("Analyzing " + segments.length + " segments…") : "Generating clips…");
       const path = getAnthropicPath();
