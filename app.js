@@ -1,4 +1,4 @@
-/* Zaidsaid — app.js v2.0 — x86: clip preview no-autoplay — remove YouTube loop=1&playlist (fixes whole-video loop), remove autoPlay on uploaded video, preview now shows clip-only paused state until user clicks play | x85: Phase B.1 — persist chapters on description-fallback, surface worker errors, transcript-source chip, length-variance prompt, analyzeLocal intro-skip, **remove dead RepurposeAnalyzer + RepurposeRealAnalyze god-mode components** | x84: Phase B — YT chapter-boundary detection (parseYouTubeChapters in worker; analyzeLocal uses chapter spans as candidate windows when ≥3 chapters; Claude receives chapter list for boundary alignment) + Web Audio energy analyzer (analyzeUploadedVideoAudio: 8x scrub AudioContext RMS scan on uploaded files; peaks boost analyzeLocal virality by +5*peakDensity) | x83: Smart Clipping v2 — two-stage viral detection + topic-boundary awareness + variable 30-180s clip length + unified Generate flow + target default 10 (range 3-20) | x82: preview fix — CSP frame-src, youtube-nocookie embed, thumbnail fallback | x80: Smart Clipping — viral moment detection. Worker /youtube-transcript returns segments[{t,d,text}]. analyzeViaClaude uses timestamped transcript with 4-dimension scoring (hook_power/emotional_impact/quotability/surprise_drama). analyzeLocal scores ~45-75s windows, picks top N with spatial diversity across full duration. YT iframe autoplay+loop within clip range; uploaded video autoplay muted with loop-on-end.
+/* Zaidsaid — app.js v2.0 — x87: clip length range widened — 5s floor (viral reactions, one-liners) to 1800s / 30min ceiling (full topic arcs); removed rigid length-mix prompt in favor of idea-first sizing | x86: clip preview no-autoplay — remove YouTube loop=1&playlist (fixes whole-video loop), remove autoPlay on uploaded video, preview now shows clip-only paused state until user clicks play | x85: Phase B.1 — persist chapters on description-fallback, surface worker errors, transcript-source chip, length-variance prompt, analyzeLocal intro-skip, **remove dead RepurposeAnalyzer + RepurposeRealAnalyze god-mode components** | x84: Phase B — YT chapter-boundary detection (parseYouTubeChapters in worker; analyzeLocal uses chapter spans as candidate windows when ≥3 chapters; Claude receives chapter list for boundary alignment) + Web Audio energy analyzer (analyzeUploadedVideoAudio: 8x scrub AudioContext RMS scan on uploaded files; peaks boost analyzeLocal virality by +5*peakDensity) | x83: Smart Clipping v2 — two-stage viral detection + topic-boundary awareness + variable 30-180s clip length + unified Generate flow + target default 10 (range 3-20) | x82: preview fix — CSP frame-src, youtube-nocookie embed, thumbnail fallback | x80: Smart Clipping — viral moment detection. Worker /youtube-transcript returns segments[{t,d,text}]. analyzeViaClaude uses timestamped transcript with 4-dimension scoring (hook_power/emotional_impact/quotability/surprise_drama). analyzeLocal scores ~45-75s windows, picks top N with spatial diversity across full duration. YT iframe autoplay+loop within clip range; uploaded video autoplay muted with loop-on-end.
  * Security: localStorage namespaced as zaidsaid.v2.*, error boundary, no innerHTML, no eval, no fetch.
  * Archived v1 seed data preserved under ARCHIVE_* for later reuse.
  */
@@ -1133,7 +1133,7 @@ const analyzeViaClaude = async (proxyUrl, sourceText, targetCount, segments, met
     : '';
   const sys = 'You are a viral short-form video strategist extracting TikTok/Reels/Shorts clips from long-form content. For each clip you pick:\n\n' +
     '(a) TOPIC BOUNDARY — Identify the EXACT transcript segment where the viral moment\'s conversation/thought begins (usually a hook line, topic shift, or question). Identify where the thought concludes (answer, punchline, resolution, or topic change). Set clip.start and clip.end to those exact timestamps so the clip captures the COMPLETE thought — never cut mid-sentence, never start mid-answer.\n\n' +
-    '(b) LENGTH — vary deliberately. Typical mix for 10 clips: roughly 3 at 30-60s, 4 at 60-90s, 2 at 90-120s, at most 1 at 120-180s. Pick length to match the idea; do NOT pad. At most 2 clips may exceed 120s across the full set.\n\n' +
+    '(b) LENGTH — pick to match the idea, no target length. Valid range: 5 seconds (a single viral reaction, one-liner, or beat drop) to 1800 seconds / 30 minutes (a full topic arc, extended story, or complete discussion). Guidance: viral hooks are often 30-90s, full thoughts 2-5min, deep segments 10-30min. Never pad. A 7-second perfect moment beats a 60-second padded one. A 20-minute complete arc beats a chopped 3-minute excerpt. Trust the content — if the idea finishes at 12 seconds, end the clip at 12 seconds.\n\n' +
     '(c) SELF-CONTAINED — the viewer sees this cold. It must make sense without any prior context.\n\n' +
     '(d) HOOK + PAYOFF — opens with a hook (question, bold claim, conflict, or surprising fact) and closes on a payoff (answer, punchline, or resolution).\n\n' +
     '(e) DISTRIBUTE — clips must span DIFFERENT moments across the full video. Do not cluster near the start.\n\n' +
@@ -1177,8 +1177,8 @@ const analyzeViaClaude = async (proxyUrl, sourceText, targetCount, segments, met
     const start = Math.max(0, Number(c.start)||0);
     let end = Number(c.end)||start+60;
     if(end <= start) end = start + 60;
-    if(end - start > 180) end = start + 180;
-    if(end - start < 30) end = start + 30;
+    if(end - start > 1800) end = start + 1800;
+    if(end - start < 5) end = start + 5;
     let virality = baseVirality;
     if(audioPeaks.length){
       const winDur = Math.max(1, end - start);
@@ -1261,7 +1261,7 @@ const analyzeLocal = (sourceText, targetCount, segments, chapters, audioMap) => 
   if(hasSegments){
     const { lines, totalDur } = buildTimedTranscript(segments, 60000);
     void lines;
-    const windowMin = 30, windowMax = 180;
+    const windowMin = 5, windowMax = 1800;
     const candidates = [];
 
     const INTRO_CHAP_KW = /\b(intro|introduction|welcome|sponsor|cold[- ]open)\b/i;
