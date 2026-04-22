@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <meta name="referrer" content="strict-origin-when-cross-origin" />
   <meta http-equiv="X-Content-Type-Options" content="nosniff" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://unpkg.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https:; media-src 'self' blob:; connect-src 'self' https://zaidsaid-proxy.zaidsaid.workers.dev https://noembed.com https://www.youtube.com https://api.x.ai https://api.elevenlabs.io https://image.pollinations.ai; frame-src 'self' https://www.youtube.com https://www.youtube-nocookie.com https://youtube.com; base-uri 'self'; form-action 'self'; frame-ancestors 'none';" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' blob: https://cdn.tailwindcss.com https://unpkg.com; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https:; media-src 'self' blob:; connect-src 'self' blob: https://zaidsaid-proxy.zaidsaid.workers.dev https://noembed.com https://www.youtube.com https://api.x.ai https://api.elevenlabs.io https://image.pollinations.ai https://unpkg.com; frame-src 'self' https://www.youtube.com https://www.youtube-nocookie.com https://youtube.com; base-uri 'self'; form-action 'self'; frame-ancestors 'none';" />
   <title>Zaidsaid — The AI video platform for teams</title>
   <meta name="description" content="Zaidsaid turns text, links, audio, articles, podcasts, and images into polished, branded, social-ready videos — research, script, storyboard, assets, motion, voice, avatar, edit, and publish in one workflow." />
   <meta property="og:title" content="Zaidsaid — The AI video platform for teams" />
@@ -48,6 +48,7 @@
 <body class="glow">
   <noscript><div style="padding:24px;color:#e9ecff">Zaidsaid requires JavaScript.</div></noscript>
   <div id="root" aria-live="polite"></div>
-  <script type="text/babel" data-presets="env,react" src="./app.js?v=mvp_god_x91"></script>
+  <script type="module" src="./ffmpeg-loader.js?v=mvp_god_x92"></script>
+  <script type="text/babel" data-presets="env,react" src="./app.js?v=mvp_god_x92"></script>
 </body>
 </html>
