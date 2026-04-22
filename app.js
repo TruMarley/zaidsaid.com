@@ -1,4 +1,4 @@
-/* Zaidsaid — app.js v2.0 — x87: clip length range widened — 5s floor (viral reactions, one-liners) to 1800s / 30min ceiling (full topic arcs); removed rigid length-mix prompt in favor of idea-first sizing | x86: clip preview no-autoplay — remove YouTube loop=1&playlist (fixes whole-video loop), remove autoPlay on uploaded video, preview now shows clip-only paused state until user clicks play | x85: Phase B.1 — persist chapters on description-fallback, surface worker errors, transcript-source chip, length-variance prompt, analyzeLocal intro-skip, **remove dead RepurposeAnalyzer + RepurposeRealAnalyze god-mode components** | x84: Phase B — YT chapter-boundary detection (parseYouTubeChapters in worker; analyzeLocal uses chapter spans as candidate windows when ≥3 chapters; Claude receives chapter list for boundary alignment) + Web Audio energy analyzer (analyzeUploadedVideoAudio: 8x scrub AudioContext RMS scan on uploaded files; peaks boost analyzeLocal virality by +5*peakDensity) | x83: Smart Clipping v2 — two-stage viral detection + topic-boundary awareness + variable 30-180s clip length + unified Generate flow + target default 10 (range 3-20) | x82: preview fix — CSP frame-src, youtube-nocookie embed, thumbnail fallback | x80: Smart Clipping — viral moment detection. Worker /youtube-transcript returns segments[{t,d,text}]. analyzeViaClaude uses timestamped transcript with 4-dimension scoring (hook_power/emotional_impact/quotability/surprise_drama). analyzeLocal scores ~45-75s windows, picks top N with spatial diversity across full duration. YT iframe autoplay+loop within clip range; uploaded video autoplay muted with loop-on-end.
+/* Zaidsaid — app.js v2.0 — x88: batch export respects selection + preset-aware video render — "Export selected as video" renders .webm per selected clip at its preset aspect ratio (9:16/1:1/16:9); fallback selection→approved→all; metadata (.txt) export kept as secondary. Fix stray /span> text below batch-export button. | x87: clip length range widened — 5s floor (viral reactions, one-liners) to 1800s / 30min ceiling (full topic arcs); removed rigid length-mix prompt in favor of idea-first sizing | x86: clip preview no-autoplay — remove YouTube loop=1&playlist (fixes whole-video loop), remove autoPlay on uploaded video, preview now shows clip-only paused state until user clicks play | x85: Phase B.1 — persist chapters on description-fallback, surface worker errors, transcript-source chip, length-variance prompt, analyzeLocal intro-skip, **remove dead RepurposeAnalyzer + RepurposeRealAnalyze god-mode components** | x84: Phase B — YT chapter-boundary detection (parseYouTubeChapters in worker; analyzeLocal uses chapter spans as candidate windows when ≥3 chapters; Claude receives chapter list for boundary alignment) + Web Audio energy analyzer (analyzeUploadedVideoAudio: 8x scrub AudioContext RMS scan on uploaded files; peaks boost analyzeLocal virality by +5*peakDensity) | x83: Smart Clipping v2 — two-stage viral detection + topic-boundary awareness + variable 30-180s clip length + unified Generate flow + target default 10 (range 3-20) | x82: preview fix — CSP frame-src, youtube-nocookie embed, thumbnail fallback | x80: Smart Clipping — viral moment detection. Worker /youtube-transcript returns segments[{t,d,text}]. analyzeViaClaude uses timestamped transcript with 4-dimension scoring (hook_power/emotional_impact/quotability/surprise_drama). analyzeLocal scores ~45-75s windows, picks top N with spatial diversity across full duration. YT iframe autoplay+loop within clip range; uploaded video autoplay muted with loop-on-end.
  * Security: localStorage namespaced as zaidsaid.v2.*, error boundary, no innerHTML, no eval, no fetch.
  * Archived v1 seed data preserved under ARCHIVE_* for later reuse.
  */
@@ -4750,6 +4750,8 @@ function RepurposeTab(){
   const [copyPostBusyId, setCopyPostBusyId] = useState(null);
   const [clipRenderBusyId, setClipRenderBusyId] = useState(null);
   const [clipRenderProgress, setClipRenderProgress] = useState(0);
+  const [batchRenderBusy, setBatchRenderBusy] = useState(null);
+  const [batchRenderProgress, setBatchRenderProgress] = useState(0);
   const toast = useToast();
   const [hookAltsBusyId, setHookAltsBusyId] = useState(null);
   const [processBusy, setProcessBusy] = useState(false);
@@ -5171,10 +5173,47 @@ const removeClip = (clipId) => {
     if(!selected.length) return;
     setProject({ ...project, clips: project.clips.map(c => selected.includes(c.id) ? { ...c, status: "approved" } : c) });
   };
-  const downloadAllClips = () => {
-    if(!project.clips.length) return;
+  const exportClipsAsVideo = async () => {
+    if(!project.uploadedVideoUrl){ toast("Upload a video first", "error"); return; }
+    let targets = project.clips.filter(c => selected.includes(c.id) || (!selected.length && c.status === "approved"));
+    if(targets.length === 0){
+      targets = project.clips;
+      if(targets.length === 0) return;
+      toast("Exporting all clips (none selected)", "info");
+    }
+    const nameSlug = (project.name || "zaidsaid-clips").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "zaidsaid-clips";
+    setBatchRenderBusy({ current: 1, total: targets.length, clipId: targets[0].id });
+    setBatchRenderProgress(0);
     try {
-      const body = project.clips.map(c => buildClipExportText(c, project)).join("\n\n\n");
+      for(let i = 0; i < targets.length; i++){
+        const clip = targets[i];
+        setBatchRenderBusy({ current: i + 1, total: targets.length, clipId: clip.id });
+        setBatchRenderProgress(0);
+        const blob = await renderClipVideoFromUpload(project.uploadedVideoUrl, clip, (p) => setBatchRenderProgress(p), { overlay: { hook: clip.hook } });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        const safeTitle = (clip.title || "clip").replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "clip";
+        a.download = nameSlug + "-clip" + (i + 1) + "-" + safeTitle + ".webm";
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => { try { document.body.removeChild(a); URL.revokeObjectURL(url); } catch(e){} }, 500);
+        if(i < targets.length - 1) await new Promise(r => setTimeout(r, 400));
+      }
+      toast("Exported " + targets.length + " clips (.webm)", "success");
+    } catch(e){
+      toast("Batch export failed: " + (e && e.message || "unknown"), "error");
+    } finally {
+      setBatchRenderBusy(null);
+      setBatchRenderProgress(0);
+    }
+  };
+  const exportClipsAsText = () => {
+    if(!project.clips.length) return;
+    let targets = project.clips.filter(c => selected.includes(c.id) || (!selected.length && c.status === "approved"));
+    if(targets.length === 0) targets = project.clips;
+    try {
+      const body = targets.map(c => buildClipExportText(c, project)).join("\n\n\n");
       const blob = new Blob([body], { type: "text/plain;charset=utf-8" });
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
@@ -5183,7 +5222,7 @@ const removeClip = (clipId) => {
       document.body.appendChild(a);
       a.click();
       setTimeout(() => { try{ URL.revokeObjectURL(a.href); a.remove(); } catch(e){} }, 250);
-    } catch(e) { console.warn("batch export failed:", e); }
+    } catch(e) { console.warn("batch text export failed:", e); }
   };
   const resetSeed = () => setProject(REPURPOSE_SEED);
 
@@ -5321,10 +5360,21 @@ const removeClip = (clipId) => {
             <div><div className="text-[color:var(--muted)] text-[11px]">Approved</div><div>{approvedCount}</div></div>
             <div><div className="text-[color:var(--muted)] text-[11px]">Output duration</div><div>{totalExportSec}s</div></div>
           </div>
-          <div className="mt-4 flex items-center gap-2">
-            <button className="btn btn-primary" onClick={downloadAllClips} disabled={!project.clips.length}>{I.arrow({size:14})} Download all clips (.txt)</button>
-            <span className="text-[11px] text-[color:var(--muted)]">Exports a single text file with every clip's title, hook, caption, platform captions, and any generated insights.</span>
-/span>
+          <div className="mt-4 flex items-center gap-2 flex-wrap">
+            <button className="btn btn-primary" onClick={exportClipsAsVideo}
+              disabled={!project.clips.length || !!batchRenderBusy || !project.uploadedVideoUrl}
+              title={!project.uploadedVideoUrl ? "Upload a source video to export rendered clips" : ""}>
+              {batchRenderBusy
+                ? `Rendering ${batchRenderBusy.current} of ${batchRenderBusy.total}… ${Math.round((batchRenderProgress||0)*100)}%`
+                : <>{I.arrow({size:14})} Export selected as video</>}
+            </button>
+            <button className="btn btn-outline" onClick={exportClipsAsText}
+              disabled={!project.clips.length || !!batchRenderBusy}>
+              Export metadata (.txt)
+            </button>
+            <span className="text-[11px] text-[color:var(--muted)]">
+              Video export renders each selected clip to .webm at its chosen aspect (9:16 / 1:1 / 16:9). Metadata export is text only.
+            </span>
           </div>
         </div>
       </div>
