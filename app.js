@@ -1,4 +1,4 @@
-/* Zaidsaid — app.js v2.0 — x80: Smart Clipping — viral moment detection. Worker /youtube-transcript returns segments[{t,d,text}]. analyzeViaClaude uses timestamped transcript with 4-dimension scoring (hook_power/emotional_impact/quotability/surprise_drama). analyzeLocal scores ~45-75s windows, picks top N with spatial diversity across full duration. YT iframe autoplay+loop within clip range; uploaded video autoplay muted with loop-on-end.
+/* Zaidsaid — app.js v2.0 — x82: preview fix — CSP frame-src, youtube-nocookie embed, thumbnail fallback | x80: Smart Clipping — viral moment detection. Worker /youtube-transcript returns segments[{t,d,text}]. analyzeViaClaude uses timestamped transcript with 4-dimension scoring (hook_power/emotional_impact/quotability/surprise_drama). analyzeLocal scores ~45-75s windows, picks top N with spatial diversity across full duration. YT iframe autoplay+loop within clip range; uploaded video autoplay muted with loop-on-end.
  * Security: localStorage namespaced as zaidsaid.v2.*, error boundary, no innerHTML, no eval, no fetch.
  * Archived v1 seed data preserved under ARCHIVE_* for later reuse.
  */
@@ -3599,17 +3599,21 @@ function RepurposeClipPreview({ clip, uploadedVideoUrl, sourceUrl, width, height
   if(ytId){
     const start = Math.max(0, Math.floor(clip.start || 0));
     const end = Math.max(start + 1, Math.ceil(clip.end || 0));
+    // youtube-nocookie: better embed compat for videos that block standard domain
     // autoplay=1 + mute=1 for browser auto-play permission; loop=1 + playlist=VIDEOID to enable looping on a single video
-    const src = "https://www.youtube.com/embed/" + ytId + "?start=" + start + "&end=" + end + "&autoplay=1&mute=1&loop=1&playlist=" + ytId + "&controls=1&rel=0&modestbranding=1&playsinline=1&iv_load_policy=3";
+    const src = "https://www.youtube-nocookie.com/embed/" + ytId + "?start=" + start + "&end=" + end + "&autoplay=1&mute=1&loop=1&playlist=" + ytId + "&controls=1&rel=0&modestbranding=1&playsinline=1&iv_load_policy=3";
+    const thumbSrc = "https://img.youtube.com/vi/" + ytId + "/hqdefault.jpg";
     return (
-      <div className="rounded-xl overflow-hidden bg-black shrink-0" style={{ width, height }}>
+      <div className="relative rounded-xl overflow-hidden bg-black shrink-0" style={{ width, height }}>
+        <img src={thumbSrc} alt="" className="absolute inset-0 w-full h-full object-cover" aria-hidden style={{ zIndex: 0 }} />
         <iframe
           src={src}
           title={"Clip preview " + (clip.title || "")}
-          className="w-full h-full"
+          className="absolute inset-0 w-full h-full"
           frameBorder="0"
           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
           allowFullScreen
+          style={{ zIndex: 1 }}
         />
       </div>
     );
