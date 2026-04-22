@@ -4946,7 +4946,9 @@ function RepurposeTab(){
     if(audioScanKeyRef.current === scanKey) return;
     audioScanKeyRef.current = scanKey;
     analyzeUploadedVideoAudio(url, (result) => {
-      setProject(p => ({ ...p, audioMap: result }));
+      if(!result) return;
+      const compact = { duration: result.duration, peaks: result.peaks };
+      setProject(p => ({ ...p, audioMap: compact }));
       toast('Audio analysis complete — ' + result.peaks.length + ' peaks detected', 'success');
     }).catch(() => {});
   };
