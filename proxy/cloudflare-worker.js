@@ -320,6 +320,54 @@ async function fetchYouTubeTranscriptViaScrape(videoId) {
   throw lastErr || new Error("YouTube scrape failed for all UAs");
 }
 
+async function fetchYouTubePlayerInfo(videoId) {
+  const attempts = [];
+  for (const c of INNERTUBE_CLIENTS) {
+    try {
+      const data = await fetchPlayerViaClient(videoId, c);
+      const playability = (data.playabilityStatus || {});
+      if (playability.status && playability.status !== "OK") {
+        attempts.push(c.name + ": playability=" + playability.status);
+        continue;
+      }
+      const streamingData = data.streamingData || {};
+      // Only progressive (combined audio+video) formats with a plain url — adaptive
+      // streams would need client-side muxing, and WEB cipher-protected urls need a
+      // signature decipher we don't ship. Android/iOS players return plain urls.
+      const formats = (streamingData.formats || []).filter(f => f && f.url);
+      if (!formats.length) {
+        attempts.push(c.name + ": no progressive formats with direct url");
+        continue;
+      }
+      const vd = data.videoDetails || {};
+      return {
+        client: c.name,
+        videoId,
+        title: vd.title || "",
+        author: vd.author || "",
+        lengthSeconds: Number(vd.lengthSeconds) || 0,
+        formats: formats.map(f => ({
+          itag: f.itag,
+          mimeType: f.mimeType || "",
+          qualityLabel: f.qualityLabel || f.quality || "",
+          width: f.width || 0,
+          height: f.height || 0,
+          fps: f.fps || 0,
+          bitrate: f.bitrate || 0,
+          contentLength: Number(f.contentLength) || 0,
+          url: f.url,
+          approxDurationMs: Number(f.approxDurationMs) || 0
+        }))
+      };
+    } catch (err) {
+      attempts.push(c.name + ": " + String((err && err.message) || err));
+    }
+  }
+  const err = new Error("InnerTube all clients failed: " + attempts.join(" | "));
+  err.attempts = attempts;
+  throw err;
+}
+
 async function fetchYouTubeTranscript(videoId, env) {
   const apiMeta = await fetchYouTubeMetaViaApi(videoId, env);
   const chapters = parseYouTubeChapters(apiMeta && apiMeta.description ? apiMeta.description : "");
@@ -393,6 +441,79 @@ export default {
       return new Response(JSON.stringify({ ok: true, ts: Date.now() }), {
         headers: { ...cors, "Content-Type": "application/json" }
       });
+    }
+
+    if (url.pathname === "/youtube-formats") {
+      const raw = url.searchParams.get("v") || url.searchParams.get("url") || "";
+      const videoId = extractVideoId(raw);
+      if (!videoId) {
+        return new Response(JSON.stringify({ error: "missing or invalid videoId" }), {
+          status: 400, headers: { ...cors, "Content-Type": "application/json" }
+        });
+      }
+      try {
+        const info = await fetchYouTubePlayerInfo(videoId);
+        // Strip the raw googlevideo urls — client must go through /youtube-media so
+        // we can forward the right User-Agent and pass through Range requests.
+        return new Response(JSON.stringify({
+          videoId: info.videoId,
+          title: info.title,
+          author: info.author,
+          lengthSeconds: info.lengthSeconds,
+          client: info.client,
+          formats: info.formats.map(f => ({
+            itag: f.itag,
+            mimeType: f.mimeType,
+            qualityLabel: f.qualityLabel,
+            width: f.width,
+            height: f.height,
+            fps: f.fps,
+            contentLength: f.contentLength
+          }))
+        }), { headers: { ...cors, "Content-Type": "application/json" } });
+      } catch (err) {
+        return new Response(JSON.stringify({ error: String((err && err.message) || err), videoId }), {
+          status: 502, headers: { ...cors, "Content-Type": "application/json" }
+        });
+      }
+    }
+
+    if (url.pathname === "/youtube-media") {
+      const raw = url.searchParams.get("v") || url.searchParams.get("url") || "";
+      const itag = parseInt(url.searchParams.get("itag") || "", 10);
+      const videoId = extractVideoId(raw);
+      if (!videoId || !itag) {
+        return new Response(JSON.stringify({ error: "missing v or itag" }), {
+          status: 400, headers: { ...cors, "Content-Type": "application/json" }
+        });
+      }
+      try {
+        const info = await fetchYouTubePlayerInfo(videoId);
+        const fmt = info.formats.find(f => f.itag === itag);
+        if (!fmt || !fmt.url) {
+          return new Response(JSON.stringify({ error: "format not found", itag }), {
+            status: 404, headers: { ...cors, "Content-Type": "application/json" }
+          });
+        }
+        const clientUA = (INNERTUBE_CLIENTS.find(c => c.name === info.client) || INNERTUBE_CLIENTS[0]).userAgent;
+        const upstreamHeaders = { "User-Agent": clientUA };
+        const rangeHeader = req.headers.get("range");
+        if (rangeHeader) upstreamHeaders["Range"] = rangeHeader;
+        const upstream = await fetch(fmt.url, { headers: upstreamHeaders, redirect: "follow" });
+        const responseHeaders = new Headers(cors);
+        for (const h of ["content-type", "content-length", "content-range", "accept-ranges", "last-modified", "etag"]) {
+          const v = upstream.headers.get(h);
+          if (v) responseHeaders.set(h, v);
+        }
+        const safeTitle = (info.title || videoId).replace(/[^A-Za-z0-9._ -]+/g, "_").slice(0, 80) || videoId;
+        const ext = (fmt.mimeType || "").includes("webm") ? "webm" : (fmt.mimeType || "").includes("mp4") ? "mp4" : "bin";
+        responseHeaders.set("Content-Disposition", 'attachment; filename="' + safeTitle + "." + ext + '"');
+        return new Response(upstream.body, { status: upstream.status, headers: responseHeaders });
+      } catch (err) {
+        return new Response(JSON.stringify({ error: String((err && err.message) || err), videoId, itag }), {
+          status: 502, headers: { ...cors, "Content-Type": "application/json" }
+        });
+      }
     }
 
     if (url.pathname === "/youtube-transcript") {
