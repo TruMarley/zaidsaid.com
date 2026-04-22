@@ -560,8 +560,8 @@ function setHash(path, params){
 /* ---------------- Error Boundary ---------------- */
 class Boundary extends React.Component {
   constructor(p){ super(p); this.state = { error: null }; }
-  static getDerivedStateFromError(error){ try { window.__lastErr = { message: error && error.message, stack: error && error.stack }; } catch(_){} return { error }; }
-  componentDidCatch(error, info){ try { window.__lastErr = { message: error && error.message, stack: error && error.stack, info: info && info.componentStack }; } catch(_){} }
+  static getDerivedStateFromError(error){ try { window.__lastErr = String(error && (error.stack || error.message || error)) + ' (via getDerived)'; } catch(_){} return { error }; }
+  componentDidCatch(error, info){ try { window.__lastErr = String(error && (error.stack || error.message || error)) + '\n\ninfo:\n' + (info && info.componentStack ? info.componentStack : ''); document.title = '🔴 ' + (error && error.message || 'err').slice(0, 80); } catch(_){} }
   render(){
     if(this.state.error){
       return (
