@@ -1,4 +1,4 @@
-/* Zaidsaid — app.js v2.0 — x89: Repurpose — YouTube downloader tool (paste URL → fetch progressive formats via worker InnerTube → quality dropdown → File System Access folder picker with streamed writable, falls back to <a download> when unsupported). Worker: /youtube-formats, /youtube-media. | x88: batch export respects selection + preset-aware video render — "Export selected as video" renders .webm per selected clip at its preset aspect ratio (9:16/1:1/16:9); fallback selection→approved→all; metadata (.txt) export kept as secondary. Fix stray /span> text below batch-export button. | x87: clip length range widened — 5s floor (viral reactions, one-liners) to 1800s / 30min ceiling (full topic arcs); removed rigid length-mix prompt in favor of idea-first sizing | x86: clip preview no-autoplay — remove YouTube loop=1&playlist (fixes whole-video loop), remove autoPlay on uploaded video, preview now shows clip-only paused state until user clicks play | x85: Phase B.1 — persist chapters on description-fallback, surface worker errors, transcript-source chip, length-variance prompt, analyzeLocal intro-skip, **remove dead RepurposeAnalyzer + RepurposeRealAnalyze god-mode components** | x84: Phase B — YT chapter-boundary detection (parseYouTubeChapters in worker; analyzeLocal uses chapter spans as candidate windows when ≥3 chapters; Claude receives chapter list for boundary alignment) + Web Audio energy analyzer (analyzeUploadedVideoAudio: 8x scrub AudioContext RMS scan on uploaded files; peaks boost analyzeLocal virality by +5*peakDensity) | x83: Smart Clipping v2 — two-stage viral detection + topic-boundary awareness + variable 30-180s clip length + unified Generate flow + target default 10 (range 3-20) | x82: preview fix — CSP frame-src, youtube-nocookie embed, thumbnail fallback | x80: Smart Clipping — viral moment detection. Worker /youtube-transcript returns segments[{t,d,text}]. analyzeViaClaude uses timestamped transcript with 4-dimension scoring (hook_power/emotional_impact/quotability/surprise_drama). analyzeLocal scores ~45-75s windows, picks top N with spatial diversity across full duration. YT iframe autoplay+loop within clip range; uploaded video autoplay muted with loop-on-end.
+/* Zaidsaid — app.js v2.0 — x90: Repurpose — uploads now actually clip. processSource gate no longer bails on empty source when an uploaded video is present; on new file upload we clear stale transcript/chapters/clips/name; uploaded videos without a transcript auto-transcribe via ElevenLabs Scribe (/elevenlabs/v1/speech-to-text with model_id=scribe_v1, word-level timestamps grouped into ~6s segments) and feed the existing two-stage viral analyzer. New fuchsia "ElevenLabs Scribe (auto-transcribed)" source chip. | x89: Repurpose — YouTube downloader tool (paste URL → fetch progressive formats via worker InnerTube → quality dropdown → File System Access folder picker with streamed writable, falls back to <a download> when unsupported). Worker: /youtube-formats, /youtube-media. | x88: batch export respects selection + preset-aware video render — "Export selected as video" renders .webm per selected clip at its preset aspect ratio (9:16/1:1/16:9); fallback selection→approved→all; metadata (.txt) export kept as secondary. Fix stray /span> text below batch-export button. | x87: clip length range widened — 5s floor (viral reactions, one-liners) to 1800s / 30min ceiling (full topic arcs); removed rigid length-mix prompt in favor of idea-first sizing | x86: clip preview no-autoplay — remove YouTube loop=1&playlist (fixes whole-video loop), remove autoPlay on uploaded video, preview now shows clip-only paused state until user clicks play | x85: Phase B.1 — persist chapters on description-fallback, surface worker errors, transcript-source chip, length-variance prompt, analyzeLocal intro-skip, **remove dead RepurposeAnalyzer + RepurposeRealAnalyze god-mode components** | x84: Phase B — YT chapter-boundary detection (parseYouTubeChapters in worker; analyzeLocal uses chapter spans as candidate windows when ≥3 chapters; Claude receives chapter list for boundary alignment) + Web Audio energy analyzer (analyzeUploadedVideoAudio: 8x scrub AudioContext RMS scan on uploaded files; peaks boost analyzeLocal virality by +5*peakDensity) | x83: Smart Clipping v2 — two-stage viral detection + topic-boundary awareness + variable 30-180s clip length + unified Generate flow + target default 10 (range 3-20) | x82: preview fix — CSP frame-src, youtube-nocookie embed, thumbnail fallback | x80: Smart Clipping — viral moment detection. Worker /youtube-transcript returns segments[{t,d,text}]. analyzeViaClaude uses timestamped transcript with 4-dimension scoring (hook_power/emotional_impact/quotability/surprise_drama). analyzeLocal scores ~45-75s windows, picks top N with spatial diversity across full duration. YT iframe autoplay+loop within clip range; uploaded video autoplay muted with loop-on-end.
  * Security: localStorage namespaced as zaidsaid.v2.*, error boundary, no innerHTML, no eval, no fetch.
  * Archived v1 seed data preserved under ARCHIVE_* for later reuse.
  */
@@ -1488,6 +1488,68 @@ const analyzeUploadedVideoAudio = (videoUrl, onDone) => {
       audio.load();
     } catch(_){ cleanup(); resolve(null); }
   });
+};
+
+// x90: Transcribe an uploaded video/audio file via ElevenLabs Scribe.
+// Returns { text, segments:[{t,d,text}] } by grouping word-level timestamps
+// into ~6-second phrases (breaks earlier on sentence-ending punctuation).
+const transcribeUploadedFile = async (elevenBase, blob, filename) => {
+  const form = new FormData();
+  form.append('file', blob, filename || 'upload.mp4');
+  form.append('model_id', 'scribe_v1');
+  form.append('timestamps_granularity', 'word');
+  const res = await fetch(elevenBase.replace(/\/$/, '') + '/elevenlabs/v1/speech-to-text', {
+    method: 'POST',
+    body: form
+  });
+  if(!res.ok){
+    let msg = 'HTTP ' + res.status;
+    try {
+      const j = await res.json();
+      if(j && j.detail){
+        msg = Array.isArray(j.detail) ? (j.detail[0] && (j.detail[0].msg || JSON.stringify(j.detail[0]))) : String(j.detail);
+      } else if(j && j.error){ msg = j.error; }
+    } catch(_){}
+    throw new Error(msg);
+  }
+  const data = await res.json();
+  const fullText = (data.text || '').trim();
+  const words = Array.isArray(data.words) ? data.words : [];
+  const segments = [];
+  const MIN_DUR = 3;
+  const MAX_DUR = 8;
+  const PUNCT_END = /[.!?]$/;
+  let cur = [];
+  for(const w of words){
+    if(w && typeof w.start === 'number' && typeof w.end === 'number' && (w.type === 'word' || w.type === undefined)){
+      cur.push(w);
+    } else if(w && w.type === 'spacing'){
+      continue;
+    } else if(w && w.type === 'punctuation' && cur.length){
+      cur[cur.length-1] = { ...cur[cur.length-1], text: (cur[cur.length-1].text || '') + (w.text || '') };
+      continue;
+    }
+    if(!cur.length) continue;
+    const span = cur[cur.length-1].end - cur[0].start;
+    const last = cur[cur.length-1];
+    const endsSentence = PUNCT_END.test(String(last.text || '').trim());
+    if(span >= MAX_DUR || (endsSentence && span >= MIN_DUR)){
+      segments.push({
+        t: +cur[0].start.toFixed(2),
+        d: +(cur[cur.length-1].end - cur[0].start).toFixed(2),
+        text: cur.map(x => String(x.text || '').trim()).filter(Boolean).join(' ').replace(/\s+([.,!?;:])/g, '$1').trim()
+      });
+      cur = [];
+    }
+  }
+  if(cur.length){
+    segments.push({
+      t: +cur[0].start.toFixed(2),
+      d: +(cur[cur.length-1].end - cur[0].start).toFixed(2),
+      text: cur.map(x => String(x.text || '').trim()).filter(Boolean).join(' ').replace(/\s+([.,!?;:])/g, '$1').trim()
+    });
+  }
+  return { text: fullText || segments.map(s => s.text).join(' '), segments };
 };
 
 // x81: Two-stage viral detection. Stage 1: local pre-filter top 3N+5 candidates with ±2 neighbor context.
@@ -3382,6 +3444,9 @@ function RepurposeIntake({ project, setProject, onProcessSource, processBusy, pr
           {project.transcriptSource === 'description' && (
             <span className="mt-1 inline-block rounded-full px-2 py-0.5 text-[10px] border border-amber-400/30 bg-amber-500/10 text-amber-300">Source: description fallback — paste transcript below for sharper clips</span>
           )}
+          {project.transcriptSource === 'transcribed' && (
+            <span className="mt-1 inline-block rounded-full px-2 py-0.5 text-[10px] border border-fuchsia-400/30 bg-fuchsia-500/10 text-fuchsia-300">Source: ElevenLabs Scribe (auto-transcribed)</span>
+          )}
           <details className="mt-2 rounded-xl border border-[color:var(--line)] bg-white/[0.02]">
             <summary className="cursor-pointer px-3 py-2 text-[12px] text-[color:var(--muted)] hover:text-white select-none">
               Paste full transcript (recommended for YouTube — sharper clips)
@@ -3451,8 +3516,25 @@ function RepurposeIntake({ project, setProject, onProcessSource, processBusy, pr
                     onChange={(e)=>{
                       const f = e.target.files && e.target.files[0];
                       if(!f) return;
+                      try { if(project.uploadedVideoUrl) URL.revokeObjectURL(project.uploadedVideoUrl); } catch(_){}
                       const url = URL.createObjectURL(f);
-                      setProject({ ...project, kind: "upload", uploadedVideoUrl: url, uploadedVideoName: f.name, audioMap: null });
+                      const defaultName = f.name.replace(/\.[^.]+$/, '').slice(0, 80);
+                      setProject({
+                        ...project,
+                        kind: "upload",
+                        uploadedVideoUrl: url,
+                        uploadedVideoName: f.name,
+                        audioMap: null,
+                        source: "",
+                        transcriptText: "",
+                        transcriptSegments: [],
+                        chapters: [],
+                        transcriptSource: "",
+                        clips: [],
+                        author: "",
+                        name: defaultName,
+                        durationSec: 0
+                      });
                       if(onFileUpload) onFileUpload(url, f);
                     }}
                   />
@@ -4993,15 +5075,68 @@ function RepurposeTab(){
   const processSource = async () => {
     if(processBusy) return;
     const sourceUrl = (project.source || "").trim();
-    if(!sourceUrl){ toast("Paste a URL or transcript first", "error"); return; }
+    const isUpload = project.kind === 'upload' && !!project.uploadedVideoUrl;
+    const pastedInitial = (project.transcriptText || "").trim();
+    if(!sourceUrl && !pastedInitial && !isUpload){
+      toast("Paste a URL, paste a transcript, or upload a video first", "error"); return;
+    }
     setProcessBusy(true); setProcessStatus("Starting…");
     try {
-      let text = (project.transcriptText || "").trim();
-      let segments = Array.isArray(project.transcriptSegments) ? project.transcriptSegments : [];
+      let text = pastedInitial;
+      let segments = Array.isArray(project.transcriptSegments) ? project.transcriptSegments.slice() : [];
       let meta = { title: project.name || "", author: project.author || "" };
       let fetchedChaps = [];
+      // x90: drop YT-origin transcript/chapters when the current source is an upload —
+      // otherwise we'd cut clips against the wrong video's transcript.
+      const transcriptLooksStale = isUpload && !sourceUrl && text.length > 0 &&
+        !['pasted','transcribed'].includes(project.transcriptSource);
+      if(transcriptLooksStale){
+        text = '';
+        segments = [];
+        setProject(p => ({ ...p, transcriptText: '', transcriptSegments: [], chapters: [], transcriptSource: '' }));
+      }
       const hasPastedTranscript = text.length > 0 && segments.length === 0;
-      const isYT = /youtu\.?be/i.test(sourceUrl);
+      const isYT = !!sourceUrl && /youtu\.?be/i.test(sourceUrl);
+
+      // x90: uploaded file with no transcript → auto-transcribe via ElevenLabs Scribe.
+      if(isUpload && !text && !segments.length){
+        let providers = {};
+        try { providers = JSON.parse(localStorage.getItem('zaidsaid.v2.providers') || '{}'); } catch(_){}
+        const eleven = providers.elevenlabs || {};
+        const elevenEnabled = !!eleven.proxyUrl && eleven.enabled !== false;
+        if(!elevenEnabled){
+          toast('Configure ElevenLabs in Settings → Providers to auto-transcribe uploads, or paste the transcript below and re-run.', 'warn');
+          return;
+        }
+        const durationMin = project.durationSec ? Math.ceil(project.durationSec / 60) : 0;
+        setProcessStatus(durationMin ? ("Transcribing ~" + durationMin + " min via ElevenLabs Scribe…") : "Transcribing via ElevenLabs Scribe…");
+        try {
+          const blobRes = await fetch(project.uploadedVideoUrl);
+          if(!blobRes.ok) throw new Error("Couldn't read uploaded file (did you refresh since uploading? Try re-uploading).");
+          const blob = await blobRes.blob();
+          const elevenBase = String(eleven.proxyUrl).replace(/\/elevenlabs\/?$/, '');
+          const stt = await transcribeUploadedFile(elevenBase, blob, project.uploadedVideoName || 'upload.mp4');
+          text = stt.text || '';
+          segments = stt.segments || [];
+          if(!text && !segments.length) throw new Error("Empty transcription — audio may be silent or unintelligible.");
+          const lastSeg = segments[segments.length-1];
+          const derivedDur = lastSeg ? (lastSeg.t + lastSeg.d) : 0;
+          setProject(p => ({
+            ...p,
+            transcriptText: text,
+            transcriptSegments: segments,
+            chapters: [],
+            transcriptSource: 'transcribed',
+            durationSec: derivedDur > 0 ? Math.round(derivedDur) : p.durationSec
+          }));
+          toast('Transcribed ' + segments.length + ' segments', 'success');
+        } catch(e){
+          const msg = (e && e.message) || 'unknown';
+          toast('Transcription failed: ' + msg, 'error');
+          setProcessStatus('Failed');
+          return;
+        }
+      }
       if(isYT){
         setProcessStatus("Fetching transcript…");
         try {
