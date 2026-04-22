@@ -1,4 +1,4 @@
-/* Zaidsaid — app.js v2.0 — x96: Phase E — preset-aware per-clip re-encoding via ffmpeg.wasm (scale+pad for 9:16/1:1/16:9) + JSZip batch download when multiple clips selected. Replaces the old MediaRecorder .webm pipeline for clips that have a per-clip mp4 blob. | x95: Phase B UI cleanup: collapsed intake to URL/File, folded YT downloader into URL expandable, per-clip actions 9→3, removed fake waveform, toolbar pruned. | x94: clear stale clips at Generate start + narrow reseed effect so demo doesn't overwrite a user's upload on refresh. | x93: Repurpose — real per-clip mp4 cuts + thumbnail frames. cutClipFromSource (ffmpeg.wasm, -ss after -i, -c copy with libx264 fallback <5 min) + grabFrameThumb (off-DOM canvas) + generateClipAssets (sequential, IDB-backed). processSource fires generateClipAssets after setProject for upload flows. RepurposeTab hydrates clipBlobUrls Map from IDB on mount; RepurposeClipPreview shows pre-cut <video controls> when blob ready. removeClip deletes IDB entries + revokes URLs. | x92: Repurpose — big videos extract audio client-side before transcribing. Lazy-loads ffmpeg.wasm (@ffmpeg/ffmpeg@0.12.10 + @ffmpeg/core@0.12.6 from unpkg, ~30 MB one-time); any uploaded video >50 MB is reduced to mono 16 kHz 32 kbps MP3 (~14 MB/hr) before POSTing to /elevenlabs/v1/speech-to-text. Fixes 700+ MB uploads hanging on the Cloudflare Worker 500 MiB body limit. CSP widened for wasm-unsafe-eval, blob: workers, and unpkg connect. | x91: Repurpose — uploaded files now survive page refreshes. New IndexedDB blob store (zaidsaid/uploads, key repurpose:current) persists the File on upload; RepurposeTab useEffect on mount HEAD-checks the existing blob URL and rehydrates from IDB when it's dead, or clears the dangling reference + toasts "please re-upload" when IDB is empty too. processSource now reads the blob from IDB first, falling back to the blob URL. Remove button deletes the IDB entry. | x90: Repurpose — uploads now actually clip. processSource gate no longer bails on empty source when an uploaded video is present; on new file upload we clear stale transcript/chapters/clips/name; uploaded videos without a transcript auto-transcribe via ElevenLabs Scribe (/elevenlabs/v1/speech-to-text with model_id=scribe_v1, word-level timestamps grouped into ~6s segments) and feed the existing two-stage viral analyzer. New fuchsia "ElevenLabs Scribe (auto-transcribed)" source chip. | x89: Repurpose — YouTube downloader tool (paste URL → fetch progressive formats via worker InnerTube → quality dropdown → File System Access folder picker with streamed writable, falls back to <a download> when unsupported). Worker: /youtube-formats, /youtube-media. | x88: batch export respects selection + preset-aware video render — "Export selected as video" renders .webm per selected clip at its preset aspect ratio (9:16/1:1/16:9); fallback selection→approved→all; metadata (.txt) export kept as secondary. Fix stray /span> text below batch-export button. | x87: clip length range widened — 5s floor (viral reactions, one-liners) to 1800s / 30min ceiling (full topic arcs); removed rigid length-mix prompt in favor of idea-first sizing | x86: clip preview no-autoplay — remove YouTube loop=1&playlist (fixes whole-video loop), remove autoPlay on uploaded video, preview now shows clip-only paused state until user clicks play | x85: Phase B.1 — persist chapters on description-fallback, surface worker errors, transcript-source chip, length-variance prompt, analyzeLocal intro-skip, **remove dead RepurposeAnalyzer + RepurposeRealAnalyze god-mode components** | x84: Phase B — YT chapter-boundary detection (parseYouTubeChapters in worker; analyzeLocal uses chapter spans as candidate windows when ≥3 chapters; Claude receives chapter list for boundary alignment) + Web Audio energy analyzer (analyzeUploadedVideoAudio: 8x scrub AudioContext RMS scan on uploaded files; peaks boost analyzeLocal virality by +5*peakDensity) | x83: Smart Clipping v2 — two-stage viral detection + topic-boundary awareness + variable 30-180s clip length + unified Generate flow + target default 10 (range 3-20) | x82: preview fix — CSP frame-src, youtube-nocookie embed, thumbnail fallback | x80: Smart Clipping — viral moment detection. Worker /youtube-transcript returns segments[{t,d,text}]. analyzeViaClaude uses timestamped transcript with 4-dimension scoring (hook_power/emotional_impact/quotability/surprise_drama). analyzeLocal scores ~45-75s windows, picks top N with spatial diversity across full duration. YT iframe autoplay+loop within clip range; uploaded video autoplay muted with loop-on-end.
+/* Zaidsaid — app.js v2.0 — x97: Phase C — multi-modal virality signals. WebCodecs scene-cut detection in-browser; /gemini-video-highlights worker route (Gemini 2.5 Flash, graceful no-key); /sensevoice worker route (Replicate SenseVoice for laughter/applause, graceful no-key). Claude scoring extended to boost clips matching ≥2 signal types. | x96: Phase E — preset-aware per-clip re-encoding via ffmpeg.wasm (scale+pad for 9:16/1:1/16:9) + JSZip batch download when multiple clips selected. Replaces the old MediaRecorder .webm pipeline for clips that have a per-clip mp4 blob. | x95: Phase B UI cleanup: collapsed intake to URL/File, folded YT downloader into URL expandable, per-clip actions 9→3, removed fake waveform, toolbar pruned. | x94: clear stale clips at Generate start + narrow reseed effect so demo doesn't overwrite a user's upload on refresh. | x93: Repurpose — real per-clip mp4 cuts + thumbnail frames. cutClipFromSource (ffmpeg.wasm, -ss after -i, -c copy with libx264 fallback <5 min) + grabFrameThumb (off-DOM canvas) + generateClipAssets (sequential, IDB-backed). processSource fires generateClipAssets after setProject for upload flows. RepurposeTab hydrates clipBlobUrls Map from IDB on mount; RepurposeClipPreview shows pre-cut <video controls> when blob ready. removeClip deletes IDB entries + revokes URLs. | x92: Repurpose — big videos extract audio client-side before transcribing. Lazy-loads ffmpeg.wasm (@ffmpeg/ffmpeg@0.12.10 + @ffmpeg/core@0.12.6 from unpkg, ~30 MB one-time); any uploaded video >50 MB is reduced to mono 16 kHz 32 kbps MP3 (~14 MB/hr) before POSTing to /elevenlabs/v1/speech-to-text. Fixes 700+ MB uploads hanging on the Cloudflare Worker 500 MiB body limit. CSP widened for wasm-unsafe-eval, blob: workers, and unpkg connect. | x91: Repurpose — uploaded files now survive page refreshes. New IndexedDB blob store (zaidsaid/uploads, key repurpose:current) persists the File on upload; RepurposeTab useEffect on mount HEAD-checks the existing blob URL and rehydrates from IDB when it's dead, or clears the dangling reference + toasts "please re-upload" when IDB is empty too. processSource now reads the blob from IDB first, falling back to the blob URL. Remove button deletes the IDB entry. | x90: Repurpose — uploads now actually clip. processSource gate no longer bails on empty source when an uploaded video is present; on new file upload we clear stale transcript/chapters/clips/name; uploaded videos without a transcript auto-transcribe via ElevenLabs Scribe (/elevenlabs/v1/speech-to-text with model_id=scribe_v1, word-level timestamps grouped into ~6s segments) and feed the existing two-stage viral analyzer. New fuchsia "ElevenLabs Scribe (auto-transcribed)" source chip. | x89: Repurpose — YouTube downloader tool (paste URL → fetch progressive formats via worker InnerTube → quality dropdown → File System Access folder picker with streamed writable, falls back to <a download> when unsupported). Worker: /youtube-formats, /youtube-media. | x88: batch export respects selection + preset-aware video render — "Export selected as video" renders .webm per selected clip at its preset aspect ratio (9:16/1:1/16:9); fallback selection→approved→all; metadata (.txt) export kept as secondary. Fix stray /span> text below batch-export button. | x87: clip length range widened — 5s floor (viral reactions, one-liners) to 1800s / 30min ceiling (full topic arcs); removed rigid length-mix prompt in favor of idea-first sizing | x86: clip preview no-autoplay — remove YouTube loop=1&playlist (fixes whole-video loop), remove autoPlay on uploaded video, preview now shows clip-only paused state until user clicks play | x85: Phase B.1 — persist chapters on description-fallback, surface worker errors, transcript-source chip, length-variance prompt, analyzeLocal intro-skip, **remove dead RepurposeAnalyzer + RepurposeRealAnalyze god-mode components** | x84: Phase B — YT chapter-boundary detection (parseYouTubeChapters in worker; analyzeLocal uses chapter spans as candidate windows when ≥3 chapters; Claude receives chapter list for boundary alignment) + Web Audio energy analyzer (analyzeUploadedVideoAudio: 8x scrub AudioContext RMS scan on uploaded files; peaks boost analyzeLocal virality by +5*peakDensity) | x83: Smart Clipping v2 — two-stage viral detection + topic-boundary awareness + variable 30-180s clip length + unified Generate flow + target default 10 (range 3-20) | x82: preview fix — CSP frame-src, youtube-nocookie embed, thumbnail fallback | x80: Smart Clipping — viral moment detection. Worker /youtube-transcript returns segments[{t,d,text}]. analyzeViaClaude uses timestamped transcript with 4-dimension scoring (hook_power/emotional_impact/quotability/surprise_drama). analyzeLocal scores ~45-75s windows, picks top N with spatial diversity across full duration. YT iframe autoplay+loop within clip range; uploaded video autoplay muted with loop-on-end.
  * Security: localStorage namespaced as zaidsaid.v2.*, error boundary, no innerHTML, no eval, no fetch.
  * Archived v1 seed data preserved under ARCHIVE_* for later reuse.
  */
@@ -1150,7 +1150,7 @@ const parsePastedTranscript = (text) => {
 
 // x80: MVP-F — Viral clip detection via Claude with timestamped segments + 4-dimension scoring
 // x84: accepts optional chapters [{t,title}] and audioMap for Phase B signals.
-const analyzeViaClaude = async (proxyUrl, sourceText, targetCount, segments, meta, chapters, audioMap) => {
+const analyzeViaClaude = async (proxyUrl, sourceText, targetCount, segments, meta, chapters, audioMap, signals) => {
   const tools = [{
     name:'emit_clips',
     description:'Return the N best viral short-form clip candidates with 4-dimension scoring.',
@@ -1186,6 +1186,18 @@ const analyzeViaClaude = async (proxyUrl, sourceText, targetCount, segments, met
   const chapSysAddendum = chaps.length >= 3
     ? '\n\n(f) CHAPTER BOUNDARIES — If chapter boundaries are provided, strongly prefer clip.start/clip.end to align with chapter boundaries unless the viral moment clearly spans a chapter edge.'
     : '';
+  const hasSignals = signals && typeof signals === 'object' && (
+    (Array.isArray(signals.scenes) && signals.scenes.length > 0) ||
+    (Array.isArray(signals.audioEvents) && signals.audioEvents.length > 0) ||
+    (Array.isArray(signals.visualHighlights) && signals.visualHighlights.length > 0)
+  );
+  const signalsSysAddendum = hasSignals
+    ? '\n\nAdditional signals (if present):\n' +
+      '- scenes: [{t, reason}] — hard visual cuts\n' +
+      '- audioEvents: [{t, d, label}] — laughter, applause, emphasis\n' +
+      '- visualHighlights: [{t, d, reason, mood}] — model-identified dynamic moments\n\n' +
+      'When a candidate clip window aligns with ≥2 distinct signal types (e.g., scene cut + laughter), boost its virality by 8. When it matches a mood of {funny, shocking, emotional, dramatic}, additionally boost by 5.'
+    : '';
   const sys = 'You are a viral short-form video strategist extracting TikTok/Reels/Shorts clips from long-form content. For each clip you pick:\n\n' +
     '(a) TOPIC BOUNDARY — Identify the EXACT transcript segment where the viral moment\'s conversation/thought begins (usually a hook line, topic shift, or question). Identify where the thought concludes (answer, punchline, resolution, or topic change). Set clip.start and clip.end to those exact timestamps so the clip captures the COMPLETE thought — never cut mid-sentence, never start mid-answer.\n\n' +
     '(b) LENGTH — pick to match the idea, no target length. Valid range: 5 seconds (a single viral reaction, one-liner, or beat drop) to 1800 seconds / 30 minutes (a full topic arc, extended story, or complete discussion). Guidance: viral hooks are often 30-90s, full thoughts 2-5min, deep segments 10-30min. Never pad. A 7-second perfect moment beats a 60-second padded one. A 20-minute complete arc beats a chopped 3-minute excerpt. Trust the content — if the idea finishes at 12 seconds, end the clip at 12 seconds.\n\n' +
@@ -1194,7 +1206,13 @@ const analyzeViaClaude = async (proxyUrl, sourceText, targetCount, segments, met
     '(e) DISTRIBUTE — clips must span DIFFERENT moments across the full video. Do not cluster near the start.\n\n' +
     'Score each clip 0-10 on: hook_power, emotional_impact, quotability, surprise_drama. Return ONLY via emit_clips tool.\n\n' +
     '(g) SKIP INTROS — Never set clip.start before the first substantive content. Skip boilerplate intros, sponsor reads, \'welcome back\', table of contents, and podcast cold-opens. If chapter[0] title contains intro/welcome/sponsor/start, begin picks from chapter[1].' +
-    chapSysAddendum;
+    chapSysAddendum + signalsSysAddendum;
+  const signalsUserBlock = hasSignals
+    ? '\n\nMulti-modal signals:\n' +
+      (Array.isArray(signals.scenes) && signals.scenes.length ? 'Scene cuts: ' + JSON.stringify(signals.scenes.slice(0, 50)) + '\n' : '') +
+      (Array.isArray(signals.audioEvents) && signals.audioEvents.length ? 'Audio events: ' + JSON.stringify(signals.audioEvents.slice(0, 50)) + '\n' : '') +
+      (Array.isArray(signals.visualHighlights) && signals.visualHighlights.length ? 'Visual highlights: ' + JSON.stringify(signals.visualHighlights.slice(0, 30)) + '\n' : '')
+    : '';
   let userMsg;
   if(hasSegments){
     const { lines, totalDur } = buildTimedTranscript(segments, 14000);
@@ -1208,7 +1226,8 @@ const analyzeViaClaude = async (proxyUrl, sourceText, targetCount, segments, met
       chapLine +
       'Timestamped transcript (format: [M:SS] or [H:MM:SS] text):\n' + lines.join('\n') + '\n\n' +
       'Extract exactly ' + n + ' viral clips. Each clip.start / clip.end MUST be in seconds (not formatted). ' +
-      'Distribute picks across the full ' + Math.round(totalDur) + 's duration — do not cluster near the start.';
+      'Distribute picks across the full ' + Math.round(totalDur) + 's duration — do not cluster near the start.' +
+      signalsUserBlock;
   } else {
     const chapLine = chaps.length >= 3
       ? 'Available chapters:\n' + chaps.map(c => { const m = Math.floor(c.t/60); const s = Math.round(c.t%60); return '[' + m + ':' + String(s).padStart(2,'0') + '] ' + c.title; }).join('\n') + '\n\n'
@@ -1217,7 +1236,8 @@ const analyzeViaClaude = async (proxyUrl, sourceText, targetCount, segments, met
       chapLine +
       'Source (no timestamps — infer approximate seconds across assumed duration):\n' +
       String(sourceText||'').slice(0, 8000) + '\n\n' +
-      'Extract exactly ' + n + ' viral clips. Score each on the 4 dimensions.';
+      'Extract exactly ' + n + ' viral clips. Score each on the 4 dimensions.' +
+      signalsUserBlock;
   }
   const audioPeaks = (audioMap && Array.isArray(audioMap.peaks)) ? audioMap.peaks : [];
   const j = await mvpCallClaude(proxyUrl, [{role:'user', content:userMsg}], { system:sys, tools, tool_choice:{type:'tool', name:'emit_clips'}, max_tokens:3072 });
@@ -1242,6 +1262,21 @@ const analyzeViaClaude = async (proxyUrl, sourceText, targetCount, segments, met
         const peakDensity = peaksInWindow / (winDur / 10);
         virality = Math.min(100, baseVirality + Math.round(5 * Math.min(1, peakDensity)));
       }
+    }
+    if(hasSignals){
+      let signalHits = 0;
+      let moodBoost = 0;
+      if(Array.isArray(signals.scenes) && signals.scenes.some(s => s.t >= start && s.t <= end)) signalHits++;
+      if(Array.isArray(signals.audioEvents) && signals.audioEvents.some(e => e.t + (e.d||0) >= start && e.t <= end)) signalHits++;
+      if(Array.isArray(signals.visualHighlights)){
+        const matchedVH = signals.visualHighlights.find(h => h.t + (h.d||0) >= start && h.t <= end);
+        if(matchedVH){
+          signalHits++;
+          if(['funny','shocking','emotional','dramatic'].includes(String(matchedVH.mood||'').toLowerCase())) moodBoost = 5;
+        }
+      }
+      if(signalHits >= 2) virality = Math.min(100, virality + 8);
+      virality = Math.min(100, virality + moodBoost);
     }
     return {
       id:'c'+(i+1),
@@ -1607,6 +1642,154 @@ const extractAudioAsMp3 = async (videoBlob, filename, onStatus, onProgress) => {
   }
 };
 
+// x97: Scene-cut detector using WebCodecs + MP4Box.js color-histogram diff.
+// Returns [{t: seconds, reason: "hard-cut"}], capped at 200 events.
+// Gracefully resolves [] when WebCodecs or MP4Box is unavailable.
+const detectSceneCuts = async (videoBlob, onProgress) => {
+  if(typeof VideoDecoder === 'undefined') return [];
+
+  // Lazy-load MP4Box.js
+  if(typeof window.MP4Box === 'undefined'){
+    await new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = 'https://unpkg.com/mp4box@0.5.2/dist/mp4box.all.min.js';
+      s.onload = resolve;
+      s.onerror = () => reject(new Error('mp4box load failed'));
+      document.head.appendChild(s);
+    });
+  }
+  if(typeof window.MP4Box === 'undefined') return [];
+
+  try {
+    const arrayBuffer = await videoBlob.arrayBuffer();
+    const mp4 = window.MP4Box.createFile();
+
+    // Collect video track samples
+    const frames = await new Promise((resolve, reject) => {
+      const samples = [];
+      let videoTrackId = null;
+
+      mp4.onReady = (info) => {
+        const vt = (info.videoTracks || [])[0];
+        if(!vt){ reject(new Error('no video track')); return; }
+        videoTrackId = vt.id;
+        mp4.setExtractionOptions(videoTrackId, null, { nbSamples: 9999 });
+        mp4.start();
+      };
+      mp4.onSamples = (trackId, _ref, sampleList) => {
+        if(trackId !== videoTrackId) return;
+        for(const s of sampleList){
+          samples.push({ dts: s.dts, duration: s.duration, timescale: s.timescale, isSync: s.is_sync, data: s.data });
+        }
+      };
+      mp4.onError = reject;
+      mp4.onFlush = () => resolve(samples);
+
+      const buf = arrayBuffer.slice(0);
+      buf.fileStart = 0;
+      mp4.appendBuffer(buf);
+      mp4.flush();
+    });
+
+    if(!frames || frames.length === 0) return [];
+
+    const totalDur = frames[frames.length - 1].dts / frames[frames.length - 1].timescale + 1;
+
+    // Sample at ~5 fps
+    const TARGET_FPS = 5;
+    const INTERVAL = 1 / TARGET_FPS;
+    const BINS = 8; // 8x8x8 histogram per channel
+    const THRESHOLD = 0.35;
+    const MAX_CUTS = 200;
+
+    // Build a map of time -> frame data for keyframes near sample points
+    const keyframes = frames.filter(f => f.isSync);
+    if(keyframes.length === 0) return [];
+
+    const cuts = [];
+    let prevHist = null;
+    let prevT = -999;
+
+    // Use an OffscreenCanvas or a regular canvas to decode frames visually
+    // We decode each keyframe near a sample point via VideoDecoder
+    const canvas = (typeof OffscreenCanvas !== 'undefined')
+      ? new OffscreenCanvas(160, 90)
+      : (() => { const c = document.createElement('canvas'); c.width=160; c.height=90; return c; })();
+    const ctx = canvas.getContext('2d');
+
+    const computeHistogram = (imgData) => {
+      const d = imgData.data;
+      const hist = new Float32Array(BINS * BINS * BINS);
+      const step = BINS / 256;
+      for(let i = 0; i < d.length; i += 4){
+        const r = Math.floor(d[i] * step);
+        const g = Math.floor(d[i+1] * step);
+        const b = Math.floor(d[i+2] * step);
+        hist[r * BINS * BINS + g * BINS + b]++;
+      }
+      const total = d.length / 4;
+      if(total > 0) for(let j = 0; j < hist.length; j++) hist[j] /= total;
+      return hist;
+    };
+
+    const l1Distance = (a, b) => {
+      let d = 0;
+      for(let i = 0; i < a.length; i++) d += Math.abs(a[i] - b[i]);
+      return d;
+    };
+
+    // Decode via VideoDecoder at sample timestamps
+    const videoEl = document.createElement('video');
+    videoEl.muted = true;
+    videoEl.preload = 'metadata';
+    const blobUrl = URL.createObjectURL(videoBlob);
+
+    try {
+      await new Promise((res, rej) => {
+        videoEl.onloadedmetadata = res;
+        videoEl.onerror = rej;
+        videoEl.src = blobUrl;
+      });
+
+      const vidDur = videoEl.duration;
+      const sampleCount = Math.ceil(vidDur / INTERVAL);
+
+      for(let i = 0; i < sampleCount && cuts.length < MAX_CUTS; i++){
+        const t = i * INTERVAL;
+        if(t > vidDur) break;
+        if(t - prevT < INTERVAL * 0.8) continue;
+        prevT = t;
+
+        await new Promise((res) => {
+          videoEl.currentTime = t;
+          videoEl.onseeked = res;
+        });
+
+        ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+        const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const hist = computeHistogram(imgData);
+
+        if(prevHist !== null){
+          const dist = l1Distance(hist, prevHist);
+          if(dist > THRESHOLD){
+            cuts.push({ t: +t.toFixed(2), reason: 'hard-cut' });
+          }
+        }
+        prevHist = hist;
+
+        if(onProgress) onProgress(t / vidDur);
+      }
+    } finally {
+      URL.revokeObjectURL(blobUrl);
+    }
+
+    return cuts.slice(0, MAX_CUTS);
+  } catch(e){
+    console.warn('[zs] detectSceneCuts failed', e);
+    return [];
+  }
+};
+
 // x93: Cut a single clip out of a source blob using ffmpeg.wasm.
 // Uses output-side seek (-ss after -i) for frame-accurate start/end.
 // Tries -c copy first (fast mux); falls back to libx264+aac encode for
@@ -1824,13 +2007,60 @@ const transcribeUploadedFile = async (elevenBase, blob, filename) => {
   return { text: fullText || segments.map(s => s.text).join(' '), segments };
 };
 
+// x97: Fetch visual highlights from Gemini 2.5 Flash via worker /gemini-video-highlights.
+// audioBlob: the MP3 we already extracted (avoids re-extracting video).
+// Returns [{t, d, reason, mood}] or [] on failure/key-absent.
+const fetchGeminiHighlights = async (workerBase, audioBlob, targetCount) => {
+  try {
+    const form = new FormData();
+    form.append('file', audioBlob, 'audio.mp3');
+    form.append('targetCount', String(targetCount || 10));
+    const res = await fetch(workerBase.replace(/\/$/, '') + '/gemini-video-highlights', { method: 'POST', body: form });
+    if(!res.ok) return [];
+    const data = await res.json();
+    if(data.disabled) return [];
+    return Array.isArray(data.highlights) ? data.highlights : [];
+  } catch(e){
+    console.warn('[zs] fetchGeminiHighlights failed', e);
+    return [];
+  }
+};
+
+// x97: Fetch audio events (laughter, applause) via /sensevoice worker route.
+// Uploads the MP3 as a data URL to avoid CORS issues with Replicate polling.
+// Returns [{t, d, label}] or [] on failure/key-absent.
+const fetchSenseVoiceEvents = async (workerBase, audioBlob) => {
+  try {
+    // Convert blob to data URL so Replicate can fetch it
+    const dataUrl = await new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result);
+      r.onerror = reject;
+      r.readAsDataURL(audioBlob);
+    });
+    const res = await fetch(workerBase.replace(/\/$/, '') + '/sensevoice', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ audio_url: dataUrl })
+    });
+    if(!res.ok) return [];
+    const data = await res.json();
+    if(data.disabled) return [];
+    return Array.isArray(data.events) ? data.events : [];
+  } catch(e){
+    console.warn('[zs] fetchSenseVoiceEvents failed', e);
+    return [];
+  }
+};
+
 // x81: Two-stage viral detection. Stage 1: local pre-filter top 3N+5 candidates with ±2 neighbor context.
 // Stage 2: send candidate windows to Claude for final pick + exact timestamps.
 // x84: accepts optional chapters [{t,title}] and audioMap for Phase B signals.
+// x97: accepts optional signals {scenes, audioEvents, visualHighlights} for Phase C multi-modal scoring.
 // Falls through to text-only path if no segments.
-const analyzeViaClaudeTwoStage = async (proxyUrl, sourceText, targetCount, segments, meta, chapters, audioMap) => {
+const analyzeViaClaudeTwoStage = async (proxyUrl, sourceText, targetCount, segments, meta, chapters, audioMap, signals) => {
   const hasSegments = Array.isArray(segments) && segments.length > 0;
-  if(!hasSegments) return analyzeViaClaude(proxyUrl, sourceText, targetCount, [], meta, chapters, audioMap);
+  if(!hasSegments) return analyzeViaClaude(proxyUrl, sourceText, targetCount, [], meta, chapters, audioMap, signals);
   const n = Math.max(1, Math.min(20, Number(targetCount)||10));
   const candidateCount = 3 * n + 5;
 
@@ -1853,7 +2083,7 @@ const analyzeViaClaudeTwoStage = async (proxyUrl, sourceText, targetCount, segme
   const candidateIdxs = Array.from(expandedSet).sort((a, b) => a - b);
   const candidateSegs = candidateIdxs.map(i => segments[i]);
 
-  return analyzeViaClaude(proxyUrl, sourceText, targetCount, candidateSegs, meta, chapters, audioMap);
+  return analyzeViaClaude(proxyUrl, sourceText, targetCount, candidateSegs, meta, chapters, audioMap, signals);
 };
 
 // MVP-B: Polish a Studio script scene via Claude
@@ -4019,7 +4249,7 @@ function RepurposeClipPreview({ clip, clipBlobUrl, clipThumbUrl, uploadedVideoUr
   );
 }
 
-function RepurposeClipCard({ clip, onField, onRegen, regenBusy, onRemove, onExplain, explainBusy, onHookAlts, hookAltsBusy, onThumbConcept, thumbConceptBusy, onHookScore, hookScoreBusy, onObjAnswer, objAnswerBusy, onCommentSeeds, commentSeedsBusy, onCopyPost, copyPostBusy, onRenderVideo, renderVideoBusy, renderVideoProgress, uploadEnabled, uploadedVideoUrl, sourceUrl, clipBlobUrl, clipThumbUrl, onShare, shareBusyPlatform }){
+function RepurposeClipCard({ clip, onField, onRegen, regenBusy, onRemove, onExplain, explainBusy, onHookAlts, hookAltsBusy, onThumbConcept, thumbConceptBusy, onHookScore, hookScoreBusy, onObjAnswer, objAnswerBusy, onCommentSeeds, commentSeedsBusy, onCopyPost, copyPostBusy, onRenderVideo, renderVideoBusy, renderVideoProgress, uploadEnabled, uploadedVideoUrl, sourceUrl, clipBlobUrl, clipThumbUrl, onShare, shareBusyPlatform, signals }){
   const [shareOpen, setShareOpen] = useState(false);
   const band = viralityBand(clip.virality);
   const preset = REPURPOSE_PRESETS.find(p => p.id === clip.preset) || REPURPOSE_PRESETS[0];
@@ -4072,6 +4302,20 @@ function RepurposeClipCard({ clip, onField, onRegen, regenBusy, onRemove, onExpl
           height={previewH}
         />
       </div>
+      {signals && (() => {
+        const start = clip.start, end = clip.end;
+        const hasScene = Array.isArray(signals.scenes) && signals.scenes.some(s => s.t >= start && s.t <= end);
+        const audioMatch = Array.isArray(signals.audioEvents) && signals.audioEvents.find(e => e.t + (e.d||0) >= start && e.t <= end && ['laughter','applause'].includes(String(e.label||'').toLowerCase()));
+        const vhMatch = Array.isArray(signals.visualHighlights) && signals.visualHighlights.find(h => h.t + (h.d||0) >= start && h.t <= end);
+        if(!hasScene && !audioMatch && !vhMatch) return null;
+        return (
+          <div className="flex items-center gap-1.5 flex-wrap mt-2">
+            {hasScene && <span className="chip text-[11px]" title="Scene cut in clip window">🎬 scene cut</span>}
+            {audioMatch && <span className="chip text-[11px]" title={audioMatch.label}>🔊 {audioMatch.label}</span>}
+            {vhMatch && <span className="chip text-[11px]" title={vhMatch.reason || vhMatch.mood || 'visual highlight'}>👁 {vhMatch.mood || 'highlight'}</span>}
+          </div>
+        );
+      })()}
       <div className="grid md:grid-cols-2 gap-3 mt-3">
         <label className="block">
           <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Caption preview</span>
@@ -5469,6 +5713,7 @@ function RepurposeTab(){
       let segments = Array.isArray(project.transcriptSegments) ? project.transcriptSegments.slice() : [];
       let meta = { title: project.name || "", author: project.author || "" };
       let fetchedChaps = [];
+      let audioMp3Blob = null; // x97: held for signal collection after clip generation
       // x90: drop YT-origin transcript/chapters when the current source is an upload —
       // otherwise we'd cut clips against the wrong video's transcript.
       const transcriptLooksStale = isUpload && !sourceUrl && text.length > 0 &&
@@ -5533,6 +5778,7 @@ function RepurposeTab(){
               setProcessStatus("Audio extraction failed — falling back to raw upload, this may be slow.");
             }
           }
+          audioMp3Blob = uploadBlob; // x97: reuse for signal collection
           const elevenBase = String(eleven.proxyUrl).replace(/\/elevenlabs\/?$/, '');
           const stt = await transcribeUploadedFile(elevenBase, uploadBlob, uploadFilename);
           text = stt.text || '';
@@ -5656,6 +5902,51 @@ function RepurposeTab(){
         }
       } else {
         setProcessStatus("Done — " + clips.length + " clips");
+      }
+      // x97: Collect multi-modal signals in parallel (best-effort, non-blocking to clip display).
+      // Only run when we have an audio/video blob and a worker path to proxy through.
+      if(audioMp3Blob && path){
+        (async () => {
+          try {
+            const workerBase = path.replace(/\/anthropic\/?$/, "");
+            setProcessStatus("Collecting signals (scene-cut + audio events + visual highlights)…");
+            const [sceneCuts, audioEvents, visualHighlights] = await Promise.all([
+              detectSceneCuts(audioMp3Blob).catch(() => []),
+              fetchSenseVoiceEvents(workerBase, audioMp3Blob).catch(() => []),
+              fetchGeminiHighlights(workerBase, audioMp3Blob, target).catch(() => [])
+            ]);
+            const signals = { scenes: sceneCuts, audioEvents, visualHighlights };
+            const hasAnySignal = sceneCuts.length > 0 || audioEvents.length > 0 || visualHighlights.length > 0;
+            setProject(p => ({ ...p, signals }));
+            if(!hasAnySignal){ setProcessStatus(""); return; }
+            // Re-run Claude analysis with signals to boost clip scores.
+            if(path){
+              setProcessStatus("Re-scoring clips with signals…");
+              try {
+                const boostedClips = await analyzeViaClaudeTwoStage(path, text, target, segments, meta, chapters, audioMap, signals);
+                if(boostedClips && boostedClips.length){
+                  setProject(p => {
+                    // Preserve user-edited clips by id; replace score+virality for existing ids.
+                    const existingIds = new Set((p.clips || []).map(c => c.id));
+                    const merged = boostedClips.map((bc, i) => {
+                      const existing = (p.clips || []).find(c => c.id === bc.id);
+                      if(existing){
+                        return { ...existing, virality: bc.virality, scores: bc.scores };
+                      }
+                      return bc;
+                    });
+                    return { ...p, clips: merged };
+                  });
+                  toast("Clips re-scored with " + (sceneCuts.length ? "scenes " : "") + (audioEvents.length ? "audio " : "") + (visualHighlights.length ? "visual " : "") + "signals", "success");
+                }
+              } catch(e){ console.warn('[zs] signal re-score failed', e); }
+            }
+            setProcessStatus("");
+          } catch(e){
+            console.warn('[zs] signal collection failed', e);
+            setProcessStatus("");
+          }
+        })();
       }
     } catch(e){
       toast("Process failed: " + (e && e.message || "unknown"), "error");
@@ -6145,6 +6436,7 @@ const removeClip = (clipId) => {
                     clipThumbUrl={clipBlobUrls[c.id] ? clipBlobUrls[c.id].thumb : null}
                     onShare={(platform)=>shareClip(c.id, platform)}
                     shareBusyPlatform={shareBusyId && shareBusyId.startsWith(c.id + ":") ? shareBusyId.split(":")[1] : null}
+                    signals={project.signals || null}
                   />
                 </div>
               );
