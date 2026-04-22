@@ -1,4 +1,4 @@
-/* Zaidsaid — app.js v2.0 — x83: Smart Clipping v2 — two-stage viral detection + topic-boundary awareness + variable 30-180s clip length + unified Generate flow + target default 10 (range 3-20) | x82: preview fix — CSP frame-src, youtube-nocookie embed, thumbnail fallback | x80: Smart Clipping — viral moment detection. Worker /youtube-transcript returns segments[{t,d,text}]. analyzeViaClaude uses timestamped transcript with 4-dimension scoring (hook_power/emotional_impact/quotability/surprise_drama). analyzeLocal scores ~45-75s windows, picks top N with spatial diversity across full duration. YT iframe autoplay+loop within clip range; uploaded video autoplay muted with loop-on-end.
+/* Zaidsaid — app.js v2.0 — x84: Phase B — YT chapter-boundary detection (parseYouTubeChapters in worker; analyzeLocal uses chapter spans as candidate windows when ≥3 chapters; Claude receives chapter list for boundary alignment) + Web Audio energy analyzer (analyzeUploadedVideoAudio: 8x scrub AudioContext RMS scan on uploaded files; peaks boost analyzeLocal virality by +5*peakDensity) | x83: Smart Clipping v2 — two-stage viral detection + topic-boundary awareness + variable 30-180s clip length + unified Generate flow + target default 10 (range 3-20) | x82: preview fix — CSP frame-src, youtube-nocookie embed, thumbnail fallback | x80: Smart Clipping — viral moment detection. Worker /youtube-transcript returns segments[{t,d,text}]. analyzeViaClaude uses timestamped transcript with 4-dimension scoring (hook_power/emotional_impact/quotability/surprise_drama). analyzeLocal scores ~45-75s windows, picks top N with spatial diversity across full duration. YT iframe autoplay+loop within clip range; uploaded video autoplay muted with loop-on-end.
  * Security: localStorage namespaced as zaidsaid.v2.*, error boundary, no innerHTML, no eval, no fetch.
  * Archived v1 seed data preserved under ARCHIVE_* for later reuse.
  */
@@ -1094,7 +1094,8 @@ const parsePastedTranscript = (text) => {
 };
 
 // x80: MVP-F — Viral clip detection via Claude with timestamped segments + 4-dimension scoring
-const analyzeViaClaude = async (proxyUrl, sourceText, targetCount, segments, meta) => {
+// x84: accepts optional chapters [{t,title}] for boundary alignment hints.
+const analyzeViaClaude = async (proxyUrl, sourceText, targetCount, segments, meta, chapters) => {
   const tools = [{
     name:'emit_clips',
     description:'Return the N best viral short-form clip candidates with 4-dimension scoring.',
@@ -1126,25 +1127,38 @@ const analyzeViaClaude = async (proxyUrl, sourceText, targetCount, segments, met
   }];
   const hasSegments = Array.isArray(segments) && segments.length > 0;
   const n = Math.max(1, Math.min(20, Number(targetCount)||10));
+  const chaps = Array.isArray(chapters) && chapters.length >= 3 ? chapters : [];
+  const chapSysAddendum = chaps.length >= 3
+    ? '\n\n(f) CHAPTER BOUNDARIES — If chapter boundaries are provided, strongly prefer clip.start/clip.end to align with chapter boundaries unless the viral moment clearly spans a chapter edge.'
+    : '';
   const sys = 'You are a viral short-form video strategist extracting TikTok/Reels/Shorts clips from long-form content. For each clip you pick:\n\n' +
     '(a) TOPIC BOUNDARY — Identify the EXACT transcript segment where the viral moment\'s conversation/thought begins (usually a hook line, topic shift, or question). Identify where the thought concludes (answer, punchline, resolution, or topic change). Set clip.start and clip.end to those exact timestamps so the clip captures the COMPLETE thought — never cut mid-sentence, never start mid-answer.\n\n' +
     '(b) LENGTH — clips are typically 30-90s, but extend to 180s if the topic genuinely requires it (e.g. a 2-minute story with a payoff). Do NOT truncate just to hit a length target. A complete 2-minute clip beats a chopped 45s one.\n\n' +
     '(c) SELF-CONTAINED — the viewer sees this cold. It must make sense without any prior context.\n\n' +
     '(d) HOOK + PAYOFF — opens with a hook (question, bold claim, conflict, or surprising fact) and closes on a payoff (answer, punchline, or resolution).\n\n' +
     '(e) DISTRIBUTE — clips must span DIFFERENT moments across the full video. Do not cluster near the start.\n\n' +
-    'Score each clip 0-10 on: hook_power, emotional_impact, quotability, surprise_drama. Return ONLY via emit_clips tool.';
+    'Score each clip 0-10 on: hook_power, emotional_impact, quotability, surprise_drama. Return ONLY via emit_clips tool.' +
+    chapSysAddendum;
   let userMsg;
   if(hasSegments){
     const { lines, totalDur } = buildTimedTranscript(segments, 14000);
     const metaLine = meta && meta.title ? ('Video: "' + meta.title + '"' + (meta.author ? (' by ' + meta.author) : '') + '\n') : '';
+    const chapLine = chaps.length >= 3
+      ? 'Available chapters:\n' + chaps.map(c => { const m = Math.floor(c.t/60); const s = Math.round(c.t%60); return '[' + m + ':' + String(s).padStart(2,'0') + '] ' + c.title; }).join('\n') + '\n\n'
+      : '';
     userMsg = metaLine +
       'Duration: ' + fmtTs(totalDur) + ' (' + Math.round(totalDur) + 's)\n' +
       'Target clip count: ' + n + '\n\n' +
+      chapLine +
       'Timestamped transcript (format: [M:SS] or [H:MM:SS] text):\n' + lines.join('\n') + '\n\n' +
       'Extract exactly ' + n + ' viral clips. Each clip.start / clip.end MUST be in seconds (not formatted). ' +
       'Distribute picks across the full ' + Math.round(totalDur) + 's duration — do not cluster near the start.';
   } else {
+    const chapLine = chaps.length >= 3
+      ? 'Available chapters:\n' + chaps.map(c => { const m = Math.floor(c.t/60); const s = Math.round(c.t%60); return '[' + m + ':' + String(s).padStart(2,'0') + '] ' + c.title; }).join('\n') + '\n\n'
+      : '';
     userMsg = 'Target clip count: ' + n + '\n\n' +
+      chapLine +
       'Source (no timestamps — infer approximate seconds across assumed duration):\n' +
       String(sourceText||'').slice(0, 8000) + '\n\n' +
       'Extract exactly ' + n + ' viral clips. Score each on the 4 dimensions.';
@@ -1216,51 +1230,99 @@ const scoreSegmentViral = (text, segDurSec) => {
 };
 
 // x80: Local fallback — score timestamped segments, pick top N spread across duration.
-const analyzeLocal = (sourceText, targetCount, segments) => {
+// x84: accepts optional chapters [{t,title}] and audioMap {peaks:[]} for Phase B signals.
+const analyzeLocal = (sourceText, targetCount, segments, chapters, audioMap) => {
   const n = Math.max(1, Math.min(20, Number(targetCount)||10));
   const hasSegments = Array.isArray(segments) && segments.length > 0;
+  const chaps = Array.isArray(chapters) && chapters.length >= 3 ? chapters : [];
+  const peaks = (audioMap && Array.isArray(audioMap.peaks)) ? audioMap.peaks : [];
+  const HOOK_TITLE_KW = /\b(why|how|secret|truth|nobody|everyone|never|always|biggest|worst|best|stop|start|hidden|surprising|actually|listen|think about|shocking|crazy|insane|amazing|unbelievable|real reason|turns out|twist|reveal)\b/i;
+
+  const applyAudioBoost = (virality, start, end) => {
+    if(!peaks.length) return virality;
+    const winDur = Math.max(1, end - start);
+    const peaksInWindow = peaks.filter(pt => pt >= start && pt < end).length;
+    if(!peaksInWindow) return virality;
+    const peakDensity = peaksInWindow / (winDur / 10);
+    return virality + Math.min(5, Math.round(5 * peakDensity));
+  };
+
   if(hasSegments){
     const { lines, totalDur } = buildTimedTranscript(segments, 60000);
     void lines;
-    // Chunk segments into 30-150s candidate windows, step 25s
-    const windowMin = 30, windowMax = 150, step = 25;
-    const TOPIC_SHIFT = /\b(let me tell you|let's talk|moving on|next|by the way|here's the thing|so|but|now|imagine|think about)\b/i;
+    const windowMin = 30, windowMax = 180;
     const candidates = [];
-    for(let startT = 0; startT < totalDur; startT += step){
-      let endT = Math.min(totalDur, startT + windowMax);
-      let winSegs = segments.filter(s => {
-        const t = Number(s.t)||0;
-        return t >= startT && t < endT;
-      });
-      if(!winSegs.length) continue;
-      // Topic-boundary: if a shift phrase appears in the first 8s, snap start to that segment
-      const earlySegs = winSegs.filter(s => (Number(s.t)||0) - startT <= 8);
-      for(const es of earlySegs){
-        if(TOPIC_SHIFT.test(es.text || '')){
-          const snapT = Number(es.t)||startT;
-          winSegs = segments.filter(s => { const t = Number(s.t)||0; return t >= snapT && t < endT; });
-          break;
+
+    if(chaps.length >= 3){
+      // x84: use chapter spans as candidate windows
+      let i = 0;
+      while(i < chaps.length){
+        const chapStart = chaps[i].t;
+        const chapEnd = i + 1 < chaps.length ? chaps[i+1].t : totalDur;
+        const span = chapEnd - chapStart;
+        if(span < windowMin && i + 1 < chaps.length){
+          // merge with next chapter
+          i++;
+          continue;
         }
-      }
-      // Topic-boundary: if last segment doesn't end on sentence punctuation, extend up to +30s
-      const lastSeg = winSegs[winSegs.length - 1];
-      if(lastSeg && !/[.!?]$/.test((lastSeg.text || '').trim())){
-        const extendTo = Math.min(totalDur, endT + 30);
-        const extSegs = segments.filter(s => { const t = Number(s.t)||0; return t >= endT && t < extendTo; });
-        for(const es of extSegs){
-          winSegs.push(es);
-          if(/[.!?]$/.test((es.text || '').trim())){ break; }
+        const clampedEnd = Math.min(totalDur, chapStart + windowMax);
+        const actualEnd = span > windowMax ? clampedEnd : Math.min(totalDur, chapEnd);
+        const winSegs = segments.filter(s => { const t = Number(s.t)||0; return t >= chapStart && t < actualEnd; });
+        if(winSegs.length){
+          const winText = winSegs.map(s => s.text).join(' ').replace(/\s+/g,' ').trim();
+          if(winText.length >= 60){
+            const winDur = Math.max(windowMin, Math.min(windowMax, actualEnd - chapStart));
+            const score = scoreSegmentViral(winText, winDur);
+            const titleBoost = HOOK_TITLE_KW.test(chaps[i].title) ? 10 : 0;
+            const boostedVirality = Math.min(100, score.virality + titleBoost);
+            const boostFinal = applyAudioBoost(boostedVirality, chapStart, actualEnd);
+            candidates.push({ start: chapStart, end: actualEnd, text: winText, ...score, virality: boostFinal });
+          }
         }
-        endT = winSegs.length ? Math.min(totalDur, (Number(winSegs[winSegs.length-1].t)||0) + (Number(winSegs[winSegs.length-1].d)||5)) : endT;
+        i++;
       }
-      const actualStart = Number(winSegs[0].t)||startT;
-      const winText = winSegs.map(s => s.text).join(' ').replace(/\s+/g,' ').trim();
-      const winDur = Math.max(windowMin, Math.min(windowMax, endT - actualStart));
-      if(winText.length < 60) continue;
-      const score = scoreSegmentViral(winText, winDur);
-      const actualEnd = Math.min(totalDur, actualStart + Math.max(windowMin, Math.min(windowMax, winDur)));
-      candidates.push({ start: actualStart, end: actualEnd, text: winText, ...score });
     }
+
+    if(!candidates.length){
+      // sliding-window path (original x83 logic)
+      const step = 25;
+      const TOPIC_SHIFT = /\b(let me tell you|let's talk|moving on|next|by the way|here's the thing|so|but|now|imagine|think about)\b/i;
+      for(let startT = 0; startT < totalDur; startT += step){
+        let endT = Math.min(totalDur, startT + windowMax);
+        let winSegs = segments.filter(s => {
+          const t = Number(s.t)||0;
+          return t >= startT && t < endT;
+        });
+        if(!winSegs.length) continue;
+        const earlySegs = winSegs.filter(s => (Number(s.t)||0) - startT <= 8);
+        for(const es of earlySegs){
+          if(TOPIC_SHIFT.test(es.text || '')){
+            const snapT = Number(es.t)||startT;
+            winSegs = segments.filter(s => { const t = Number(s.t)||0; return t >= snapT && t < endT; });
+            break;
+          }
+        }
+        const lastSeg = winSegs[winSegs.length - 1];
+        if(lastSeg && !/[.!?]$/.test((lastSeg.text || '').trim())){
+          const extendTo = Math.min(totalDur, endT + 30);
+          const extSegs = segments.filter(s => { const t = Number(s.t)||0; return t >= endT && t < extendTo; });
+          for(const es of extSegs){
+            winSegs.push(es);
+            if(/[.!?]$/.test((es.text || '').trim())){ break; }
+          }
+          endT = winSegs.length ? Math.min(totalDur, (Number(winSegs[winSegs.length-1].t)||0) + (Number(winSegs[winSegs.length-1].d)||5)) : endT;
+        }
+        const actualStart = Number(winSegs[0].t)||startT;
+        const winText = winSegs.map(s => s.text).join(' ').replace(/\s+/g,' ').trim();
+        const winDur = Math.max(windowMin, Math.min(windowMax, endT - actualStart));
+        if(winText.length < 60) continue;
+        const score = scoreSegmentViral(winText, winDur);
+        const actualEnd = Math.min(totalDur, actualStart + Math.max(windowMin, Math.min(windowMax, winDur)));
+        const boostedVirality = applyAudioBoost(score.virality, actualStart, actualEnd);
+        candidates.push({ start: actualStart, end: actualEnd, text: winText, ...score, virality: boostedVirality });
+      }
+    }
+
     if(candidates.length === 0) return analyzeLocalFromText(sourceText, n);
     // Pick top N with spatial diversity — greedily select highest virality, skip windows that overlap prior picks by >50%
     candidates.sort((a,b) => b.virality - a.virality);
@@ -1335,10 +1397,11 @@ const analyzeLocalFromText = (sourceText, n) => {
 
 // x81: Two-stage viral detection. Stage 1: local pre-filter top 3N+5 candidates with ±2 neighbor context.
 // Stage 2: send candidate windows to Claude for final pick + exact timestamps.
+// x84: accepts optional chapters [{t,title}] passed through to analyzeViaClaude.
 // Falls through to text-only path if no segments.
-const analyzeViaClaudeTwoStage = async (proxyUrl, sourceText, targetCount, segments, meta) => {
+const analyzeViaClaudeTwoStage = async (proxyUrl, sourceText, targetCount, segments, meta, chapters) => {
   const hasSegments = Array.isArray(segments) && segments.length > 0;
-  if(!hasSegments) return analyzeViaClaude(proxyUrl, sourceText, targetCount, [], meta);
+  if(!hasSegments) return analyzeViaClaude(proxyUrl, sourceText, targetCount, [], meta, chapters);
   const n = Math.max(1, Math.min(20, Number(targetCount)||10));
   const candidateCount = 3 * n + 5;
 
@@ -1361,7 +1424,7 @@ const analyzeViaClaudeTwoStage = async (proxyUrl, sourceText, targetCount, segme
   const candidateIdxs = Array.from(expandedSet).sort((a, b) => a - b);
   const candidateSegs = candidateIdxs.map(i => segments[i]);
 
-  return analyzeViaClaude(proxyUrl, sourceText, targetCount, candidateSegs, meta);
+  return analyzeViaClaude(proxyUrl, sourceText, targetCount, candidateSegs, meta, chapters);
 };
 
 // MVP-B: Polish a Studio script scene via Claude
@@ -4807,6 +4870,7 @@ function RepurposeTab(){
             const data = await res.json();
             const tx = (data.transcript || data.description || "").trim();
             const segs = Array.isArray(data.segments) ? data.segments : [];
+            const chaps = Array.isArray(data.chapters) ? data.chapters : [];
             // If user already pasted text but we got real segments from YT, use the segments for timing.
             if(segs.length > 0){
               segments = segs;
@@ -4816,6 +4880,7 @@ function RepurposeTab(){
                 ...p,
                 transcriptText: hasPastedTranscript ? p.transcriptText : tx,
                 transcriptSegments: segs,
+                chapters: chaps,
                 name: p.name || data.title || "",
                 author: p.author || data.author || "",
                 durationSec: (!p.durationSec || p.durationSec === 5520) && data.lengthSeconds ? data.lengthSeconds : (p.durationSec || data.lengthSeconds || p.durationSec)
@@ -4850,13 +4915,15 @@ function RepurposeTab(){
         }
       }
       const target = Number(project.targetCount) || 10;
+      const chapters = Array.isArray(project.chapters) ? project.chapters : [];
+      const audioMap = project.audioMap || null;
       setProcessStatus(segments.length > 0 ? ("Analyzing " + segments.length + " segments…") : "Generating clips…");
       const path = getAnthropicPath();
       let clips = null;
       if(path){
-        try { clips = await analyzeViaClaudeTwoStage(path, text, target, segments, meta); } catch(e){ console.warn('[zs] analyzeViaClaudeTwoStage failed', e); clips = null; }
+        try { clips = await analyzeViaClaudeTwoStage(path, text, target, segments, meta, chapters); } catch(e){ console.warn('[zs] analyzeViaClaudeTwoStage failed', e); clips = null; }
       }
-      if(!clips || !clips.length){ clips = analyzeLocal(text, target, segments); }
+      if(!clips || !clips.length){ clips = analyzeLocal(text, target, segments, chapters, audioMap); }
       if(!clips || !clips.length){ toast("No clips generated — try a different source", "error"); return; }
       setProject(p => ({ ...p, clips, durationSec: p.durationSec || (clips[clips.length-1].end + 60) }));
       setProcessStatus("Done — " + clips.length + " clips");

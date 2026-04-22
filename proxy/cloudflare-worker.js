@@ -121,6 +121,23 @@ function decodeHtmlEntities(s) {
     .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)));
 }
 
+function parseYouTubeChapters(description) {
+  const chapters = [];
+  const lines = String(description || "").split(/\r?\n/);
+  const re = /^[\[\(]?(\d{1,2}:\d{2}(?::\d{2})?)[\]\)]?[\s\-–—|]+(.+)$/;
+  for (const line of lines) {
+    const m = re.exec(line.trim());
+    if (!m) continue;
+    const parts = m[1].split(":").map(Number);
+    let t = 0;
+    if (parts.length === 3) t = parts[0] * 3600 + parts[1] * 60 + parts[2];
+    else t = parts[0] * 60 + (parts[1] || 0);
+    const title = m[2].trim();
+    if (title) chapters.push({ t, title });
+  }
+  return chapters;
+}
+
 function parseCaptionPayload(text) {
   const trimmed = (text || "").trim();
   if (!trimmed) return { text: "", segments: [] };
@@ -305,6 +322,7 @@ async function fetchYouTubeTranscriptViaScrape(videoId) {
 
 async function fetchYouTubeTranscript(videoId, env) {
   const apiMeta = await fetchYouTubeMetaViaApi(videoId, env);
+  const chapters = parseYouTubeChapters(apiMeta && apiMeta.description ? apiMeta.description : "");
   const errors = [];
 
   try {
@@ -317,6 +335,7 @@ async function fetchYouTubeTranscript(videoId, env) {
       language: it.language,
       transcript: it.transcript,
       segments: it.segments || [],
+      chapters,
       source: "innertube"
     };
   } catch (itErr) {
@@ -333,6 +352,7 @@ async function fetchYouTubeTranscript(videoId, env) {
       language: scrape.language,
       transcript: scrape.transcript,
       segments: scrape.segments || [],
+      chapters,
       source: "scrape"
     };
   } catch (scrapeErr) {
@@ -348,6 +368,7 @@ async function fetchYouTubeTranscript(videoId, env) {
       language: "en",
       transcript: apiMeta.description,
       segments: [],
+      chapters,
       source: "description",
       fallback: "description-only",
       errors
