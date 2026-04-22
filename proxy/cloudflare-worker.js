@@ -11,6 +11,8 @@
  *   wrangler secret put XAI_KEY
  *   wrangler secret put STABILITY_KEY
  *   wrangler secret put YOUTUBE_API_KEY
+ *   wrangler secret put GEMINI_KEY
+ *   wrangler secret put REPLICATE_TOKEN
  *
  * Then in Zaidsaid (Settings -> Providers), set each vendor's Proxy URL to
  * your deployed worker, e.g. https://my-zaidsaid-proxy.workers.dev/elevenlabs
@@ -44,7 +46,15 @@ const VENDORS = {
   },
   grok: { base: "https://api.x.ai", authHeader: (env) => ({ "Authorization": "Bearer " + env.XAI_KEY }) },
   pollinations: { base: "https://image.pollinations.ai", authHeader: () => ({}) },
-  stability: { base: "https://api.stability.ai", authHeader: (env) => ({ "Authorization": "Bearer " + env.STABILITY_KEY }) }
+  stability: { base: "https://api.stability.ai", authHeader: (env) => ({ "Authorization": "Bearer " + env.STABILITY_KEY }) },
+  gemini: {
+    base: "https://generativelanguage.googleapis.com",
+    authHeader: (env) => env.GEMINI_KEY ? { "x-goog-api-key": env.GEMINI_KEY } : {}
+  },
+  replicate: {
+    base: "https://api.replicate.com",
+    authHeader: (env) => env.REPLICATE_TOKEN ? { "Authorization": "Token " + env.REPLICATE_TOKEN } : {}
+  }
 };
 
 function corsHeaders(req) {
@@ -531,6 +541,193 @@ export default {
         });
       } catch (err) {
         return new Response(JSON.stringify({ error: String((err && err.message) || err), videoId }), {
+          status: 502, headers: { ...cors, "Content-Type": "application/json" }
+        });
+      }
+    }
+
+    if (url.pathname === "/gemini-video-highlights") {
+      if (!env.GEMINI_KEY) {
+        return new Response(JSON.stringify({ disabled: true, reason: "GEMINI_KEY not configured" }), {
+          headers: { ...cors, "Content-Type": "application/json" }
+        });
+      }
+      if (req.method !== "POST") {
+        return new Response(JSON.stringify({ error: "POST required" }), {
+          status: 405, headers: { ...cors, "Content-Type": "application/json" }
+        });
+      }
+      try {
+        const form = await req.formData();
+        const file = form.get("file");
+        const prompt = String(form.get("prompt") || "");
+        const targetCount = parseInt(form.get("targetCount") || "10", 10);
+        if (!file || typeof file.arrayBuffer !== "function") {
+          return new Response(JSON.stringify({ error: "file field required" }), {
+            status: 400, headers: { ...cors, "Content-Type": "application/json" }
+          });
+        }
+        const fileBytes = await file.arrayBuffer();
+        const mimeType = file.type || "audio/mpeg";
+        const fileSize = fileBytes.byteLength;
+
+        // Step 1: initiate resumable upload
+        const initRes = await fetch(
+          "https://generativelanguage.googleapis.com/upload/v1beta/files?uploadType=resumable",
+          {
+            method: "POST",
+            headers: {
+              "x-goog-api-key": env.GEMINI_KEY,
+              "X-Goog-Upload-Protocol": "resumable",
+              "X-Goog-Upload-Command": "start",
+              "X-Goog-Upload-Header-Content-Length": String(fileSize),
+              "X-Goog-Upload-Header-Content-Type": mimeType,
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({ file: { display_name: file.name || "upload" } })
+          }
+        );
+        if (!initRes.ok) {
+          const t = await initRes.text().catch(() => "");
+          throw new Error("Gemini upload init HTTP " + initRes.status + " " + t.slice(0, 200));
+        }
+        const uploadUrl = initRes.headers.get("x-goog-upload-url");
+        if (!uploadUrl) throw new Error("No x-goog-upload-url in Gemini response");
+
+        // Step 2: upload the bytes
+        const uploadRes = await fetch(uploadUrl, {
+          method: "POST",
+          headers: {
+            "Content-Length": String(fileSize),
+            "X-Goog-Upload-Offset": "0",
+            "X-Goog-Upload-Command": "upload, finalize"
+          },
+          body: fileBytes
+        });
+        if (!uploadRes.ok) {
+          const t = await uploadRes.text().catch(() => "");
+          throw new Error("Gemini upload HTTP " + uploadRes.status + " " + t.slice(0, 200));
+        }
+        const uploadData = await uploadRes.json();
+        const fileUri = (uploadData.file && uploadData.file.uri) ? uploadData.file.uri : null;
+        if (!fileUri) throw new Error("No file.uri in Gemini upload response");
+
+        // Step 3: generateContent
+        const systemPrompt = prompt ||
+          'Return JSON {"highlights":[{"t":seconds,"d":duration_seconds,"reason":"one-line why","mood":"funny|shocking|emotional|educational|dramatic"}]}. Identify the ' + targetCount + ' most visually dynamic or emotionally charged moments. Output JSON only.';
+        const genRes = await fetch(
+          "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" + env.GEMINI_KEY,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              contents: [{
+                parts: [
+                  { file_data: { mime_type: mimeType, file_uri: fileUri } },
+                  { text: systemPrompt }
+                ]
+              }]
+            })
+          }
+        );
+        if (!genRes.ok) {
+          const t = await genRes.text().catch(() => "");
+          throw new Error("Gemini generateContent HTTP " + genRes.status + " " + t.slice(0, 200));
+        }
+        const genData = await genRes.json();
+        const rawText = ((((genData.candidates || [])[0] || {}).content || {}).parts || []).map(p => p.text || "").join("");
+        const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+        if (!jsonMatch) throw new Error("No JSON in Gemini response: " + rawText.slice(0, 300));
+        const parsed = JSON.parse(jsonMatch[0]);
+        const highlights = Array.isArray(parsed.highlights) ? parsed.highlights : [];
+        return new Response(JSON.stringify({ highlights }), {
+          headers: { ...cors, "Content-Type": "application/json" }
+        });
+      } catch (err) {
+        return new Response(JSON.stringify({ error: String((err && err.message) || err), disabled: false }), {
+          status: 502, headers: { ...cors, "Content-Type": "application/json" }
+        });
+      }
+    }
+
+    if (url.pathname === "/sensevoice") {
+      if (!env.REPLICATE_TOKEN) {
+        return new Response(JSON.stringify({ disabled: true, reason: "REPLICATE_TOKEN not configured" }), {
+          headers: { ...cors, "Content-Type": "application/json" }
+        });
+      }
+      if (req.method !== "POST") {
+        return new Response(JSON.stringify({ error: "POST required" }), {
+          status: 405, headers: { ...cors, "Content-Type": "application/json" }
+        });
+      }
+      try {
+        const body = await req.json();
+        const audioUrl = body.audio_url || body.audioUrl || body.url || "";
+        if (!audioUrl) {
+          return new Response(JSON.stringify({ error: "audio_url required" }), {
+            status: 400, headers: { ...cors, "Content-Type": "application/json" }
+          });
+        }
+        // lucataco/sensevoice — multilingual STT + audio event detection (laughter, applause, emphasis)
+        const predRes = await fetch("https://api.replicate.com/v1/models/lucataco/sensevoice/predictions", {
+          method: "POST",
+          headers: {
+            "Authorization": "Token " + env.REPLICATE_TOKEN,
+            "Content-Type": "application/json",
+            "Prefer": "wait"
+          },
+          body: JSON.stringify({
+            input: { audio: audioUrl }
+          })
+        });
+        if (!predRes.ok) {
+          const t = await predRes.text().catch(() => "");
+          throw new Error("Replicate HTTP " + predRes.status + " " + t.slice(0, 200));
+        }
+        const predData = await predRes.json();
+        // If still processing, poll once
+        let output = predData.output;
+        if (!output && predData.urls && predData.urls.get) {
+          const pollRes = await fetch(predData.urls.get, {
+            headers: { "Authorization": "Token " + env.REPLICATE_TOKEN }
+          });
+          if (pollRes.ok) {
+            const polled = await pollRes.json();
+            output = polled.output;
+          }
+        }
+        // Parse SenseVoice output into [{t, d, label}] events
+        const events = [];
+        if (Array.isArray(output)) {
+          for (const item of output) {
+            const text = String(item.text || item.content || "");
+            const t = Number(item.start || item.timestamp && item.timestamp[0] || 0);
+            const d = Number(item.end || item.timestamp && item.timestamp[1] || 0) - t;
+            const labelMatch = text.match(/<\|([^|]+)\|>/);
+            const label = labelMatch ? labelMatch[1].toLowerCase() : "speech";
+            if (label && label !== "speech" && label !== "background") {
+              events.push({ t: +t.toFixed(2), d: +Math.max(0, d).toFixed(2), label });
+            }
+          }
+        } else if (output && typeof output === "object") {
+          const segments = output.segments || output.chunks || [];
+          for (const seg of segments) {
+            const text = String(seg.text || "");
+            const t = Number(seg.start || (Array.isArray(seg.timestamp) ? seg.timestamp[0] : 0) || 0);
+            const end = Number(seg.end || (Array.isArray(seg.timestamp) ? seg.timestamp[1] : 0) || t);
+            const labelMatch = text.match(/<\|([^|]+)\|>/);
+            const label = labelMatch ? labelMatch[1].toLowerCase() : "speech";
+            if (label && label !== "speech" && label !== "background") {
+              events.push({ t: +t.toFixed(2), d: +Math.max(0, end - t).toFixed(2), label });
+            }
+          }
+        }
+        return new Response(JSON.stringify({ events }), {
+          headers: { ...cors, "Content-Type": "application/json" }
+        });
+      } catch (err) {
+        return new Response(JSON.stringify({ error: String((err && err.message) || err), events: [] }), {
           status: 502, headers: { ...cors, "Content-Type": "application/json" }
         });
       }
