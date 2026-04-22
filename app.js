@@ -1673,7 +1673,13 @@ const grabFrameThumb = (srcBlob, atSec) => new Promise((resolve, reject) => {
 
 // x93: Generate cut video + thumbnail for every clip, write both to IDB, mark ready.
 // Sequential — ffmpeg.wasm is single-threaded.
-const generateClipAssets = async (srcBlob, clips, onStatus) => {
+const generateClipAssets = async (srcBlob, clips, onStatus, setClipBlobUrls) => {
+  if(setClipBlobUrls){
+    setClipBlobUrls(prev => {
+      Object.values(prev).forEach(e => { try { URL.revokeObjectURL(e.video); } catch(_){} try { URL.revokeObjectURL(e.thumb); } catch(_){} });
+      return {};
+    });
+  }
   const total = clips.length;
   const results = [];
   for(let i = 0; i < clips.length; i++){
@@ -1688,14 +1694,18 @@ const generateClipAssets = async (srcBlob, clips, onStatus) => {
       results.push({ id: clip.id, ready: false });
       continue;
     }
+    const video = URL.createObjectURL(cutBlob);
+    let thumb = null;
     try {
       const midSec = (clip.start || 0) + ((clip.end || 0) - (clip.start || 0)) * 0.25;
       thumbBlob = await grabFrameThumb(srcBlob, midSec);
       await idbPutClip(clip.id + ":thumb", thumbBlob);
+      thumb = URL.createObjectURL(thumbBlob);
     } catch(e){
       console.warn("[zs] grabFrameThumb failed for clip", clip.id, e);
       // non-fatal — clip still usable without thumbnail
     }
+    if(setClipBlobUrls) setClipBlobUrls(prev => ({ ...prev, [clip.id]: { video, thumb } }));
     results.push({ id: clip.id, ready: true });
   }
   return results;
@@ -5342,6 +5352,9 @@ function RepurposeTab(){
   const [clipBlobUrls, setClipBlobUrls] = useState({});
   useEffect(() => {
     if(!Array.isArray(project.clips) || project.clips.length === 0) return;
+    const clipIds = project.clips.map(c => c.id).sort().join(',');
+    const loadedIds = Object.keys(clipBlobUrls).sort().join(',');
+    if(Object.keys(clipBlobUrls).length > 0 && loadedIds === clipIds) return;
     let cancelled = false;
     const minted = [];
     (async () => {
@@ -5562,7 +5575,7 @@ function RepurposeTab(){
         try { srcBlob = await idbGet(IDB_UPLOAD_KEY); } catch(_){}
         if(srcBlob){
           try {
-            await generateClipAssets(srcBlob, clips, setProcessStatus);
+            await generateClipAssets(srcBlob, clips, setProcessStatus, setClipBlobUrls);
             setProcessStatus("Done — " + clips.length + " clips");
           } catch(e){
             console.warn("[zs] generateClipAssets failed", e);
