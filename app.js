@@ -1,4 +1,4 @@
-/* Zaidsaid — app.js v2.0 — x95: Phase B UI cleanup: collapsed intake to URL/File, folded YT downloader into URL expandable, per-clip actions 9→3, removed fake waveform, toolbar pruned. | x94: clear stale clips at Generate start + narrow reseed effect so demo doesn't overwrite a user's upload on refresh. | x93: Repurpose — real per-clip mp4 cuts + thumbnail frames. cutClipFromSource (ffmpeg.wasm, -ss after -i, -c copy with libx264 fallback <5 min) + grabFrameThumb (off-DOM canvas) + generateClipAssets (sequential, IDB-backed). processSource fires generateClipAssets after setProject for upload flows. RepurposeTab hydrates clipBlobUrls Map from IDB on mount; RepurposeClipPreview shows pre-cut <video controls> when blob ready. removeClip deletes IDB entries + revokes URLs. | x92: Repurpose — big videos extract audio client-side before transcribing. Lazy-loads ffmpeg.wasm (@ffmpeg/ffmpeg@0.12.10 + @ffmpeg/core@0.12.6 from unpkg, ~30 MB one-time); any uploaded video >50 MB is reduced to mono 16 kHz 32 kbps MP3 (~14 MB/hr) before POSTing to /elevenlabs/v1/speech-to-text. Fixes 700+ MB uploads hanging on the Cloudflare Worker 500 MiB body limit. CSP widened for wasm-unsafe-eval, blob: workers, and unpkg connect. | x91: Repurpose — uploaded files now survive page refreshes. New IndexedDB blob store (zaidsaid/uploads, key repurpose:current) persists the File on upload; RepurposeTab useEffect on mount HEAD-checks the existing blob URL and rehydrates from IDB when it's dead, or clears the dangling reference + toasts "please re-upload" when IDB is empty too. processSource now reads the blob from IDB first, falling back to the blob URL. Remove button deletes the IDB entry. | x90: Repurpose — uploads now actually clip. processSource gate no longer bails on empty source when an uploaded video is present; on new file upload we clear stale transcript/chapters/clips/name; uploaded videos without a transcript auto-transcribe via ElevenLabs Scribe (/elevenlabs/v1/speech-to-text with model_id=scribe_v1, word-level timestamps grouped into ~6s segments) and feed the existing two-stage viral analyzer. New fuchsia "ElevenLabs Scribe (auto-transcribed)" source chip. | x89: Repurpose — YouTube downloader tool (paste URL → fetch progressive formats via worker InnerTube → quality dropdown → File System Access folder picker with streamed writable, falls back to <a download> when unsupported). Worker: /youtube-formats, /youtube-media. | x88: batch export respects selection + preset-aware video render — "Export selected as video" renders .webm per selected clip at its preset aspect ratio (9:16/1:1/16:9); fallback selection→approved→all; metadata (.txt) export kept as secondary. Fix stray /span> text below batch-export button. | x87: clip length range widened — 5s floor (viral reactions, one-liners) to 1800s / 30min ceiling (full topic arcs); removed rigid length-mix prompt in favor of idea-first sizing | x86: clip preview no-autoplay — remove YouTube loop=1&playlist (fixes whole-video loop), remove autoPlay on uploaded video, preview now shows clip-only paused state until user clicks play | x85: Phase B.1 — persist chapters on description-fallback, surface worker errors, transcript-source chip, length-variance prompt, analyzeLocal intro-skip, **remove dead RepurposeAnalyzer + RepurposeRealAnalyze god-mode components** | x84: Phase B — YT chapter-boundary detection (parseYouTubeChapters in worker; analyzeLocal uses chapter spans as candidate windows when ≥3 chapters; Claude receives chapter list for boundary alignment) + Web Audio energy analyzer (analyzeUploadedVideoAudio: 8x scrub AudioContext RMS scan on uploaded files; peaks boost analyzeLocal virality by +5*peakDensity) | x83: Smart Clipping v2 — two-stage viral detection + topic-boundary awareness + variable 30-180s clip length + unified Generate flow + target default 10 (range 3-20) | x82: preview fix — CSP frame-src, youtube-nocookie embed, thumbnail fallback | x80: Smart Clipping — viral moment detection. Worker /youtube-transcript returns segments[{t,d,text}]. analyzeViaClaude uses timestamped transcript with 4-dimension scoring (hook_power/emotional_impact/quotability/surprise_drama). analyzeLocal scores ~45-75s windows, picks top N with spatial diversity across full duration. YT iframe autoplay+loop within clip range; uploaded video autoplay muted with loop-on-end.
+/* Zaidsaid — app.js v2.0 — x96: Phase E — preset-aware per-clip re-encoding via ffmpeg.wasm (scale+pad for 9:16/1:1/16:9) + JSZip batch download when multiple clips selected. Replaces the old MediaRecorder .webm pipeline for clips that have a per-clip mp4 blob. | x95: Phase B UI cleanup: collapsed intake to URL/File, folded YT downloader into URL expandable, per-clip actions 9→3, removed fake waveform, toolbar pruned. | x94: clear stale clips at Generate start + narrow reseed effect so demo doesn't overwrite a user's upload on refresh. | x93: Repurpose — real per-clip mp4 cuts + thumbnail frames. cutClipFromSource (ffmpeg.wasm, -ss after -i, -c copy with libx264 fallback <5 min) + grabFrameThumb (off-DOM canvas) + generateClipAssets (sequential, IDB-backed). processSource fires generateClipAssets after setProject for upload flows. RepurposeTab hydrates clipBlobUrls Map from IDB on mount; RepurposeClipPreview shows pre-cut <video controls> when blob ready. removeClip deletes IDB entries + revokes URLs. | x92: Repurpose — big videos extract audio client-side before transcribing. Lazy-loads ffmpeg.wasm (@ffmpeg/ffmpeg@0.12.10 + @ffmpeg/core@0.12.6 from unpkg, ~30 MB one-time); any uploaded video >50 MB is reduced to mono 16 kHz 32 kbps MP3 (~14 MB/hr) before POSTing to /elevenlabs/v1/speech-to-text. Fixes 700+ MB uploads hanging on the Cloudflare Worker 500 MiB body limit. CSP widened for wasm-unsafe-eval, blob: workers, and unpkg connect. | x91: Repurpose — uploaded files now survive page refreshes. New IndexedDB blob store (zaidsaid/uploads, key repurpose:current) persists the File on upload; RepurposeTab useEffect on mount HEAD-checks the existing blob URL and rehydrates from IDB when it's dead, or clears the dangling reference + toasts "please re-upload" when IDB is empty too. processSource now reads the blob from IDB first, falling back to the blob URL. Remove button deletes the IDB entry. | x90: Repurpose — uploads now actually clip. processSource gate no longer bails on empty source when an uploaded video is present; on new file upload we clear stale transcript/chapters/clips/name; uploaded videos without a transcript auto-transcribe via ElevenLabs Scribe (/elevenlabs/v1/speech-to-text with model_id=scribe_v1, word-level timestamps grouped into ~6s segments) and feed the existing two-stage viral analyzer. New fuchsia "ElevenLabs Scribe (auto-transcribed)" source chip. | x89: Repurpose — YouTube downloader tool (paste URL → fetch progressive formats via worker InnerTube → quality dropdown → File System Access folder picker with streamed writable, falls back to <a download> when unsupported). Worker: /youtube-formats, /youtube-media. | x88: batch export respects selection + preset-aware video render — "Export selected as video" renders .webm per selected clip at its preset aspect ratio (9:16/1:1/16:9); fallback selection→approved→all; metadata (.txt) export kept as secondary. Fix stray /span> text below batch-export button. | x87: clip length range widened — 5s floor (viral reactions, one-liners) to 1800s / 30min ceiling (full topic arcs); removed rigid length-mix prompt in favor of idea-first sizing | x86: clip preview no-autoplay — remove YouTube loop=1&playlist (fixes whole-video loop), remove autoPlay on uploaded video, preview now shows clip-only paused state until user clicks play | x85: Phase B.1 — persist chapters on description-fallback, surface worker errors, transcript-source chip, length-variance prompt, analyzeLocal intro-skip, **remove dead RepurposeAnalyzer + RepurposeRealAnalyze god-mode components** | x84: Phase B — YT chapter-boundary detection (parseYouTubeChapters in worker; analyzeLocal uses chapter spans as candidate windows when ≥3 chapters; Claude receives chapter list for boundary alignment) + Web Audio energy analyzer (analyzeUploadedVideoAudio: 8x scrub AudioContext RMS scan on uploaded files; peaks boost analyzeLocal virality by +5*peakDensity) | x83: Smart Clipping v2 — two-stage viral detection + topic-boundary awareness + variable 30-180s clip length + unified Generate flow + target default 10 (range 3-20) | x82: preview fix — CSP frame-src, youtube-nocookie embed, thumbnail fallback | x80: Smart Clipping — viral moment detection. Worker /youtube-transcript returns segments[{t,d,text}]. analyzeViaClaude uses timestamped transcript with 4-dimension scoring (hook_power/emotional_impact/quotability/surprise_drama). analyzeLocal scores ~45-75s windows, picks top N with spatial diversity across full duration. YT iframe autoplay+loop within clip range; uploaded video autoplay muted with loop-on-end.
  * Security: localStorage namespaced as zaidsaid.v2.*, error boundary, no innerHTML, no eval, no fetch.
  * Archived v1 seed data preserved under ARCHIVE_* for later reuse.
  */
@@ -1643,6 +1643,57 @@ const cutClipFromSource = async (srcBlob, clip, onProgress) => {
     try { await ffmpeg.deleteFile(outputName); } catch(_){}
   }
 };
+
+// x96: Re-encode a per-clip mp4 blob to a target preset using ffmpeg.wasm scale+pad.
+// Preset dims: vertical=1080x1920, square=1080x1080, landscape=1920x1080.
+// Centers with black bars — never crops unpredictably.
+const reencodeClipForPreset = async (srcMp4Blob, presetId, onProgress) => {
+  const PRESET_DIMS = { vertical: [1080, 1920], square: [1080, 1080], landscape: [1920, 1080] };
+  const [W, H] = PRESET_DIMS[presetId] || PRESET_DIMS.vertical;
+  const { ffmpeg, util } = await loadFfmpeg(null);
+  const inputName = "reencode_in.mp4";
+  const outputName = "reencode_out.mp4";
+  const progressHandler = ({ progress }) => { if(onProgress && typeof progress === 'number') onProgress(Math.min(0.99, progress)); };
+  ffmpeg.on && ffmpeg.on("progress", progressHandler);
+  try {
+    await ffmpeg.writeFile(inputName, await util.fetchFile(srcMp4Blob));
+    await ffmpeg.exec([
+      "-i", inputName,
+      "-vf", "scale=" + W + ":" + H + ":force_original_aspect_ratio=decrease,pad=" + W + ":" + H + ":(ow-iw)/2:(oh-ih)/2:black,setsar=1",
+      "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
+      "-c:a", "aac", "-b:a", "128k",
+      "-movflags", "+faststart",
+      outputName
+    ]);
+    const data = await ffmpeg.readFile(outputName);
+    return new Blob([data.buffer || data], { type: "video/mp4" });
+  } finally {
+    try { ffmpeg.off && ffmpeg.off("progress", progressHandler); } catch(_){}
+    try { await ffmpeg.deleteFile(inputName); } catch(_){}
+    try { await ffmpeg.deleteFile(outputName); } catch(_){}
+  }
+};
+
+// x96: Trigger a browser download from a Blob.
+const downloadBlob = (blob, filename) => {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { try { document.body.removeChild(a); URL.revokeObjectURL(url); } catch(_){} }, 500);
+};
+
+// x96: Wait for zip-loader.js to expose window.zsLoadJSZip (ESM module, deferred).
+const awaitZipLoader = () => new Promise((resolve, reject) => {
+  if(window.zsLoadJSZip) return resolve(window.zsLoadJSZip);
+  const start = Date.now();
+  const t = setInterval(() => {
+    if(window.zsLoadJSZip){ clearInterval(t); resolve(window.zsLoadJSZip); }
+    else if(Date.now() - start > 10000){ clearInterval(t); reject(new Error("zip-loader.js failed to load")); }
+  }, 50);
+});
 
 // x93: Grab a JPEG thumbnail from srcBlob at atSec using an off-DOM video element.
 const grabFrameThumb = (srcBlob, atSec) => new Promise((resolve, reject) => {
@@ -5928,38 +5979,56 @@ const removeClip = (clipId) => {
     setProject({ ...project, clips: project.clips.map(c => selected.includes(c.id) ? { ...c, status: "approved" } : c) });
   };
   const exportClipsAsVideo = async () => {
-    if(!project.uploadedVideoUrl){ toast("Upload a video first", "error"); return; }
-    let targets = project.clips.filter(c => selected.includes(c.id) || (!selected.length && c.status === "approved"));
-    if(targets.length === 0){
-      targets = project.clips;
-      if(targets.length === 0) return;
-      toast("Exporting all clips (none selected)", "info");
-    }
-    const nameSlug = (project.name || "zaidsaid-clips").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "zaidsaid-clips";
-    setBatchRenderBusy({ current: 1, total: targets.length, clipId: targets[0].id });
+    const selectedClips = project.clips.filter(c => selected.includes(c.id));
+    if(selectedClips.length === 0){ toast("Select at least one clip", "warn"); return; }
+    const preset = batchPreset || "vertical";
+    setBatchRenderBusy(true);
     setBatchRenderProgress(0);
+    setProcessStatus("");
     try {
-      for(let i = 0; i < targets.length; i++){
-        const clip = targets[i];
-        setBatchRenderBusy({ current: i + 1, total: targets.length, clipId: clip.id });
-        setBatchRenderProgress(0);
-        const blob = await renderClipVideoFromUpload(project.uploadedVideoUrl, clip, (p) => setBatchRenderProgress(p), { overlay: { hook: clip.hook } });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
+      const outputs = [];
+      for(let i = 0; i < selectedClips.length; i++){
+        const clip = selectedClips[i];
+        setProcessStatus("Encoding " + (i + 1) + "/" + selectedClips.length + "…");
+        const srcBlob = await idbGetClip(clip.id);
+        if(!srcBlob){
+          // Fallback to old MediaRecorder path for clips without a per-clip blob (YouTube or pre-x93).
+          if(project.uploadedVideoUrl){
+            try {
+              const fbBlob = await renderClipVideoFromUpload(project.uploadedVideoUrl, clip, (p) => setBatchRenderProgress(Math.round((i + p) / selectedClips.length * 100)), { overlay: { hook: clip.hook } });
+              const safeTitle = (clip.title || "clip").replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "clip";
+              outputs.push({ name: safeTitle + "_" + preset + ".webm", blob: fbBlob });
+            } catch(fbErr){
+              toast("Skipped clip “" + (clip.title || clip.id) + "” (fallback render failed)", "warn");
+            }
+          } else {
+            toast("Skipped clip “" + (clip.title || clip.id) + "” (no source blob)", "warn");
+          }
+          continue;
+        }
+        const outBlob = await reencodeClipForPreset(srcBlob, preset, (p) => setBatchRenderProgress(Math.round((i + p) / selectedClips.length * 100)));
         const safeTitle = (clip.title || "clip").replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "clip";
-        a.download = nameSlug + "-clip" + (i + 1) + "-" + safeTitle + ".webm";
-        document.body.appendChild(a);
-        a.click();
-        setTimeout(() => { try { document.body.removeChild(a); URL.revokeObjectURL(url); } catch(e){} }, 500);
-        if(i < targets.length - 1) await new Promise(r => setTimeout(r, 400));
+        outputs.push({ name: safeTitle + "_" + preset + ".mp4", blob: outBlob });
       }
-      toast("Exported " + targets.length + " clips (.webm)", "success");
+      if(outputs.length === 0) throw new Error("Nothing encoded");
+      if(outputs.length === 1){
+        downloadBlob(outputs[0].blob, outputs[0].name);
+      } else {
+        setProcessStatus("Packing zip…");
+        const loadZip = await awaitZipLoader();
+        const JSZip = await loadZip();
+        const zip = new JSZip();
+        outputs.forEach(o => zip.file(o.name, o.blob));
+        const zipBlob = await zip.generateAsync({ type: "blob" }, (meta) => setBatchRenderProgress(Math.round(90 + meta.percent * 0.1)));
+        downloadBlob(zipBlob, "clips-" + preset + "-" + Date.now() + ".zip");
+      }
+      toast("Exported " + outputs.length + " clip(s)", "success");
     } catch(e){
       toast("Batch export failed: " + (e && e.message || "unknown"), "error");
     } finally {
       setBatchRenderBusy(null);
       setBatchRenderProgress(0);
+      setProcessStatus("");
     }
   };
   const exportClipsAsText = () => {
@@ -6117,7 +6186,7 @@ const removeClip = (clipId) => {
               disabled={!project.clips.length || !!batchRenderBusy || !project.uploadedVideoUrl}
               title={!project.uploadedVideoUrl ? "Upload a source video to export rendered clips" : ""}>
               {batchRenderBusy
-                ? `Rendering ${batchRenderBusy.current} of ${batchRenderBusy.total}… ${Math.round((batchRenderProgress||0)*100)}%`
+                ? (processStatus || "Encoding…") + " " + (batchRenderProgress || 0) + "%"
                 : <>{I.arrow({size:14})} Export selected as video</>}
             </button>
             <button className="btn btn-outline" onClick={exportClipsAsText}
@@ -6125,7 +6194,7 @@ const removeClip = (clipId) => {
               Export metadata (.txt)
             </button>
             <span className="text-[11px] text-[color:var(--muted)]">
-              Video export renders each selected clip to .webm at its chosen aspect (9:16 / 1:1 / 16:9). Metadata export is text only.
+              Video export re-encodes each selected clip via ffmpeg.wasm at the chosen preset (9:16 / 1:1 / 16:9). Multiple clips download as a zip. Metadata export is text only.
             </span>
           </div>
         </div>
