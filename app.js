@@ -1,4 +1,4 @@
-/* Zaidsaid — app.js v2.0 — x82: preview fix — CSP frame-src, youtube-nocookie embed, thumbnail fallback | x80: Smart Clipping — viral moment detection. Worker /youtube-transcript returns segments[{t,d,text}]. analyzeViaClaude uses timestamped transcript with 4-dimension scoring (hook_power/emotional_impact/quotability/surprise_drama). analyzeLocal scores ~45-75s windows, picks top N with spatial diversity across full duration. YT iframe autoplay+loop within clip range; uploaded video autoplay muted with loop-on-end.
+/* Zaidsaid — app.js v2.0 — x83: Smart Clipping v2 — two-stage viral detection + topic-boundary awareness + variable 30-180s clip length + unified Generate flow + target default 10 (range 3-20) | x82: preview fix — CSP frame-src, youtube-nocookie embed, thumbnail fallback | x80: Smart Clipping — viral moment detection. Worker /youtube-transcript returns segments[{t,d,text}]. analyzeViaClaude uses timestamped transcript with 4-dimension scoring (hook_power/emotional_impact/quotability/surprise_drama). analyzeLocal scores ~45-75s windows, picks top N with spatial diversity across full duration. YT iframe autoplay+loop within clip range; uploaded video autoplay muted with loop-on-end.
  * Security: localStorage namespaced as zaidsaid.v2.*, error boundary, no innerHTML, no eval, no fetch.
  * Archived v1 seed data preserved under ARCHIVE_* for later reuse.
  */
@@ -1125,16 +1125,14 @@ const analyzeViaClaude = async (proxyUrl, sourceText, targetCount, segments, met
     }
   }];
   const hasSegments = Array.isArray(segments) && segments.length > 0;
-  const n = Math.max(1, Math.min(8, Number(targetCount)||5));
-  const sys = 'You are a viral short-form video strategist extracting TikTok/Reels/Shorts clips from long-form content. Rules:\n' +
-    '1. Each clip must be self-contained (no prior context needed)\n' +
-    '2. Must open with a hook (question, bold claim, conflict, surprising fact)\n' +
-    '3. Must close on a payoff, punchline, or resolution — NEVER mid-sentence\n' +
-    '4. Target 30-90 seconds of spoken content per clip\n' +
-    '5. Clips MUST span DIFFERENT moments across the full video — do not bunch at the start\n' +
-    '6. Use exact timestamps from the transcript for start/end\n' +
-    '7. Pick preset per platform fit: vertical (TikTok/Reels/Shorts default), square, or landscape\n' +
-    'Score each clip 0-10 on hook_power, emotional_impact, quotability, surprise_drama. Return ONLY via emit_clips tool.';
+  const n = Math.max(1, Math.min(20, Number(targetCount)||10));
+  const sys = 'You are a viral short-form video strategist extracting TikTok/Reels/Shorts clips from long-form content. For each clip you pick:\n\n' +
+    '(a) TOPIC BOUNDARY — Identify the EXACT transcript segment where the viral moment\'s conversation/thought begins (usually a hook line, topic shift, or question). Identify where the thought concludes (answer, punchline, resolution, or topic change). Set clip.start and clip.end to those exact timestamps so the clip captures the COMPLETE thought — never cut mid-sentence, never start mid-answer.\n\n' +
+    '(b) LENGTH — clips are typically 30-90s, but extend to 180s if the topic genuinely requires it (e.g. a 2-minute story with a payoff). Do NOT truncate just to hit a length target. A complete 2-minute clip beats a chopped 45s one.\n\n' +
+    '(c) SELF-CONTAINED — the viewer sees this cold. It must make sense without any prior context.\n\n' +
+    '(d) HOOK + PAYOFF — opens with a hook (question, bold claim, conflict, or surprising fact) and closes on a payoff (answer, punchline, or resolution).\n\n' +
+    '(e) DISTRIBUTE — clips must span DIFFERENT moments across the full video. Do not cluster near the start.\n\n' +
+    'Score each clip 0-10 on: hook_power, emotional_impact, quotability, surprise_drama. Return ONLY via emit_clips tool.';
   let userMsg;
   if(hasSegments){
     const { lines, totalDur } = buildTimedTranscript(segments, 14000);
@@ -1161,10 +1159,10 @@ const analyzeViaClaude = async (proxyUrl, sourceText, targetCount, segments, met
     const sd = Math.max(0,Math.min(10,Number(c.surprise_drama)||0));
     const virality = Math.round((hp*0.35 + ei*0.30 + qu*0.20 + sd*0.15) * 10);
     const start = Math.max(0, Number(c.start)||0);
-    let end = Number(c.end)||start+45;
-    if(end <= start) end = start + 45;
-    if(end - start > 120) end = start + 90;
-    if(end - start < 15) end = start + 30;
+    let end = Number(c.end)||start+60;
+    if(end <= start) end = start + 60;
+    if(end - start > 180) end = start + 180;
+    if(end - start < 30) end = start + 30;
     return {
       id:'c'+(i+1),
       title:String(c.title||'Untitled clip').slice(0,140),
@@ -1219,27 +1217,49 @@ const scoreSegmentViral = (text, segDurSec) => {
 
 // x80: Local fallback — score timestamped segments, pick top N spread across duration.
 const analyzeLocal = (sourceText, targetCount, segments) => {
-  const n = Math.max(1, Math.min(8, Number(targetCount)||5));
+  const n = Math.max(1, Math.min(20, Number(targetCount)||10));
   const hasSegments = Array.isArray(segments) && segments.length > 0;
   if(hasSegments){
     const { lines, totalDur } = buildTimedTranscript(segments, 60000);
     void lines;
-    // Chunk segments into ~45-75s candidate windows, step ~30s
-    const windowMin = 30, windowMax = 75, step = 25;
+    // Chunk segments into 30-150s candidate windows, step 25s
+    const windowMin = 30, windowMax = 150, step = 25;
+    const TOPIC_SHIFT = /\b(let me tell you|let's talk|moving on|next|by the way|here's the thing|so|but|now|imagine|think about)\b/i;
     const candidates = [];
     for(let startT = 0; startT < totalDur; startT += step){
-      const endT = Math.min(totalDur, startT + windowMax);
-      const winSegs = segments.filter(s => {
+      let endT = Math.min(totalDur, startT + windowMax);
+      let winSegs = segments.filter(s => {
         const t = Number(s.t)||0;
         return t >= startT && t < endT;
       });
       if(!winSegs.length) continue;
+      // Topic-boundary: if a shift phrase appears in the first 8s, snap start to that segment
+      const earlySegs = winSegs.filter(s => (Number(s.t)||0) - startT <= 8);
+      for(const es of earlySegs){
+        if(TOPIC_SHIFT.test(es.text || '')){
+          const snapT = Number(es.t)||startT;
+          winSegs = segments.filter(s => { const t = Number(s.t)||0; return t >= snapT && t < endT; });
+          break;
+        }
+      }
+      // Topic-boundary: if last segment doesn't end on sentence punctuation, extend up to +30s
+      const lastSeg = winSegs[winSegs.length - 1];
+      if(lastSeg && !/[.!?]$/.test((lastSeg.text || '').trim())){
+        const extendTo = Math.min(totalDur, endT + 30);
+        const extSegs = segments.filter(s => { const t = Number(s.t)||0; return t >= endT && t < extendTo; });
+        for(const es of extSegs){
+          winSegs.push(es);
+          if(/[.!?]$/.test((es.text || '').trim())){ break; }
+        }
+        endT = winSegs.length ? Math.min(totalDur, (Number(winSegs[winSegs.length-1].t)||0) + (Number(winSegs[winSegs.length-1].d)||5)) : endT;
+      }
+      const actualStart = Number(winSegs[0].t)||startT;
       const winText = winSegs.map(s => s.text).join(' ').replace(/\s+/g,' ').trim();
-      const winDur = Math.max(windowMin, Math.min(windowMax, endT - startT));
+      const winDur = Math.max(windowMin, Math.min(windowMax, endT - actualStart));
       if(winText.length < 60) continue;
       const score = scoreSegmentViral(winText, winDur);
-      const actualEnd = Math.min(totalDur, startT + Math.max(windowMin, Math.min(windowMax, winDur)));
-      candidates.push({ start: startT, end: actualEnd, text: winText, ...score });
+      const actualEnd = Math.min(totalDur, actualStart + Math.max(windowMin, Math.min(windowMax, winDur)));
+      candidates.push({ start: actualStart, end: actualEnd, text: winText, ...score });
     }
     if(candidates.length === 0) return analyzeLocalFromText(sourceText, n);
     // Pick top N with spatial diversity — greedily select highest virality, skip windows that overlap prior picks by >50%
@@ -1311,6 +1331,37 @@ const analyzeLocalFromText = (sourceText, n) => {
       status:'draft'
     };
   });
+};
+
+// x81: Two-stage viral detection. Stage 1: local pre-filter top 3N+5 candidates with ±2 neighbor context.
+// Stage 2: send candidate windows to Claude for final pick + exact timestamps.
+// Falls through to text-only path if no segments.
+const analyzeViaClaudeTwoStage = async (proxyUrl, sourceText, targetCount, segments, meta) => {
+  const hasSegments = Array.isArray(segments) && segments.length > 0;
+  if(!hasSegments) return analyzeViaClaude(proxyUrl, sourceText, targetCount, [], meta);
+  const n = Math.max(1, Math.min(20, Number(targetCount)||10));
+  const candidateCount = 3 * n + 5;
+
+  // Stage 1: score every segment individually, take top candidateCount + ±2 neighbor context
+  const scored = segments.map((seg, idx) => {
+    const sc = scoreSegmentViral(seg.text || '', seg.d || 5);
+    return { idx, seg, ...sc };
+  });
+  scored.sort((a, b) => b.virality - a.virality);
+  const topIdxSet = new Set(scored.slice(0, candidateCount).map(r => r.idx));
+  // Expand to include ±2 neighbors for topic-boundary context
+  const expandedSet = new Set();
+  for(const idx of topIdxSet){
+    for(let d = -2; d <= 2; d++){
+      const ni = idx + d;
+      if(ni >= 0 && ni < segments.length) expandedSet.add(ni);
+    }
+  }
+  // Build ordered candidate list
+  const candidateIdxs = Array.from(expandedSet).sort((a, b) => a - b);
+  const candidateSegs = candidateIdxs.map(i => segments[i]);
+
+  return analyzeViaClaude(proxyUrl, sourceText, targetCount, candidateSegs, meta);
 };
 
 // MVP-B: Polish a Studio script scene via Claude
@@ -3030,12 +3081,12 @@ function platformFor(presetId){
   return p ? p.platforms[0] : "TikTok";
 }
 const REPURPOSE_SEED = {
-  name: "Huberman × Attia long-form → 5 shorts",
+  name: "Huberman × Attia long-form → 10 shorts",
   kind: "url",
   source: "https://example.com/podcast/huberman-attia-longevity-ep42",
   durationSec: 5520,
   brandKitId: "bk-zs",
-  targetCount: 5,
+  targetCount: 10,
   clips: [
     { id:"c1", title:"Zone 2 cardio is the single highest-ROI habit",                     start:  612, end:  654, virality: 92, hook:"The one zone that actually moves the needle.",        caption:"If you only do one thing for longevity, this is it.",             preset:"vertical",  status:"draft" },
     { id:"c2", title:"Why VO2 max is the strongest predictor of all-cause mortality",     start: 1488, end: 1524, virality: 88, hook:"VO2 max beats every other biomarker for mortality.",   caption:"One number predicts how long you live.",                           preset:"vertical",  status:"draft" },
@@ -3204,9 +3255,9 @@ function RepurposeIntake({ project, setProject, onProcessSource, processBusy, pr
             <label className="block">
               <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Target clips</span>
               <input
-                type="number" min={1} max={20}
-                value={project.targetCount || 5}
-                onChange={(e)=>setProject({ ...project, targetCount: Math.max(1, Math.min(20, parseInt(e.target.value||"0", 10)||0)) })}
+                type="number" min={3} max={20}
+                value={project.targetCount || 10}
+                onChange={(e)=>setProject({ ...project, targetCount: Math.max(3, Math.min(20, parseInt(e.target.value||"0", 10)||0)) })}
                 className="mt-1 w-24 bg-transparent border border-[color:var(--line)] rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-white/20"
               />
             </label>
@@ -3382,7 +3433,7 @@ function RepurposeRealAnalyze({ project, setProject }){
     if(!text){ setErr('Paste a transcript, description, or URL summary first.'); return; }
     setBusy(true); setErr(''); setInfo('');
     const path = getAnthropicPath();
-    const target = Number(project.targetCount)||5;
+    const target = Number(project.targetCount)||10;
     try {
       let clips;
       const segs = Array.isArray(project.transcriptSegments) ? project.transcriptSegments : [];
@@ -4798,12 +4849,12 @@ function RepurposeTab(){
           setProject(p => ({ ...p, transcriptSegments: pasted }));
         }
       }
-      const target = Number(project.targetCount) || 5;
+      const target = Number(project.targetCount) || 10;
       setProcessStatus(segments.length > 0 ? ("Analyzing " + segments.length + " segments…") : "Generating clips…");
       const path = getAnthropicPath();
       let clips = null;
       if(path){
-        try { clips = await analyzeViaClaude(path, text, target, segments, meta); } catch(e){ console.warn('[zs] analyzeViaClaude failed', e); clips = null; }
+        try { clips = await analyzeViaClaudeTwoStage(path, text, target, segments, meta); } catch(e){ console.warn('[zs] analyzeViaClaudeTwoStage failed', e); clips = null; }
       }
       if(!clips || !clips.length){ clips = analyzeLocal(text, target, segments); }
       if(!clips || !clips.length){ toast("No clips generated — try a different source", "error"); return; }
@@ -5168,7 +5219,7 @@ const removeClip = (clipId) => {
       <div className="grid gap-4">
         <RepurposeIntake project={project} setProject={setProject} onProcessSource={processSource} processBusy={processBusy} processStatus={processStatus} />
         {isGodMode && <RepurposeAnalyzer project={project} setProject={setProject} />}
-        <RepurposeRealAnalyze project={project} setProject={setProject} />
+        {isGodMode && <RepurposeRealAnalyze project={project} setProject={setProject} />}
         <RepurposeTranscriptStrip project={project} />
 
         <div className="card p-5">
