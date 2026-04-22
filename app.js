@@ -1,4 +1,4 @@
-/* Zaidsaid — app.js v2.0 — x85: Phase B.1 — persist chapters on description-fallback, surface worker errors, transcript-source chip, length-variance prompt, analyzeLocal intro-skip | x84: Phase B — YT chapter-boundary detection (parseYouTubeChapters in worker; analyzeLocal uses chapter spans as candidate windows when ≥3 chapters; Claude receives chapter list for boundary alignment) + Web Audio energy analyzer (analyzeUploadedVideoAudio: 8x scrub AudioContext RMS scan on uploaded files; peaks boost analyzeLocal virality by +5*peakDensity) | x83: Smart Clipping v2 — two-stage viral detection + topic-boundary awareness + variable 30-180s clip length + unified Generate flow + target default 10 (range 3-20) | x82: preview fix — CSP frame-src, youtube-nocookie embed, thumbnail fallback | x80: Smart Clipping — viral moment detection. Worker /youtube-transcript returns segments[{t,d,text}]. analyzeViaClaude uses timestamped transcript with 4-dimension scoring (hook_power/emotional_impact/quotability/surprise_drama). analyzeLocal scores ~45-75s windows, picks top N with spatial diversity across full duration. YT iframe autoplay+loop within clip range; uploaded video autoplay muted with loop-on-end.
+/* Zaidsaid — app.js v2.0 — x85: Phase B.1 — persist chapters on description-fallback, surface worker errors, transcript-source chip, length-variance prompt, analyzeLocal intro-skip, **remove dead RepurposeAnalyzer + RepurposeRealAnalyze god-mode components** | x84: Phase B — YT chapter-boundary detection (parseYouTubeChapters in worker; analyzeLocal uses chapter spans as candidate windows when ≥3 chapters; Claude receives chapter list for boundary alignment) + Web Audio energy analyzer (analyzeUploadedVideoAudio: 8x scrub AudioContext RMS scan on uploaded files; peaks boost analyzeLocal virality by +5*peakDensity) | x83: Smart Clipping v2 — two-stage viral detection + topic-boundary awareness + variable 30-180s clip length + unified Generate flow + target default 10 (range 3-20) | x82: preview fix — CSP frame-src, youtube-nocookie embed, thumbnail fallback | x80: Smart Clipping — viral moment detection. Worker /youtube-transcript returns segments[{t,d,text}]. analyzeViaClaude uses timestamped transcript with 4-dimension scoring (hook_power/emotional_impact/quotability/surprise_drama). analyzeLocal scores ~45-75s windows, picks top N with spatial diversity across full duration. YT iframe autoplay+loop within clip range; uploaded video autoplay muted with loop-on-end.
  * Security: localStorage namespaced as zaidsaid.v2.*, error boundary, no innerHTML, no eval, no fetch.
  * Archived v1 seed data preserved under ARCHIVE_* for later reuse.
  */
@@ -3200,16 +3200,6 @@ const REPURPOSE_INTAKE_KINDS = [
   { k:"rss",     label:"RSS",         hint:"Podcast or video feed." },
   { k:"transcript", label:"Transcript", hint:"Paste a time-coded transcript." },
 ];
-const REPURPOSE_STAGES = [
-  { k:"fetch",      label:"Fetch source",          ms: 700 },
-  { k:"transcribe", label:"Transcribe audio",      ms: 1400 },
-  { k:"segment",    label:"Segment into beats",    ms: 900 },
-  { k:"score",      label:"Score virality",        ms: 1100 },
-  { k:"trim",       label:"Trim to platform max",  ms: 700 },
-  { k:"reframe",    label:"Reframe 9:16 / 1:1",    ms: 1000 },
-  { k:"caption",    label:"Generate captions",     ms: 900 },
-  { k:"brand",      label:"Apply brand kit",       ms: 600 },
-];
 const REPURPOSE_PRESETS = [
   { id:"vertical",  ratio:"9:16", label:"Vertical",  platforms:["TikTok","Reels","Shorts"] },
   { id:"square",    ratio:"1:1",  label:"Square",    platforms:["X","LinkedIn"] },
@@ -3475,190 +3465,6 @@ function RepurposeIntake({ project, setProject, onProcessSource, processBusy, pr
     </div>
   );
 }
-
-function RepurposeAnalyzer({ project, setProject, onComplete }){
-  const [running, setRunning] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [stageIdx, setStageIdx] = useState(-1);
-  const timersRef = useRef([]);
-  useEffect(()=>()=>{ timersRef.current.forEach(clearTimeout); timersRef.current = []; }, []);
-  const start = () => {
-    timersRef.current.forEach(clearTimeout);
-    timersRef.current = [];
-    setRunning(true); setProgress(0); setStageIdx(0);
-    let elapsed = 0;
-    const total = REPURPOSE_STAGES.reduce((a,s)=>a+s.ms, 0);
-    REPURPOSE_STAGES.forEach((s, i) => {
-      elapsed += s.ms;
-      const t = setTimeout(() => {
-        setStageIdx(i+1);
-        setProgress(Math.min(100, Math.round((elapsed/total)*100)));
-        if(i === REPURPOSE_STAGES.length - 1){
-          setRunning(false);
-          if(onComplete) onComplete();
-        }
-      }, elapsed);
-      timersRef.current.push(t);
-    });
-  };
-  const reset = () => {
-    timersRef.current.forEach(clearTimeout);
-    timersRef.current = [];
-    setRunning(false); setProgress(0); setStageIdx(-1);
-  };
-  return (
-    <div className="card p-5">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div>
-          <div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Analyzer</div>
-          <div className="text-lg font-semibold">Find the moments worth clipping</div>
-          <div className="text-[12px] text-[color:var(--muted)] mt-1">Demo simulator. Real generation lives in Studio (Script polish, Visuals, Voiceover, Render) and Repurpose (real Analyze).</div>
-        </div>
-        <div className="flex items-center gap-2">
-          <button className="btn" onClick={start} disabled={running}>{running ? "Analyzing…" : "Analyze"}</button>
-          <button className="btn btn-ghost" onClick={reset} disabled={running && stageIdx < REPURPOSE_STAGES.length}>Reset</button>
-        </div>
-      </div>
-      <div className="mt-4">
-        <div className="h-2 rounded-full bg-white/5 overflow-hidden">
-          <div className="h-full transition-all duration-500" style={{width: progress + "%", background:"linear-gradient(90deg,#f97316,#ec4899,#6366f1)"}} />
-        </div>
-        <div className="mt-2 flex items-center justify-between text-[11px] text-[color:var(--muted)]">
-          <span>{progress}%</span>
-          <span>{stageIdx >= REPURPOSE_STAGES.length ? "Complete" : (running ? "Working…" : (stageIdx < 0 ? "Idle" : "Paused"))}</span>
-        </div>
-      </div>
-      <div className="mt-4 grid md:grid-cols-4 gap-2">
-        {REPURPOSE_STAGES.map((s, i) => {
-          const state = i < stageIdx ? "done" : (i === stageIdx && running ? "active" : "pending");
-          return (
-            <div key={s.k}
-              className={"rounded-xl border p-3 text-[12px] transition-colors " +
-                (state==="done" ? "border-white/15 bg-white/[0.04] text-white" :
-                 state==="active" ? "border-white/20 bg-white/[0.08] text-white" :
-                 "border-[color:var(--line)] text-[color:var(--muted)]")}>
-              <div className="flex items-center gap-2">
-                <span className="w-5 h-5 rounded-full flex items-center justify-center text-[10px]"
-                  style={{background: state==="done" ? "linear-gradient(135deg,#f97316,#ec4899)" : (state==="active" ? "rgba(255,255,255,0.15)" : "rgba(255,255,255,0.05)")}}>
-                  {state==="done" ? I.check({size:12}) : (i+1)}
-                </span>
-                <span className="font-semibold">{s.label}</span>
-              </div>
-              <div className="mt-1 text-[11px] text-[color:var(--muted)]">{s.ms} ms</div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-function RepurposeRealAnalyze({ project, setProject }){
-  const [busy, setBusy] = React.useState(false);
-  const [err, setErr] = React.useState('');
-  const [info, setInfo] = React.useState('');
-  const [src, setSrc] = React.useState('');
-  const [fetchStatus, setFetchStatus] = React.useState(''); // '' | 'fetching' | 'ok' | 'warn' | 'err'
-  const [fetchMsg, setFetchMsg] = React.useState('');
-
-  const isYouTubeSource = (s) => /youtu\.?be/i.test(s||'');
-
-  const getWorkerBase = () => {
-    const path = getAnthropicPath();
-    if(path) return path.replace(/\/anthropic\/?$/, '');
-    return 'https://zaidsaid-proxy.zaidsaid.workers.dev';
-  };
-
-  const fetchTranscript = async () => {
-    const sourceUrl = (project.source || '').trim();
-    if(!sourceUrl){ setFetchStatus('err'); setFetchMsg('Enter a YouTube URL in the Source field first.'); return; }
-    if(!/youtu\.?be/i.test(sourceUrl)){ setFetchStatus('err'); setFetchMsg('Paste a YouTube URL (youtube.com/watch?v= or youtu.be/) to fetch a transcript.'); return; }
-    setFetchStatus('fetching'); setFetchMsg('');
-    try {
-      const base = getWorkerBase();
-      const endpoint = base + '/youtube-transcript?url=' + encodeURIComponent(sourceUrl);
-      const res = await fetch(endpoint);
-      if(!res.ok){ setFetchStatus('err'); setFetchMsg('Worker returned HTTP ' + res.status + '. Try again or paste transcript manually.'); return; }
-      const data = await res.json();
-      const text = (data.transcript || data.description || '').trim();
-      if(!text){ setFetchStatus('err'); setFetchMsg('No transcript or description returned.'); return; }
-      setSrc(text);
-      const usedTranscript = !!(data.transcript && data.transcript.trim());
-      if(!project.name && data.title) setProject(p => ({ ...p, name: data.title }));
-      if((!project.durationSec || project.durationSec === 5520) && data.duration_seconds) setProject(p => ({ ...p, durationSec: data.duration_seconds }));
-      setFetchStatus(usedTranscript ? 'ok' : 'warn');
-      setFetchMsg(usedTranscript
-        ? 'Transcript ready — ' + text.length.toLocaleString() + ' chars from YouTube.'
-        : 'No captions found — using description only (' + text.length.toLocaleString() + ' chars).');
-    } catch(e) {
-      setFetchStatus('err');
-      setFetchMsg('Fetch failed: ' + (e && e.message || String(e)));
-    }
-  };
-
-  const run = async () => {
-    if(busy) return;
-    const text = (src || project.transcriptText || project.source || '').trim();
-    if(!text){ setErr('Paste a transcript, description, or URL summary first.'); return; }
-    setBusy(true); setErr(''); setInfo('');
-    const path = getAnthropicPath();
-    const target = Number(project.targetCount)||10;
-    try {
-      let clips;
-      const segs = Array.isArray(project.transcriptSegments) ? project.transcriptSegments : [];
-      const meta = { title: project.name || '', author: project.author || '' };
-      if(path){
-        console.log('[zs] real-analyze: calling Claude (segments=' + segs.length + ')');
-        clips = await analyzeViaClaude(path, text, target, segs, meta);
-        setInfo('Analyzed via Claude — ' + clips.length + ' clips.');
-      } else {
-        console.log('[zs] real-analyze: using local fallback (segments=' + segs.length + ')');
-        clips = analyzeLocal(text, target, segs);
-        setInfo('Analyzed locally (no Anthropic proxy configured) — ' + clips.length + ' clips.');
-      }
-      if(!clips || !clips.length){ setErr('No clips returned. Try richer source text.'); return; }
-      setProject({ ...project, clips, durationSec: project.durationSec || (clips[clips.length-1].end + 60) });
-    } catch(e){
-      console.warn('[zs] real-analyze error', e);
-      try { const segs = Array.isArray(project.transcriptSegments) ? project.transcriptSegments : []; const fb = analyzeLocal(text, target, segs); setProject({ ...project, clips: fb }); setErr('Claude call failed (' + (e && e.message || e) + '). Fell back to local analyze.'); }
-      catch(e2){ setErr('Analyze failed: ' + (e2 && e2.message || e2)); }
-    } finally { setBusy(false); }
-  };
-  return (
-    <div className="card p-5 mt-4">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="text-[12px] uppercase tracking-wide text-[color:var(--muted)]">Real analyze</div>
-          <div className="text-lg font-semibold">Generate clips from your source</div>
-          <div className="text-[12px] text-[color:var(--muted)] mt-1">Sends transcript or description to Claude (or local heuristic) and writes real clips into the project.</div>
-        </div>
-        <button className="btn btn-primary" onClick={run} disabled={busy}>{busy ? 'Analyzing…' : 'Run real analyze'}</button>
-      </div>
-      {isYouTubeSource(project.source) && (
-        <div className="mt-3 flex items-center gap-2 flex-wrap">
-          <button className="btn" onClick={fetchTranscript} disabled={fetchStatus === 'fetching'}>
-            {fetchStatus === 'fetching' ? 'Fetching…' : 'Fetch transcript from YouTube'}
-          </button>
-          {fetchStatus === 'ok' && (
-            <span className="chip text-emerald-200 border-emerald-400/30 bg-emerald-500/10">{fetchMsg}</span>
-          )}
-          {fetchStatus === 'warn' && (
-            <span className="chip text-amber-200 border-amber-400/30 bg-amber-500/10">{fetchMsg}</span>
-          )}
-          {fetchStatus === 'err' && (
-            <span className="text-[12px] text-red-400">{fetchMsg}</span>
-          )}
-        </div>
-      )}
-      <div className="mt-3">
-        <textarea className="input w-full" rows={4} placeholder="Paste source transcript or description (or use the project transcript above)" value={src} onChange={e=>setSrc(e.target.value)} />
-      </div>
-      {err && <div className="mt-2 text-[12px] text-red-400">{err}</div>}
-      {info && <div className="mt-2 text-[12px] text-emerald-400">{info}</div>}
-    </div>
-  );
-}
-
-
 
 function RepurposeTranscriptStrip({ project }){
   const dur = Math.max(1, project.durationSec || 1);
@@ -5419,8 +5225,6 @@ const removeClip = (clipId) => {
 
       <div className="grid gap-4">
         <RepurposeIntake project={project} setProject={setProject} onProcessSource={processSource} processBusy={processBusy} processStatus={processStatus} onFileUpload={handleFileUpload} />
-        {isGodMode && <RepurposeAnalyzer project={project} setProject={setProject} />}
-        {isGodMode && <RepurposeRealAnalyze project={project} setProject={setProject} />}
         <RepurposeTranscriptStrip project={project} />
 
         <div className="card p-5">
