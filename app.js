@@ -1,4 +1,4 @@
-/* Zaidsaid — app.js v2.0 — x85: Phase B.1 — persist chapters on description-fallback, surface worker errors, transcript-source chip, length-variance prompt, analyzeLocal intro-skip, **remove dead RepurposeAnalyzer + RepurposeRealAnalyze god-mode components** | x84: Phase B — YT chapter-boundary detection (parseYouTubeChapters in worker; analyzeLocal uses chapter spans as candidate windows when ≥3 chapters; Claude receives chapter list for boundary alignment) + Web Audio energy analyzer (analyzeUploadedVideoAudio: 8x scrub AudioContext RMS scan on uploaded files; peaks boost analyzeLocal virality by +5*peakDensity) | x83: Smart Clipping v2 — two-stage viral detection + topic-boundary awareness + variable 30-180s clip length + unified Generate flow + target default 10 (range 3-20) | x82: preview fix — CSP frame-src, youtube-nocookie embed, thumbnail fallback | x80: Smart Clipping — viral moment detection. Worker /youtube-transcript returns segments[{t,d,text}]. analyzeViaClaude uses timestamped transcript with 4-dimension scoring (hook_power/emotional_impact/quotability/surprise_drama). analyzeLocal scores ~45-75s windows, picks top N with spatial diversity across full duration. YT iframe autoplay+loop within clip range; uploaded video autoplay muted with loop-on-end.
+/* Zaidsaid — app.js v2.0 — x86: clip preview no-autoplay — remove YouTube loop=1&playlist (fixes whole-video loop), remove autoPlay on uploaded video, preview now shows clip-only paused state until user clicks play | x85: Phase B.1 — persist chapters on description-fallback, surface worker errors, transcript-source chip, length-variance prompt, analyzeLocal intro-skip, **remove dead RepurposeAnalyzer + RepurposeRealAnalyze god-mode components** | x84: Phase B — YT chapter-boundary detection (parseYouTubeChapters in worker; analyzeLocal uses chapter spans as candidate windows when ≥3 chapters; Claude receives chapter list for boundary alignment) + Web Audio energy analyzer (analyzeUploadedVideoAudio: 8x scrub AudioContext RMS scan on uploaded files; peaks boost analyzeLocal virality by +5*peakDensity) | x83: Smart Clipping v2 — two-stage viral detection + topic-boundary awareness + variable 30-180s clip length + unified Generate flow + target default 10 (range 3-20) | x82: preview fix — CSP frame-src, youtube-nocookie embed, thumbnail fallback | x80: Smart Clipping — viral moment detection. Worker /youtube-transcript returns segments[{t,d,text}]. analyzeViaClaude uses timestamped transcript with 4-dimension scoring (hook_power/emotional_impact/quotability/surprise_drama). analyzeLocal scores ~45-75s windows, picks top N with spatial diversity across full duration. YT iframe autoplay+loop within clip range; uploaded video autoplay muted with loop-on-end.
  * Security: localStorage namespaced as zaidsaid.v2.*, error boundary, no innerHTML, no eval, no fetch.
  * Archived v1 seed data preserved under ARCHIVE_* for later reuse.
  */
@@ -3542,9 +3542,6 @@ function RepurposeClipPreview({ clip, uploadedVideoUrl, sourceUrl, width, height
     const onPause = () => setPlaying(false);
     const onLoaded = () => {
       try { v.currentTime = clip.start || 0; } catch(e){}
-      // Autoplay muted — browsers require muted for unprompted autoplay
-      v.muted = true;
-      v.play().catch(()=>{});
     };
     v.addEventListener("timeupdate", onTime);
     v.addEventListener("play", onPlay);
@@ -3592,7 +3589,6 @@ function RepurposeClipPreview({ clip, uploadedVideoUrl, sourceUrl, width, height
           className="w-full h-full object-cover"
           preload="auto"
           playsInline
-          autoPlay
           muted={muted}
           loop={false}
         />
@@ -3625,8 +3621,7 @@ function RepurposeClipPreview({ clip, uploadedVideoUrl, sourceUrl, width, height
     const start = Math.max(0, Math.floor(clip.start || 0));
     const end = Math.max(start + 1, Math.ceil(clip.end || 0));
     // youtube-nocookie: better embed compat for videos that block standard domain
-    // autoplay=1 + mute=1 for browser auto-play permission; loop=1 + playlist=VIDEOID to enable looping on a single video
-    const src = "https://www.youtube-nocookie.com/embed/" + ytId + "?start=" + start + "&end=" + end + "&autoplay=1&mute=1&loop=1&playlist=" + ytId + "&controls=1&rel=0&modestbranding=1&playsinline=1&iv_load_policy=3";
+    const src = "https://www.youtube-nocookie.com/embed/" + ytId + "?start=" + start + "&end=" + end + "&controls=1&rel=0&modestbranding=1&playsinline=1&iv_load_policy=3";
     const thumbSrc = "https://img.youtube.com/vi/" + ytId + "/hqdefault.jpg";
     return (
       <div className="relative rounded-xl overflow-hidden bg-black shrink-0" style={{ width, height }}>
