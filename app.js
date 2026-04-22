@@ -1094,8 +1094,8 @@ const parsePastedTranscript = (text) => {
 };
 
 // x80: MVP-F — Viral clip detection via Claude with timestamped segments + 4-dimension scoring
-// x84: accepts optional chapters [{t,title}] for boundary alignment hints.
-const analyzeViaClaude = async (proxyUrl, sourceText, targetCount, segments, meta, chapters) => {
+// x84: accepts optional chapters [{t,title}] and audioMap for Phase B signals.
+const analyzeViaClaude = async (proxyUrl, sourceText, targetCount, segments, meta, chapters, audioMap) => {
   const tools = [{
     name:'emit_clips',
     description:'Return the N best viral short-form clip candidates with 4-dimension scoring.',
@@ -1163,6 +1163,7 @@ const analyzeViaClaude = async (proxyUrl, sourceText, targetCount, segments, met
       String(sourceText||'').slice(0, 8000) + '\n\n' +
       'Extract exactly ' + n + ' viral clips. Score each on the 4 dimensions.';
   }
+  const audioPeaks = (audioMap && Array.isArray(audioMap.peaks)) ? audioMap.peaks : [];
   const j = await mvpCallClaude(proxyUrl, [{role:'user', content:userMsg}], { system:sys, tools, tool_choice:{type:'tool', name:'emit_clips'}, max_tokens:3072 });
   const tu = (j.content||[]).find(b => b.type==='tool_use' && b.name==='emit_clips');
   if(!tu || !tu.input || !Array.isArray(tu.input.clips)) throw new Error('No emit_clips tool_use in response');
@@ -1171,12 +1172,21 @@ const analyzeViaClaude = async (proxyUrl, sourceText, targetCount, segments, met
     const ei = Math.max(0,Math.min(10,Number(c.emotional_impact)||0));
     const qu = Math.max(0,Math.min(10,Number(c.quotability)||0));
     const sd = Math.max(0,Math.min(10,Number(c.surprise_drama)||0));
-    const virality = Math.round((hp*0.35 + ei*0.30 + qu*0.20 + sd*0.15) * 10);
+    const baseVirality = Math.round((hp*0.35 + ei*0.30 + qu*0.20 + sd*0.15) * 10);
     const start = Math.max(0, Number(c.start)||0);
     let end = Number(c.end)||start+60;
     if(end <= start) end = start + 60;
     if(end - start > 180) end = start + 180;
     if(end - start < 30) end = start + 30;
+    let virality = baseVirality;
+    if(audioPeaks.length){
+      const winDur = Math.max(1, end - start);
+      const peaksInWindow = audioPeaks.filter(pt => pt >= start && pt < end).length;
+      if(peaksInWindow){
+        const peakDensity = peaksInWindow / (winDur / 10);
+        virality = Math.min(100, baseVirality + Math.round(5 * Math.min(1, peakDensity)));
+      }
+    }
     return {
       id:'c'+(i+1),
       title:String(c.title||'Untitled clip').slice(0,140),
@@ -1395,13 +1405,93 @@ const analyzeLocalFromText = (sourceText, n) => {
   });
 };
 
+// x84: Web Audio energy analyzer for uploaded video/audio files.
+// Scrubs at 8x (4x Safari fallback) via AudioContext, samples RMS, records peaks.
+// Only runs once per file (keyed on name+size). Stores result on project.audioMap.
+const analyzeUploadedVideoAudio = (videoUrl, onDone) => {
+  return new Promise((resolve) => {
+    let audio;
+    let ctx;
+    let source;
+    let analyser;
+    const samples = [];
+    let rafId = null;
+
+    const cleanup = () => {
+      if(rafId !== null){ cancelAnimationFrame(rafId); rafId = null; }
+      try { if(source) source.disconnect(); } catch(_){}
+      try { if(ctx && ctx.state !== 'closed') ctx.close(); } catch(_){}
+      try { if(audio){ audio.pause(); audio.src = ''; } } catch(_){}
+    };
+
+    const finish = () => {
+      cleanup();
+      if(!samples.length){ resolve(null); return; }
+      const duration = samples[samples.length-1].t;
+      const rmsValues = samples.map(s => s.rms);
+      const mean = rmsValues.reduce((a,b) => a+b, 0) / rmsValues.length;
+      const variance = rmsValues.reduce((a,b) => a + (b-mean)*(b-mean), 0) / rmsValues.length;
+      const stddev = Math.sqrt(variance);
+      const threshold = mean + 1.5 * stddev;
+      const peaks = samples.filter(s => s.rms > threshold && s.rms > 0.15).map(s => +s.t.toFixed(2));
+      const result = { duration: +duration.toFixed(2), samples, peaks };
+      resolve(result);
+      if(onDone) onDone(result);
+    };
+
+    const tick = () => {
+      if(!analyser || !audio || audio.ended || audio.paused){ finish(); return; }
+      const buf = new Uint8Array(analyser.fftSize);
+      analyser.getByteTimeDomainData(buf);
+      let sumSq = 0;
+      for(let i = 0; i < buf.length; i++){
+        const v = (buf[i] - 128) / 128;
+        sumSq += v * v;
+      }
+      const rms = Math.sqrt(sumSq / buf.length);
+      samples.push({ t: audio.currentTime, rms: +rms.toFixed(4) });
+      rafId = requestAnimationFrame(tick);
+    };
+
+    try {
+      ctx = new (window.AudioContext || window.webkitAudioContext)();
+      analyser = ctx.createAnalyser();
+      analyser.fftSize = 2048;
+      analyser.smoothingTimeConstant = 0.4;
+
+      audio = document.createElement('audio');
+      audio.src = videoUrl;
+      audio.muted = true;
+      audio.preservesPitch = false;
+      audio.crossOrigin = 'anonymous';
+
+      audio.addEventListener('canplay', () => {
+        try {
+          source = ctx.createMediaElementSource(audio);
+          source.connect(analyser);
+          audio.playbackRate = 8;
+          audio.play().catch(() => {
+            try { audio.playbackRate = 4; audio.play().catch(() => { cleanup(); resolve(null); }); } catch(_){ cleanup(); resolve(null); }
+          });
+          rafId = requestAnimationFrame(tick);
+        } catch(_){ cleanup(); resolve(null); }
+      }, { once: true });
+
+      audio.addEventListener('ended', () => { finish(); }, { once: true });
+      audio.addEventListener('error', () => { cleanup(); resolve(null); }, { once: true });
+
+      audio.load();
+    } catch(_){ cleanup(); resolve(null); }
+  });
+};
+
 // x81: Two-stage viral detection. Stage 1: local pre-filter top 3N+5 candidates with ±2 neighbor context.
 // Stage 2: send candidate windows to Claude for final pick + exact timestamps.
-// x84: accepts optional chapters [{t,title}] passed through to analyzeViaClaude.
+// x84: accepts optional chapters [{t,title}] and audioMap for Phase B signals.
 // Falls through to text-only path if no segments.
-const analyzeViaClaudeTwoStage = async (proxyUrl, sourceText, targetCount, segments, meta, chapters) => {
+const analyzeViaClaudeTwoStage = async (proxyUrl, sourceText, targetCount, segments, meta, chapters, audioMap) => {
   const hasSegments = Array.isArray(segments) && segments.length > 0;
-  if(!hasSegments) return analyzeViaClaude(proxyUrl, sourceText, targetCount, [], meta, chapters);
+  if(!hasSegments) return analyzeViaClaude(proxyUrl, sourceText, targetCount, [], meta, chapters, audioMap);
   const n = Math.max(1, Math.min(20, Number(targetCount)||10));
   const candidateCount = 3 * n + 5;
 
@@ -1424,7 +1514,7 @@ const analyzeViaClaudeTwoStage = async (proxyUrl, sourceText, targetCount, segme
   const candidateIdxs = Array.from(expandedSet).sort((a, b) => a - b);
   const candidateSegs = candidateIdxs.map(i => segments[i]);
 
-  return analyzeViaClaude(proxyUrl, sourceText, targetCount, candidateSegs, meta, chapters);
+  return analyzeViaClaude(proxyUrl, sourceText, targetCount, candidateSegs, meta, chapters, audioMap);
 };
 
 // MVP-B: Polish a Studio script scene via Claude
@@ -3244,7 +3334,7 @@ function buildClipExportText(clip, project){
   return out.join("\n");
 }
 
-function RepurposeIntake({ project, setProject, onProcessSource, processBusy, processStatus }){
+function RepurposeIntake({ project, setProject, onProcessSource, processBusy, processStatus, onFileUpload }){
   return (
     <div className="card p-5">
       <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -3358,7 +3448,8 @@ function RepurposeIntake({ project, setProject, onProcessSource, processBusy, pr
                       const f = e.target.files && e.target.files[0];
                       if(!f) return;
                       const url = URL.createObjectURL(f);
-                      setProject({ ...project, kind: "upload", uploadedVideoUrl: url, uploadedVideoName: f.name });
+                      setProject({ ...project, kind: "upload", uploadedVideoUrl: url, uploadedVideoName: f.name, audioMap: null });
+                      if(onFileUpload) onFileUpload(url, f);
                     }}
                   />
                 </label>
@@ -4848,6 +4939,17 @@ function RepurposeTab(){
   const [hookAltsBusyId, setHookAltsBusyId] = useState(null);
   const [processBusy, setProcessBusy] = useState(false);
   const [processStatus, setProcessStatus] = useState("");
+  const audioScanKeyRef = useRef(null);
+
+  const handleFileUpload = (url, file) => {
+    const scanKey = (file && file.name ? file.name : '') + ':' + (file && file.size ? file.size : '');
+    if(audioScanKeyRef.current === scanKey) return;
+    audioScanKeyRef.current = scanKey;
+    analyzeUploadedVideoAudio(url, (result) => {
+      setProject(p => ({ ...p, audioMap: result }));
+      toast('Audio analysis complete — ' + result.peaks.length + ' peaks detected', 'success');
+    }).catch(() => {});
+  };
 
   const processSource = async () => {
     if(processBusy) return;
@@ -4921,7 +5023,7 @@ function RepurposeTab(){
       const path = getAnthropicPath();
       let clips = null;
       if(path){
-        try { clips = await analyzeViaClaudeTwoStage(path, text, target, segments, meta, chapters); } catch(e){ console.warn('[zs] analyzeViaClaudeTwoStage failed', e); clips = null; }
+        try { clips = await analyzeViaClaudeTwoStage(path, text, target, segments, meta, chapters, audioMap); } catch(e){ console.warn('[zs] analyzeViaClaudeTwoStage failed', e); clips = null; }
       }
       if(!clips || !clips.length){ clips = analyzeLocal(text, target, segments, chapters, audioMap); }
       if(!clips || !clips.length){ toast("No clips generated — try a different source", "error"); return; }
@@ -5284,7 +5386,7 @@ const removeClip = (clipId) => {
       </div>
 
       <div className="grid gap-4">
-        <RepurposeIntake project={project} setProject={setProject} onProcessSource={processSource} processBusy={processBusy} processStatus={processStatus} />
+        <RepurposeIntake project={project} setProject={setProject} onProcessSource={processSource} processBusy={processBusy} processStatus={processStatus} onFileUpload={handleFileUpload} />
         {isGodMode && <RepurposeAnalyzer project={project} setProject={setProject} />}
         {isGodMode && <RepurposeRealAnalyze project={project} setProject={setProject} />}
         <RepurposeTranscriptStrip project={project} />
