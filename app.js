@@ -1,4 +1,4 @@
-/* Zaidsaid — app.js v2.0 — x97: Phase C — multi-modal virality signals. WebCodecs scene-cut detection in-browser; /gemini-video-highlights worker route (Gemini 2.5 Flash, graceful no-key); /sensevoice worker route (Replicate SenseVoice for laughter/applause, graceful no-key). Claude scoring extended to boost clips matching ≥2 signal types. | x96: Phase E — preset-aware per-clip re-encoding via ffmpeg.wasm (scale+pad for 9:16/1:1/16:9) + JSZip batch download when multiple clips selected. Replaces the old MediaRecorder .webm pipeline for clips that have a per-clip mp4 blob. | x95: Phase B UI cleanup: collapsed intake to URL/File, folded YT downloader into URL expandable, per-clip actions 9→3, removed fake waveform, toolbar pruned. | x94: clear stale clips at Generate start + narrow reseed effect so demo doesn't overwrite a user's upload on refresh. | x93: Repurpose — real per-clip mp4 cuts + thumbnail frames. cutClipFromSource (ffmpeg.wasm, -ss after -i, -c copy with libx264 fallback <5 min) + grabFrameThumb (off-DOM canvas) + generateClipAssets (sequential, IDB-backed). processSource fires generateClipAssets after setProject for upload flows. RepurposeTab hydrates clipBlobUrls Map from IDB on mount; RepurposeClipPreview shows pre-cut <video controls> when blob ready. removeClip deletes IDB entries + revokes URLs. | x92: Repurpose — big videos extract audio client-side before transcribing. Lazy-loads ffmpeg.wasm (@ffmpeg/ffmpeg@0.12.10 + @ffmpeg/core@0.12.6 from unpkg, ~30 MB one-time); any uploaded video >50 MB is reduced to mono 16 kHz 32 kbps MP3 (~14 MB/hr) before POSTing to /elevenlabs/v1/speech-to-text. Fixes 700+ MB uploads hanging on the Cloudflare Worker 500 MiB body limit. CSP widened for wasm-unsafe-eval, blob: workers, and unpkg connect. | x91: Repurpose — uploaded files now survive page refreshes. New IndexedDB blob store (zaidsaid/uploads, key repurpose:current) persists the File on upload; RepurposeTab useEffect on mount HEAD-checks the existing blob URL and rehydrates from IDB when it's dead, or clears the dangling reference + toasts "please re-upload" when IDB is empty too. processSource now reads the blob from IDB first, falling back to the blob URL. Remove button deletes the IDB entry. | x90: Repurpose — uploads now actually clip. processSource gate no longer bails on empty source when an uploaded video is present; on new file upload we clear stale transcript/chapters/clips/name; uploaded videos without a transcript auto-transcribe via ElevenLabs Scribe (/elevenlabs/v1/speech-to-text with model_id=scribe_v1, word-level timestamps grouped into ~6s segments) and feed the existing two-stage viral analyzer. New fuchsia "ElevenLabs Scribe (auto-transcribed)" source chip. | x89: Repurpose — YouTube downloader tool (paste URL → fetch progressive formats via worker InnerTube → quality dropdown → File System Access folder picker with streamed writable, falls back to <a download> when unsupported). Worker: /youtube-formats, /youtube-media. | x88: batch export respects selection + preset-aware video render — "Export selected as video" renders .webm per selected clip at its preset aspect ratio (9:16/1:1/16:9); fallback selection→approved→all; metadata (.txt) export kept as secondary. Fix stray /span> text below batch-export button. | x87: clip length range widened — 5s floor (viral reactions, one-liners) to 1800s / 30min ceiling (full topic arcs); removed rigid length-mix prompt in favor of idea-first sizing | x86: clip preview no-autoplay — remove YouTube loop=1&playlist (fixes whole-video loop), remove autoPlay on uploaded video, preview now shows clip-only paused state until user clicks play | x85: Phase B.1 — persist chapters on description-fallback, surface worker errors, transcript-source chip, length-variance prompt, analyzeLocal intro-skip, **remove dead RepurposeAnalyzer + RepurposeRealAnalyze god-mode components** | x84: Phase B — YT chapter-boundary detection (parseYouTubeChapters in worker; analyzeLocal uses chapter spans as candidate windows when ≥3 chapters; Claude receives chapter list for boundary alignment) + Web Audio energy analyzer (analyzeUploadedVideoAudio: 8x scrub AudioContext RMS scan on uploaded files; peaks boost analyzeLocal virality by +5*peakDensity) | x83: Smart Clipping v2 — two-stage viral detection + topic-boundary awareness + variable 30-180s clip length + unified Generate flow + target default 10 (range 3-20) | x82: preview fix — CSP frame-src, youtube-nocookie embed, thumbnail fallback | x80: Smart Clipping — viral moment detection. Worker /youtube-transcript returns segments[{t,d,text}]. analyzeViaClaude uses timestamped transcript with 4-dimension scoring (hook_power/emotional_impact/quotability/surprise_drama). analyzeLocal scores ~45-75s windows, picks top N with spatial diversity across full duration. YT iframe autoplay+loop within clip range; uploaded video autoplay muted with loop-on-end.
+/* Zaidsaid — app.js v2.0 — x98: Phase D — trending-context scoring. Worker routes /trends/{google,reddit,hn,x} (HN + Reddit + Google free; X via Apify needs APIFY_TOKEN). Client extracts 3-8 topic keywords via Claude tool_use, fetches trend matches, folds into analyzeViaClaudeTwoStage with convergent-attention boost. | x97: Phase C — multi-modal virality signals. WebCodecs scene-cut detection in-browser; /gemini-video-highlights worker route (Gemini 2.5 Flash, graceful no-key); /sensevoice worker route (Replicate SenseVoice for laughter/applause, graceful no-key). Claude scoring extended to boost clips matching ≥2 signal types. | x96: Phase E — preset-aware per-clip re-encoding via ffmpeg.wasm (scale+pad for 9:16/1:1/16:9) + JSZip batch download when multiple clips selected. Replaces the old MediaRecorder .webm pipeline for clips that have a per-clip mp4 blob. | x95: Phase B UI cleanup: collapsed intake to URL/File, folded YT downloader into URL expandable, per-clip actions 9→3, removed fake waveform, toolbar pruned. | x94: clear stale clips at Generate start + narrow reseed effect so demo doesn't overwrite a user's upload on refresh. | x93: Repurpose — real per-clip mp4 cuts + thumbnail frames. cutClipFromSource (ffmpeg.wasm, -ss after -i, -c copy with libx264 fallback <5 min) + grabFrameThumb (off-DOM canvas) + generateClipAssets (sequential, IDB-backed). processSource fires generateClipAssets after setProject for upload flows. RepurposeTab hydrates clipBlobUrls Map from IDB on mount; RepurposeClipPreview shows pre-cut <video controls> when blob ready. removeClip deletes IDB entries + revokes URLs. | x92: Repurpose — big videos extract audio client-side before transcribing. Lazy-loads ffmpeg.wasm (@ffmpeg/ffmpeg@0.12.10 + @ffmpeg/core@0.12.6 from unpkg, ~30 MB one-time); any uploaded video >50 MB is reduced to mono 16 kHz 32 kbps MP3 (~14 MB/hr) before POSTing to /elevenlabs/v1/speech-to-text. Fixes 700+ MB uploads hanging on the Cloudflare Worker 500 MiB body limit. CSP widened for wasm-unsafe-eval, blob: workers, and unpkg connect. | x91: Repurpose — uploaded files now survive page refreshes. New IndexedDB blob store (zaidsaid/uploads, key repurpose:current) persists the File on upload; RepurposeTab useEffect on mount HEAD-checks the existing blob URL and rehydrates from IDB when it's dead, or clears the dangling reference + toasts "please re-upload" when IDB is empty too. processSource now reads the blob from IDB first, falling back to the blob URL. Remove button deletes the IDB entry. | x90: Repurpose — uploads now actually clip. processSource gate no longer bails on empty source when an uploaded video is present; on new file upload we clear stale transcript/chapters/clips/name; uploaded videos without a transcript auto-transcribe via ElevenLabs Scribe (/elevenlabs/v1/speech-to-text with model_id=scribe_v1, word-level timestamps grouped into ~6s segments) and feed the existing two-stage viral analyzer. New fuchsia "ElevenLabs Scribe (auto-transcribed)" source chip. | x89: Repurpose — YouTube downloader tool (paste URL → fetch progressive formats via worker InnerTube → quality dropdown → File System Access folder picker with streamed writable, falls back to <a download> when unsupported). Worker: /youtube-formats, /youtube-media. | x88: batch export respects selection + preset-aware video render — "Export selected as video" renders .webm per selected clip at its preset aspect ratio (9:16/1:1/16:9); fallback selection→approved→all; metadata (.txt) export kept as secondary. Fix stray /span> text below batch-export button. | x87: clip length range widened — 5s floor (viral reactions, one-liners) to 1800s / 30min ceiling (full topic arcs); removed rigid length-mix prompt in favor of idea-first sizing | x86: clip preview no-autoplay — remove YouTube loop=1&playlist (fixes whole-video loop), remove autoPlay on uploaded video, preview now shows clip-only paused state until user clicks play | x85: Phase B.1 — persist chapters on description-fallback, surface worker errors, transcript-source chip, length-variance prompt, analyzeLocal intro-skip, **remove dead RepurposeAnalyzer + RepurposeRealAnalyze god-mode components** | x84: Phase B — YT chapter-boundary detection (parseYouTubeChapters in worker; analyzeLocal uses chapter spans as candidate windows when ≥3 chapters; Claude receives chapter list for boundary alignment) + Web Audio energy analyzer (analyzeUploadedVideoAudio: 8x scrub AudioContext RMS scan on uploaded files; peaks boost analyzeLocal virality by +5*peakDensity) | x83: Smart Clipping v2 — two-stage viral detection + topic-boundary awareness + variable 30-180s clip length + unified Generate flow + target default 10 (range 3-20) | x82: preview fix — CSP frame-src, youtube-nocookie embed, thumbnail fallback | x80: Smart Clipping — viral moment detection. Worker /youtube-transcript returns segments[{t,d,text}]. analyzeViaClaude uses timestamped transcript with 4-dimension scoring (hook_power/emotional_impact/quotability/surprise_drama). analyzeLocal scores ~45-75s windows, picks top N with spatial diversity across full duration. YT iframe autoplay+loop within clip range; uploaded video autoplay muted with loop-on-end.
  * Security: localStorage namespaced as zaidsaid.v2.*, error boundary, no innerHTML, no eval, no fetch.
  * Archived v1 seed data preserved under ARCHIVE_* for later reuse.
  */
@@ -1150,6 +1150,7 @@ const parsePastedTranscript = (text) => {
 
 // x80: MVP-F — Viral clip detection via Claude with timestamped segments + 4-dimension scoring
 // x84: accepts optional chapters [{t,title}] and audioMap for Phase B signals.
+// x98: accepts optional signals {audioEvents, scenes, visualHighlights, trendingMatches} for Phase C/D.
 const analyzeViaClaude = async (proxyUrl, sourceText, targetCount, segments, meta, chapters, audioMap, signals) => {
   const tools = [{
     name:'emit_clips',
@@ -1240,7 +1241,13 @@ const analyzeViaClaude = async (proxyUrl, sourceText, targetCount, segments, met
       signalsUserBlock;
   }
   const audioPeaks = (audioMap && Array.isArray(audioMap.peaks)) ? audioMap.peaks : [];
-  const j = await mvpCallClaude(proxyUrl, [{role:'user', content:userMsg}], { system:sys, tools, tool_choice:{type:'tool', name:'emit_clips'}, max_tokens:3072 });
+  const trendingMatches = (signals && Array.isArray(signals.trendingMatches)) ? signals.trendingMatches : [];
+  const finalSys = trendingMatches.length
+    ? sys + '\n\nTrending context (social + search signals from the last week):\n' +
+      trendingMatches.map(m => '- "' + m.keyword + '": ' + m.matches.slice(0,3).map(x => x.source + ':' + x.title).join('; ')).join('\n') +
+      '\n\nWhen a clip\'s transcript segment mentions a trending keyword, boost virality by 7. When it mentions a term appearing in ≥2 sources (Reddit + HN, etc.), boost by 12 (convergent-attention signal).'
+    : sys;
+  const j = await mvpCallClaude(proxyUrl, [{role:'user', content:userMsg}], { system:finalSys, tools, tool_choice:{type:'tool', name:'emit_clips'}, max_tokens:3072 });
   const tu = (j.content||[]).find(b => b.type==='tool_use' && b.name==='emit_clips');
   if(!tu || !tu.input || !Array.isArray(tu.input.clips)) throw new Error('No emit_clips tool_use in response');
   return tu.input.clips.map((c,i) => {
@@ -2056,7 +2063,7 @@ const fetchSenseVoiceEvents = async (workerBase, audioBlob) => {
 // x81: Two-stage viral detection. Stage 1: local pre-filter top 3N+5 candidates with ±2 neighbor context.
 // Stage 2: send candidate windows to Claude for final pick + exact timestamps.
 // x84: accepts optional chapters [{t,title}] and audioMap for Phase B signals.
-// x97: accepts optional signals {scenes, audioEvents, visualHighlights} for Phase C multi-modal scoring.
+// x98: accepts optional signals {audioEvents, scenes, visualHighlights, trendingMatches} for Phase C/D.
 // Falls through to text-only path if no segments.
 const analyzeViaClaudeTwoStage = async (proxyUrl, sourceText, targetCount, segments, meta, chapters, audioMap, signals) => {
   const hasSegments = Array.isArray(segments) && segments.length > 0;
@@ -2084,6 +2091,85 @@ const analyzeViaClaudeTwoStage = async (proxyUrl, sourceText, targetCount, segme
   const candidateSegs = candidateIdxs.map(i => segments[i]);
 
   return analyzeViaClaude(proxyUrl, sourceText, targetCount, candidateSegs, meta, chapters, audioMap, signals);
+};
+
+// Phase D: Extract 3-8 searchable topic keywords from transcript via Claude tool_use
+const extractTopicKeywords = async (proxyUrl, text, onStatus) => {
+  if (!proxyUrl) return [];
+  try {
+    if (onStatus) onStatus("Extracting topic keywords…");
+    const tools = [{
+      name: "emit_topics",
+      description: "Emit 3-8 specific, searchable topic keywords from the transcript.",
+      input_schema: {
+        type: "object",
+        properties: {
+          keywords: { type: "array", items: { type: "string" }, minItems: 3, maxItems: 8 }
+        },
+        required: ["keywords"]
+      }
+    }];
+    // Prefer the middle 6000 chars — usually the densest content
+    let chunk = String(text || "");
+    if (chunk.length > 6000) {
+      const mid = Math.floor(chunk.length / 2);
+      chunk = chunk.slice(Math.max(0, mid - 3000), mid + 3000);
+    }
+    const sys = "Extract 3-8 specific, searchable topic keywords from this transcript (not generic terms like 'productivity' — prefer specific names, products, events, companies, people). Output via emit_topics.";
+    const j = await mvpCallClaude(proxyUrl, [{ role: "user", content: chunk }], {
+      system: sys, tools, tool_choice: { type: "tool", name: "emit_topics" }, max_tokens: 256
+    });
+    const tu = (j.content || []).find(b => b.type === "tool_use" && b.name === "emit_topics");
+    if (!tu || !tu.input || !Array.isArray(tu.input.keywords)) return [];
+    return tu.input.keywords.slice(0, 8).map(k => String(k).trim()).filter(Boolean);
+  } catch (e) {
+    console.warn("[zs] extractTopicKeywords failed", e);
+    return [];
+  }
+};
+
+// Phase D: Fetch trending context for a list of keywords across all four sources
+const fetchTrendingContext = async (base, keywords) => {
+  if (!Array.isArray(keywords) || !keywords.length) return [];
+  const workerBase = (base || "").replace(/\/anthropic\/?$/, "");
+  const results = [];
+  // Fan out: for each keyword query all four sources in parallel
+  await Promise.all(keywords.map(async (kw) => {
+    const encoded = encodeURIComponent(kw);
+    const [gRes, rRes, hnRes, xRes] = await Promise.allSettled([
+      fetch(workerBase + "/trends/google?q=" + encoded).then(r => r.json()).catch(() => ({ results: [] })),
+      fetch(workerBase + "/trends/reddit?q=" + encoded).then(r => r.json()).catch(() => ({ results: [] })),
+      fetch(workerBase + "/trends/hn?q=" + encoded).then(r => r.json()).catch(() => ({ results: [] })),
+      fetch(workerBase + "/trends/x?q=" + encoded).then(r => r.json()).catch(() => ({ results: [] }))
+    ]);
+    const allMatches = [];
+    for (const settled of [gRes, rRes, hnRes, xRes]) {
+      const data = settled.status === "fulfilled" ? settled.value : { results: [] };
+      if (data.disabled) continue;
+      const hits = Array.isArray(data.results) ? data.results : [];
+      for (const hit of hits) {
+        allMatches.push({
+          source: hit.source || "unknown",
+          title: String(hit.title || ""),
+          rank: Number(hit.rank || hit.volume || 0),
+          url: String(hit.url || "")
+        });
+      }
+    }
+    if (allMatches.length) {
+      results.push({ keyword: kw, matches: allMatches.slice(0, 5) });
+    }
+  }));
+  // Cap total matches at 40
+  let total = 0;
+  return results.filter(r => {
+    const count = r.matches.length;
+    if (total + count > 40) {
+      r.matches = r.matches.slice(0, Math.max(0, 40 - total));
+    }
+    total += r.matches.length;
+    return r.matches.length > 0;
+  });
 };
 
 // MVP-B: Polish a Studio script scene via Claude
@@ -4249,10 +4335,14 @@ function RepurposeClipPreview({ clip, clipBlobUrl, clipThumbUrl, uploadedVideoUr
   );
 }
 
-function RepurposeClipCard({ clip, onField, onRegen, regenBusy, onRemove, onExplain, explainBusy, onHookAlts, hookAltsBusy, onThumbConcept, thumbConceptBusy, onHookScore, hookScoreBusy, onObjAnswer, objAnswerBusy, onCommentSeeds, commentSeedsBusy, onCopyPost, copyPostBusy, onRenderVideo, renderVideoBusy, renderVideoProgress, uploadEnabled, uploadedVideoUrl, sourceUrl, clipBlobUrl, clipThumbUrl, onShare, shareBusyPlatform, signals }){
+function RepurposeClipCard({ clip, onField, onRegen, regenBusy, onRemove, onExplain, explainBusy, onHookAlts, hookAltsBusy, onThumbConcept, thumbConceptBusy, onHookScore, hookScoreBusy, onObjAnswer, objAnswerBusy, onCommentSeeds, commentSeedsBusy, onCopyPost, copyPostBusy, onRenderVideo, renderVideoBusy, renderVideoProgress, uploadEnabled, uploadedVideoUrl, sourceUrl, clipBlobUrl, clipThumbUrl, onShare, shareBusyPlatform, trendingMatches }){
   const [shareOpen, setShareOpen] = useState(false);
   const band = viralityBand(clip.virality);
   const preset = REPURPOSE_PRESETS.find(p => p.id === clip.preset) || REPURPOSE_PRESETS[0];
+  const clipText = ((clip.hook || "") + " " + (clip.caption || "") + " " + (clip.title || "")).toLowerCase();
+  const matchedTrendingKw = Array.isArray(trendingMatches)
+    ? (trendingMatches.find(m => clipText.includes(m.keyword.toLowerCase())) || null)
+    : null;
   const previewW = preset.id === "vertical" ? 144 : (preset.id === "square" ? 160 : 200);
   const previewH = preset.id === "vertical" ? 256 : (preset.id === "square" ? 160 : 112);
   const [exportFlash, setExportFlash] = useState(false);
@@ -4283,6 +4373,9 @@ function RepurposeClipCard({ clip, onField, onRegen, regenBusy, onRemove, onExpl
             <span className="chip">{hmsFromSec(clip.start)} – {hmsFromSec(clip.end)}</span>
             <span className="chip">{clipDuration(clip)}s</span>
             <span className="chip">{preset.ratio} · {platformFor(clip.preset)}</span>
+            {matchedTrendingKw && (
+              <span className="chip text-emerald-200 !border-emerald-400/30 bg-emerald-500/10" title={"Trending: " + matchedTrendingKw.keyword}>📈 {matchedTrendingKw.keyword}</span>
+            )}
           </div>
           <input
             value={clip.title}
@@ -5876,6 +5969,18 @@ function RepurposeTab(){
       const audioMap = project.audioMap || null;
       setProcessStatus(segments.length > 0 ? ("Analyzing " + segments.length + " segments…") : "Generating clips…");
       const path = getAnthropicPath();
+      const base = path ? path.replace(/\/anthropic\/?$/, "") : "https://zaidsaid-proxy.zaidsaid.workers.dev";
+
+      // Phase D: kick off topic extraction + trending fetch in parallel with clip generation
+      const trendingPromise = path ? (async () => {
+        try {
+          const kws = await extractTopicKeywords(path, text, setProcessStatus);
+          if (!kws.length) return [];
+          setProcessStatus("Fetching trending context…");
+          return await fetchTrendingContext(base, kws);
+        } catch(e) { console.warn('[zs] trending fetch failed', e); return []; }
+      })() : Promise.resolve([]);
+
       let clips = null;
       if(path){
         try { clips = await analyzeViaClaudeTwoStage(path, text, target, segments, meta, chapters, audioMap); } catch(e){ console.warn('[zs] analyzeViaClaudeTwoStage failed', e); clips = null; }
@@ -5885,6 +5990,23 @@ function RepurposeTab(){
       setProject(p => ({ ...p, clips, durationSec: p.durationSec || (clips[clips.length-1].end + 60) }));
       const src = segments.length > 0 ? "timestamped transcript" : (hasPastedTranscript ? "pasted transcript" : "source text");
       toast("Generated " + clips.length + " clips from " + src, "success");
+
+      // Phase D: once trending arrives, store in signals and re-run scoring
+      trendingPromise.then(async (trendingMatches) => {
+        if (!trendingMatches || !trendingMatches.length) return;
+        setProject(p => ({ ...p, signals: { ...(p.signals || {}), trendingMatches } }));
+        if (!path) return;
+        try {
+          setProcessStatus("Re-scoring with trending signals…");
+          const enrichedSignals = { trendingMatches };
+          const enrichedClips = await analyzeViaClaudeTwoStage(path, text, target, segments, meta, chapters, audioMap, enrichedSignals);
+          if (enrichedClips && enrichedClips.length) {
+            setProject(p => ({ ...p, clips: enrichedClips }));
+            toast("Re-scored " + enrichedClips.length + " clips with trending signals", "success");
+          }
+        } catch(e) { console.warn('[zs] trending re-score failed', e); }
+        setProcessStatus("");
+      }).catch(() => {});
       // x93: for uploads, cut real per-clip blobs + thumbnails into IDB.
       if(isUpload){
         let srcBlob = null;
@@ -6436,7 +6558,7 @@ const removeClip = (clipId) => {
                     clipThumbUrl={clipBlobUrls[c.id] ? clipBlobUrls[c.id].thumb : null}
                     onShare={(platform)=>shareClip(c.id, platform)}
                     shareBusyPlatform={shareBusyId && shareBusyId.startsWith(c.id + ":") ? shareBusyId.split(":")[1] : null}
-                    signals={project.signals || null}
+                    trendingMatches={(project.signals && project.signals.trendingMatches) || []}
                   />
                 </div>
               );
