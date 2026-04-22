@@ -1,4 +1,4 @@
-/* Zaidsaid — app.js v2.0 — x92: Repurpose — big videos extract audio client-side before transcribing. Lazy-loads ffmpeg.wasm (@ffmpeg/ffmpeg@0.12.10 + @ffmpeg/core@0.12.6 from unpkg, ~30 MB one-time); any uploaded video >50 MB is reduced to mono 16 kHz 32 kbps MP3 (~14 MB/hr) before POSTing to /elevenlabs/v1/speech-to-text. Fixes 700+ MB uploads hanging on the Cloudflare Worker 500 MiB body limit. CSP widened for wasm-unsafe-eval, blob: workers, and unpkg connect. | x91: Repurpose — uploaded files now survive page refreshes. New IndexedDB blob store (zaidsaid/uploads, key repurpose:current) persists the File on upload; RepurposeTab useEffect on mount HEAD-checks the existing blob URL and rehydrates from IDB when it's dead, or clears the dangling reference + toasts "please re-upload" when IDB is empty too. processSource now reads the blob from IDB first, falling back to the blob URL. Remove button deletes the IDB entry. | x90: Repurpose — uploads now actually clip. processSource gate no longer bails on empty source when an uploaded video is present; on new file upload we clear stale transcript/chapters/clips/name; uploaded videos without a transcript auto-transcribe via ElevenLabs Scribe (/elevenlabs/v1/speech-to-text with model_id=scribe_v1, word-level timestamps grouped into ~6s segments) and feed the existing two-stage viral analyzer. New fuchsia "ElevenLabs Scribe (auto-transcribed)" source chip. | x89: Repurpose — YouTube downloader tool (paste URL → fetch progressive formats via worker InnerTube → quality dropdown → File System Access folder picker with streamed writable, falls back to <a download> when unsupported). Worker: /youtube-formats, /youtube-media. | x88: batch export respects selection + preset-aware video render — "Export selected as video" renders .webm per selected clip at its preset aspect ratio (9:16/1:1/16:9); fallback selection→approved→all; metadata (.txt) export kept as secondary. Fix stray /span> text below batch-export button. | x87: clip length range widened — 5s floor (viral reactions, one-liners) to 1800s / 30min ceiling (full topic arcs); removed rigid length-mix prompt in favor of idea-first sizing | x86: clip preview no-autoplay — remove YouTube loop=1&playlist (fixes whole-video loop), remove autoPlay on uploaded video, preview now shows clip-only paused state until user clicks play | x85: Phase B.1 — persist chapters on description-fallback, surface worker errors, transcript-source chip, length-variance prompt, analyzeLocal intro-skip, **remove dead RepurposeAnalyzer + RepurposeRealAnalyze god-mode components** | x84: Phase B — YT chapter-boundary detection (parseYouTubeChapters in worker; analyzeLocal uses chapter spans as candidate windows when ≥3 chapters; Claude receives chapter list for boundary alignment) + Web Audio energy analyzer (analyzeUploadedVideoAudio: 8x scrub AudioContext RMS scan on uploaded files; peaks boost analyzeLocal virality by +5*peakDensity) | x83: Smart Clipping v2 — two-stage viral detection + topic-boundary awareness + variable 30-180s clip length + unified Generate flow + target default 10 (range 3-20) | x82: preview fix — CSP frame-src, youtube-nocookie embed, thumbnail fallback | x80: Smart Clipping — viral moment detection. Worker /youtube-transcript returns segments[{t,d,text}]. analyzeViaClaude uses timestamped transcript with 4-dimension scoring (hook_power/emotional_impact/quotability/surprise_drama). analyzeLocal scores ~45-75s windows, picks top N with spatial diversity across full duration. YT iframe autoplay+loop within clip range; uploaded video autoplay muted with loop-on-end.
+/* Zaidsaid — app.js v2.0 — x93: Repurpose — real per-clip mp4 cuts + thumbnail frames. cutClipFromSource (ffmpeg.wasm, -ss after -i, -c copy with libx264 fallback <5 min) + grabFrameThumb (off-DOM canvas) + generateClipAssets (sequential, IDB-backed). processSource fires generateClipAssets after setProject for upload flows. RepurposeTab hydrates clipBlobUrls Map from IDB on mount; RepurposeClipPreview shows pre-cut <video controls> when blob ready. removeClip deletes IDB entries + revokes URLs. | x92: Repurpose — big videos extract audio client-side before transcribing. Lazy-loads ffmpeg.wasm (@ffmpeg/ffmpeg@0.12.10 + @ffmpeg/core@0.12.6 from unpkg, ~30 MB one-time); any uploaded video >50 MB is reduced to mono 16 kHz 32 kbps MP3 (~14 MB/hr) before POSTing to /elevenlabs/v1/speech-to-text. Fixes 700+ MB uploads hanging on the Cloudflare Worker 500 MiB body limit. CSP widened for wasm-unsafe-eval, blob: workers, and unpkg connect. | x91: Repurpose — uploaded files now survive page refreshes. New IndexedDB blob store (zaidsaid/uploads, key repurpose:current) persists the File on upload; RepurposeTab useEffect on mount HEAD-checks the existing blob URL and rehydrates from IDB when it's dead, or clears the dangling reference + toasts "please re-upload" when IDB is empty too. processSource now reads the blob from IDB first, falling back to the blob URL. Remove button deletes the IDB entry. | x90: Repurpose — uploads now actually clip. processSource gate no longer bails on empty source when an uploaded video is present; on new file upload we clear stale transcript/chapters/clips/name; uploaded videos without a transcript auto-transcribe via ElevenLabs Scribe (/elevenlabs/v1/speech-to-text with model_id=scribe_v1, word-level timestamps grouped into ~6s segments) and feed the existing two-stage viral analyzer. New fuchsia "ElevenLabs Scribe (auto-transcribed)" source chip. | x89: Repurpose — YouTube downloader tool (paste URL → fetch progressive formats via worker InnerTube → quality dropdown → File System Access folder picker with streamed writable, falls back to <a download> when unsupported). Worker: /youtube-formats, /youtube-media. | x88: batch export respects selection + preset-aware video render — "Export selected as video" renders .webm per selected clip at its preset aspect ratio (9:16/1:1/16:9); fallback selection→approved→all; metadata (.txt) export kept as secondary. Fix stray /span> text below batch-export button. | x87: clip length range widened — 5s floor (viral reactions, one-liners) to 1800s / 30min ceiling (full topic arcs); removed rigid length-mix prompt in favor of idea-first sizing | x86: clip preview no-autoplay — remove YouTube loop=1&playlist (fixes whole-video loop), remove autoPlay on uploaded video, preview now shows clip-only paused state until user clicks play | x85: Phase B.1 — persist chapters on description-fallback, surface worker errors, transcript-source chip, length-variance prompt, analyzeLocal intro-skip, **remove dead RepurposeAnalyzer + RepurposeRealAnalyze god-mode components** | x84: Phase B — YT chapter-boundary detection (parseYouTubeChapters in worker; analyzeLocal uses chapter spans as candidate windows when ≥3 chapters; Claude receives chapter list for boundary alignment) + Web Audio energy analyzer (analyzeUploadedVideoAudio: 8x scrub AudioContext RMS scan on uploaded files; peaks boost analyzeLocal virality by +5*peakDensity) | x83: Smart Clipping v2 — two-stage viral detection + topic-boundary awareness + variable 30-180s clip length + unified Generate flow + target default 10 (range 3-20) | x82: preview fix — CSP frame-src, youtube-nocookie embed, thumbnail fallback | x80: Smart Clipping — viral moment detection. Worker /youtube-transcript returns segments[{t,d,text}]. analyzeViaClaude uses timestamped transcript with 4-dimension scoring (hook_power/emotional_impact/quotability/surprise_drama). analyzeLocal scores ~45-75s windows, picks top N with spatial diversity across full duration. YT iframe autoplay+loop within clip range; uploaded video autoplay muted with loop-on-end.
  * Security: localStorage namespaced as zaidsaid.v2.*, error boundary, no innerHTML, no eval, no fetch.
  * Archived v1 seed data preserved under ARCHIVE_* for later reuse.
  */
@@ -73,6 +73,12 @@ const idbDelete = async (key) => {
     tx.onerror = () => reject(tx.error);
   });
 };
+
+// x93: per-clip blob key convention — video: IDB_CLIP_PREFIX+id, thumb: IDB_CLIP_PREFIX+id+":thumb"
+const IDB_CLIP_PREFIX = "repurpose:clip:";
+const idbPutClip = (id, blob) => idbPut(IDB_CLIP_PREFIX + id, blob);
+const idbGetClip = (id) => idbGet(IDB_CLIP_PREFIX + id);
+const idbDeleteClip = (id) => idbDelete(IDB_CLIP_PREFIX + id);
 
 /* ---------------- God mode (admin / power-user surface toggle) ----------------
  * Public MVP hides advanced controls (per-scene regen, full provider config,
@@ -1599,6 +1605,110 @@ const extractAudioAsMp3 = async (videoBlob, filename, onStatus, onProgress) => {
   } finally {
     try { ffmpeg.off && ffmpeg.off("progress", progressHandler); } catch(_){}
   }
+};
+
+// x93: Cut a single clip out of a source blob using ffmpeg.wasm.
+// Uses output-side seek (-ss after -i) for frame-accurate start/end.
+// Tries -c copy first (fast mux); falls back to libx264+aac encode for
+// containers that can't be stream-copied, but only when clip < 5 min.
+const cutClipFromSource = async (srcBlob, clip, onProgress) => {
+  const { ffmpeg, util } = await loadFfmpeg(null);
+  const srcName = srcBlob.name || "source.mp4";
+  const ext = srcName.split('.').pop().toLowerCase().replace(/[^a-z0-9]/g, '') || 'mp4';
+  const inputName = "clip_in." + ext;
+  const outputName = "clip_out.mp4";
+  const progressHandler = ({ progress }) => { if(onProgress && typeof progress === 'number') onProgress(Math.min(0.99, progress)); };
+  ffmpeg.on && ffmpeg.on("progress", progressHandler);
+  try {
+    await ffmpeg.writeFile(inputName, await util.fetchFile(srcBlob));
+    const ss = String(clip.start || 0);
+    const to = String(clip.end || 0);
+    let succeeded = false;
+    // Attempt 1: copy streams (no re-encode, very fast).
+    try {
+      await ffmpeg.exec(["-i", inputName, "-ss", ss, "-to", to, "-c", "copy", "-avoid_negative_ts", "1", outputName]);
+      succeeded = true;
+    } catch(_) {}
+    // Attempt 2: full encode fallback (capped at 5 min to avoid long waits).
+    if(!succeeded){
+      const clipDur = (clip.end || 0) - (clip.start || 0);
+      if(clipDur > 300) throw new Error("clip too long for encode fallback (" + Math.round(clipDur) + "s > 300s)");
+      await ffmpeg.exec(["-i", inputName, "-ss", ss, "-to", to, "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", outputName]);
+    }
+    const data = await ffmpeg.readFile(outputName);
+    return new Blob([data.buffer || data], { type: "video/mp4" });
+  } finally {
+    try { ffmpeg.off && ffmpeg.off("progress", progressHandler); } catch(_){}
+    try { await ffmpeg.deleteFile(inputName); } catch(_){}
+    try { await ffmpeg.deleteFile(outputName); } catch(_){}
+  }
+};
+
+// x93: Grab a JPEG thumbnail from srcBlob at atSec using an off-DOM video element.
+const grabFrameThumb = (srcBlob, atSec) => new Promise((resolve, reject) => {
+  const url = URL.createObjectURL(srcBlob);
+  const video = document.createElement("video");
+  video.muted = true;
+  video.preload = "metadata";
+  const cleanup = () => { try { URL.revokeObjectURL(url); } catch(_){} };
+  video.onerror = () => { cleanup(); reject(new Error("video load error for thumb")); };
+  video.onloadeddata = () => {
+    video.currentTime = Math.max(0, atSec);
+  };
+  video.onseeked = () => {
+    try {
+      const canvas = document.createElement("canvas");
+      canvas.width = 480; canvas.height = 270;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(video, 0, 0, 480, 270);
+      canvas.toBlob((blob) => {
+        cleanup();
+        if(blob) resolve(blob);
+        else reject(new Error("canvas toBlob returned null"));
+      }, "image/jpeg", 0.8);
+    } catch(e){ cleanup(); reject(e); }
+  };
+  video.src = url;
+});
+
+// x93: Generate cut video + thumbnail for every clip, write both to IDB, mark ready.
+// Sequential — ffmpeg.wasm is single-threaded.
+const generateClipAssets = async (srcBlob, clips, onStatus, setClipBlobUrls) => {
+  if(setClipBlobUrls){
+    setClipBlobUrls(prev => {
+      Object.values(prev).forEach(e => { try { URL.revokeObjectURL(e.video); } catch(_){} try { URL.revokeObjectURL(e.thumb); } catch(_){} });
+      return {};
+    });
+  }
+  const total = clips.length;
+  const results = [];
+  for(let i = 0; i < clips.length; i++){
+    const clip = clips[i];
+    if(onStatus) onStatus("Cutting clip " + (i + 1) + " of " + total + "…");
+    let cutBlob = null, thumbBlob = null;
+    try {
+      cutBlob = await cutClipFromSource(srcBlob, clip, null);
+      await idbPutClip(clip.id, cutBlob);
+    } catch(e){
+      console.warn("[zs] cutClipFromSource failed for clip", clip.id, e);
+      results.push({ id: clip.id, ready: false });
+      continue;
+    }
+    const video = URL.createObjectURL(cutBlob);
+    let thumb = null;
+    try {
+      const midSec = (clip.start || 0) + ((clip.end || 0) - (clip.start || 0)) * 0.25;
+      thumbBlob = await grabFrameThumb(srcBlob, midSec);
+      await idbPutClip(clip.id + ":thumb", thumbBlob);
+      thumb = URL.createObjectURL(thumbBlob);
+    } catch(e){
+      console.warn("[zs] grabFrameThumb failed for clip", clip.id, e);
+      // non-fatal — clip still usable without thumbnail
+    }
+    if(setClipBlobUrls) setClipBlobUrls(prev => ({ ...prev, [clip.id]: { video, thumb } }));
+    results.push({ id: clip.id, ready: true });
+  }
+  return results;
 };
 
 // x90: Transcribe an uploaded video/audio file via ElevenLabs Scribe.
@@ -3715,7 +3825,7 @@ function RepurposeTranscriptStrip({ project }){
   );
 }
 
-function RepurposeClipPreview({ clip, uploadedVideoUrl, sourceUrl, width, height }){
+function RepurposeClipPreview({ clip, clipBlobUrl, clipThumbUrl, uploadedVideoUrl, sourceUrl, width, height }){
   const videoRef = useRef(null);
   const [playing, setPlaying] = useState(false);
   const [pos, setPos] = useState(clip.start || 0);
@@ -3773,6 +3883,22 @@ function RepurposeClipPreview({ clip, uploadedVideoUrl, sourceUrl, width, height
   };
 
   const pct = Math.max(0, Math.min(100, ((pos - (clip.start || 0)) / dur) * 100));
+
+  // x93: pre-cut clip blob — play the already-trimmed mp4 directly.
+  if(clipBlobUrl){
+    return (
+      <div className="relative rounded-xl overflow-hidden bg-black shrink-0" style={{ width, height }}>
+        <video
+          src={clipBlobUrl}
+          poster={clipThumbUrl || undefined}
+          className="w-full h-full object-cover"
+          controls
+          playsInline
+          preload="metadata"
+        />
+      </div>
+    );
+  }
 
   if(uploadedVideoUrl){
     return (
@@ -3841,7 +3967,7 @@ function RepurposeClipPreview({ clip, uploadedVideoUrl, sourceUrl, width, height
   );
 }
 
-function RepurposeClipCard({ clip, onField, onRegen, regenBusy, onRemove, onExplain, explainBusy, onHookAlts, hookAltsBusy, onThumbConcept, thumbConceptBusy, onHookScore, hookScoreBusy, onObjAnswer, objAnswerBusy, onCommentSeeds, commentSeedsBusy, onCopyPost, copyPostBusy, onRenderVideo, renderVideoBusy, renderVideoProgress, uploadEnabled, uploadedVideoUrl, sourceUrl, onShare, shareBusyPlatform }){
+function RepurposeClipCard({ clip, onField, onRegen, regenBusy, onRemove, onExplain, explainBusy, onHookAlts, hookAltsBusy, onThumbConcept, thumbConceptBusy, onHookScore, hookScoreBusy, onObjAnswer, objAnswerBusy, onCommentSeeds, commentSeedsBusy, onCopyPost, copyPostBusy, onRenderVideo, renderVideoBusy, renderVideoProgress, uploadEnabled, uploadedVideoUrl, sourceUrl, clipBlobUrl, clipThumbUrl, onShare, shareBusyPlatform }){
   const [shareOpen, setShareOpen] = useState(false);
   const band = viralityBand(clip.virality);
   const preset = REPURPOSE_PRESETS.find(p => p.id === clip.preset) || REPURPOSE_PRESETS[0];
@@ -3886,6 +4012,8 @@ function RepurposeClipCard({ clip, onField, onRegen, regenBusy, onRemove, onExpl
         </div>
         <RepurposeClipPreview
           clip={clip}
+          clipBlobUrl={clipBlobUrl}
+          clipThumbUrl={clipThumbUrl}
           uploadedVideoUrl={uploadedVideoUrl}
           sourceUrl={sourceUrl}
           width={previewW}
@@ -5220,6 +5348,43 @@ function RepurposeTab(){
     return () => { cancelled = true; };
   }, []);
 
+  // x93: per-clip blob URL map — hydrated from IDB on mount and after clips change.
+  const [clipBlobUrls, setClipBlobUrls] = useState({});
+  useEffect(() => {
+    if(!Array.isArray(project.clips) || project.clips.length === 0) return;
+    const clipIds = project.clips.map(c => c.id).sort().join(',');
+    const loadedIds = Object.keys(clipBlobUrls).sort().join(',');
+    if(Object.keys(clipBlobUrls).length > 0 && loadedIds === clipIds) return;
+    let cancelled = false;
+    const minted = [];
+    (async () => {
+      const map = {};
+      for(const clip of project.clips){
+        try {
+          const vBlob = await idbGetClip(clip.id);
+          if(cancelled) break;
+          if(vBlob){
+            const vUrl = URL.createObjectURL(vBlob);
+            minted.push(vUrl);
+            map[clip.id] = { video: vUrl, thumb: null };
+            const tBlob = await idbGetClip(clip.id + ":thumb");
+            if(cancelled) break;
+            if(tBlob){
+              const tUrl = URL.createObjectURL(tBlob);
+              minted.push(tUrl);
+              map[clip.id].thumb = tUrl;
+            }
+          }
+        } catch(_){}
+      }
+      if(!cancelled) setClipBlobUrls(map);
+    })();
+    return () => {
+      cancelled = true;
+      minted.forEach(u => { try { URL.revokeObjectURL(u); } catch(_){} });
+    };
+  }, [project.clips]);
+
   const processSource = async () => {
     if(processBusy) return;
     const sourceUrl = (project.source || "").trim();
@@ -5402,9 +5567,26 @@ function RepurposeTab(){
       if(!clips || !clips.length){ clips = analyzeLocal(text, target, segments, chapters, audioMap); }
       if(!clips || !clips.length){ toast("No clips generated — try a different source", "error"); return; }
       setProject(p => ({ ...p, clips, durationSec: p.durationSec || (clips[clips.length-1].end + 60) }));
-      setProcessStatus("Done — " + clips.length + " clips");
       const src = segments.length > 0 ? "timestamped transcript" : (hasPastedTranscript ? "pasted transcript" : "source text");
       toast("Generated " + clips.length + " clips from " + src, "success");
+      // x93: for uploads, cut real per-clip blobs + thumbnails into IDB.
+      if(isUpload){
+        let srcBlob = null;
+        try { srcBlob = await idbGet(IDB_UPLOAD_KEY); } catch(_){}
+        if(srcBlob){
+          try {
+            await generateClipAssets(srcBlob, clips, setProcessStatus, setClipBlobUrls);
+            setProcessStatus("Done — " + clips.length + " clips");
+          } catch(e){
+            console.warn("[zs] generateClipAssets failed", e);
+            setProcessStatus("Done — " + clips.length + " clips (cuts failed)");
+          }
+        } else {
+          setProcessStatus("Done — " + clips.length + " clips");
+        }
+      } else {
+        setProcessStatus("Done — " + clips.length + " clips");
+      }
     } catch(e){
       toast("Process failed: " + (e && e.message || "unknown"), "error");
       setProcessStatus("Failed");
@@ -5685,6 +5867,20 @@ function RepurposeTab(){
 const removeClip = (clipId) => {
     setProject({ ...project, clips: project.clips.filter(c => c.id !== clipId) });
     setSelected(selected.filter(id => id !== clipId));
+    // x93: clean up per-clip IDB entries and revoke any minted blob URLs.
+    idbDeleteClip(clipId).catch(()=>{});
+    idbDeleteClip(clipId + ":thumb").catch(()=>{});
+    setClipBlobUrls(prev => {
+      const entry = prev[clipId];
+      if(entry){
+        try { if(entry.video) URL.revokeObjectURL(entry.video); } catch(_){}
+        try { if(entry.thumb) URL.revokeObjectURL(entry.thumb); } catch(_){}
+        const next = { ...prev };
+        delete next[clipId];
+        return next;
+      }
+      return prev;
+    });
   };
   const addClip = () => {
     const nid = "c" + (project.clips.length + 1) + "_" + Math.random().toString(36).slice(2,6);
@@ -5862,6 +6058,8 @@ const removeClip = (clipId) => {
                     uploadEnabled={!!project.uploadedVideoUrl}
                     uploadedVideoUrl={project.uploadedVideoUrl}
                     sourceUrl={project.source}
+                    clipBlobUrl={clipBlobUrls[c.id] ? clipBlobUrls[c.id].video : null}
+                    clipThumbUrl={clipBlobUrls[c.id] ? clipBlobUrls[c.id].thumb : null}
                     onShare={(platform)=>shareClip(c.id, platform)}
                     shareBusyPlatform={shareBusyId && shareBusyId.startsWith(c.id + ":") ? shareBusyId.split(":")[1] : null}
                   />
