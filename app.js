@@ -1,4 +1,4 @@
-/* Zaidsaid — app.js v2.0 — x83: Smart Clipping v2 — two-stage viral detection + topic-boundary awareness + variable 30-180s clip length + unified Generate flow + target default 10 (range 3-20) | x82: preview fix — CSP frame-src, youtube-nocookie embed, thumbnail fallback | x80: Smart Clipping — viral moment detection. Worker /youtube-transcript returns segments[{t,d,text}]. analyzeViaClaude uses timestamped transcript with 4-dimension scoring (hook_power/emotional_impact/quotability/surprise_drama). analyzeLocal scores ~45-75s windows, picks top N with spatial diversity across full duration. YT iframe autoplay+loop within clip range; uploaded video autoplay muted with loop-on-end.
+/* Zaidsaid — app.js v2.0 — x84: Phase B — YT chapter-boundary detection (parseYouTubeChapters in worker; analyzeLocal uses chapter spans as candidate windows when ≥3 chapters; Claude receives chapter list for boundary alignment) + Web Audio energy analyzer (analyzeUploadedVideoAudio: 8x scrub AudioContext RMS scan on uploaded files; peaks boost analyzeLocal virality by +5*peakDensity) | x83: Smart Clipping v2 — two-stage viral detection + topic-boundary awareness + variable 30-180s clip length + unified Generate flow + target default 10 (range 3-20) | x82: preview fix — CSP frame-src, youtube-nocookie embed, thumbnail fallback | x80: Smart Clipping — viral moment detection. Worker /youtube-transcript returns segments[{t,d,text}]. analyzeViaClaude uses timestamped transcript with 4-dimension scoring (hook_power/emotional_impact/quotability/surprise_drama). analyzeLocal scores ~45-75s windows, picks top N with spatial diversity across full duration. YT iframe autoplay+loop within clip range; uploaded video autoplay muted with loop-on-end.
  * Security: localStorage namespaced as zaidsaid.v2.*, error boundary, no innerHTML, no eval, no fetch.
  * Archived v1 seed data preserved under ARCHIVE_* for later reuse.
  */
@@ -1094,7 +1094,8 @@ const parsePastedTranscript = (text) => {
 };
 
 // x80: MVP-F — Viral clip detection via Claude with timestamped segments + 4-dimension scoring
-const analyzeViaClaude = async (proxyUrl, sourceText, targetCount, segments, meta) => {
+// x84: accepts optional chapters [{t,title}] and audioMap for Phase B signals.
+const analyzeViaClaude = async (proxyUrl, sourceText, targetCount, segments, meta, chapters, audioMap) => {
   const tools = [{
     name:'emit_clips',
     description:'Return the N best viral short-form clip candidates with 4-dimension scoring.',
@@ -1126,29 +1127,43 @@ const analyzeViaClaude = async (proxyUrl, sourceText, targetCount, segments, met
   }];
   const hasSegments = Array.isArray(segments) && segments.length > 0;
   const n = Math.max(1, Math.min(20, Number(targetCount)||10));
+  const chaps = Array.isArray(chapters) && chapters.length >= 3 ? chapters : [];
+  const chapSysAddendum = chaps.length >= 3
+    ? '\n\n(f) CHAPTER BOUNDARIES — If chapter boundaries are provided, strongly prefer clip.start/clip.end to align with chapter boundaries unless the viral moment clearly spans a chapter edge.'
+    : '';
   const sys = 'You are a viral short-form video strategist extracting TikTok/Reels/Shorts clips from long-form content. For each clip you pick:\n\n' +
     '(a) TOPIC BOUNDARY — Identify the EXACT transcript segment where the viral moment\'s conversation/thought begins (usually a hook line, topic shift, or question). Identify where the thought concludes (answer, punchline, resolution, or topic change). Set clip.start and clip.end to those exact timestamps so the clip captures the COMPLETE thought — never cut mid-sentence, never start mid-answer.\n\n' +
     '(b) LENGTH — clips are typically 30-90s, but extend to 180s if the topic genuinely requires it (e.g. a 2-minute story with a payoff). Do NOT truncate just to hit a length target. A complete 2-minute clip beats a chopped 45s one.\n\n' +
     '(c) SELF-CONTAINED — the viewer sees this cold. It must make sense without any prior context.\n\n' +
     '(d) HOOK + PAYOFF — opens with a hook (question, bold claim, conflict, or surprising fact) and closes on a payoff (answer, punchline, or resolution).\n\n' +
     '(e) DISTRIBUTE — clips must span DIFFERENT moments across the full video. Do not cluster near the start.\n\n' +
-    'Score each clip 0-10 on: hook_power, emotional_impact, quotability, surprise_drama. Return ONLY via emit_clips tool.';
+    'Score each clip 0-10 on: hook_power, emotional_impact, quotability, surprise_drama. Return ONLY via emit_clips tool.' +
+    chapSysAddendum;
   let userMsg;
   if(hasSegments){
     const { lines, totalDur } = buildTimedTranscript(segments, 14000);
     const metaLine = meta && meta.title ? ('Video: "' + meta.title + '"' + (meta.author ? (' by ' + meta.author) : '') + '\n') : '';
+    const chapLine = chaps.length >= 3
+      ? 'Available chapters:\n' + chaps.map(c => { const m = Math.floor(c.t/60); const s = Math.round(c.t%60); return '[' + m + ':' + String(s).padStart(2,'0') + '] ' + c.title; }).join('\n') + '\n\n'
+      : '';
     userMsg = metaLine +
       'Duration: ' + fmtTs(totalDur) + ' (' + Math.round(totalDur) + 's)\n' +
       'Target clip count: ' + n + '\n\n' +
+      chapLine +
       'Timestamped transcript (format: [M:SS] or [H:MM:SS] text):\n' + lines.join('\n') + '\n\n' +
       'Extract exactly ' + n + ' viral clips. Each clip.start / clip.end MUST be in seconds (not formatted). ' +
       'Distribute picks across the full ' + Math.round(totalDur) + 's duration — do not cluster near the start.';
   } else {
+    const chapLine = chaps.length >= 3
+      ? 'Available chapters:\n' + chaps.map(c => { const m = Math.floor(c.t/60); const s = Math.round(c.t%60); return '[' + m + ':' + String(s).padStart(2,'0') + '] ' + c.title; }).join('\n') + '\n\n'
+      : '';
     userMsg = 'Target clip count: ' + n + '\n\n' +
+      chapLine +
       'Source (no timestamps — infer approximate seconds across assumed duration):\n' +
       String(sourceText||'').slice(0, 8000) + '\n\n' +
       'Extract exactly ' + n + ' viral clips. Score each on the 4 dimensions.';
   }
+  const audioPeaks = (audioMap && Array.isArray(audioMap.peaks)) ? audioMap.peaks : [];
   const j = await mvpCallClaude(proxyUrl, [{role:'user', content:userMsg}], { system:sys, tools, tool_choice:{type:'tool', name:'emit_clips'}, max_tokens:3072 });
   const tu = (j.content||[]).find(b => b.type==='tool_use' && b.name==='emit_clips');
   if(!tu || !tu.input || !Array.isArray(tu.input.clips)) throw new Error('No emit_clips tool_use in response');
@@ -1157,12 +1172,21 @@ const analyzeViaClaude = async (proxyUrl, sourceText, targetCount, segments, met
     const ei = Math.max(0,Math.min(10,Number(c.emotional_impact)||0));
     const qu = Math.max(0,Math.min(10,Number(c.quotability)||0));
     const sd = Math.max(0,Math.min(10,Number(c.surprise_drama)||0));
-    const virality = Math.round((hp*0.35 + ei*0.30 + qu*0.20 + sd*0.15) * 10);
+    const baseVirality = Math.round((hp*0.35 + ei*0.30 + qu*0.20 + sd*0.15) * 10);
     const start = Math.max(0, Number(c.start)||0);
     let end = Number(c.end)||start+60;
     if(end <= start) end = start + 60;
     if(end - start > 180) end = start + 180;
     if(end - start < 30) end = start + 30;
+    let virality = baseVirality;
+    if(audioPeaks.length){
+      const winDur = Math.max(1, end - start);
+      const peaksInWindow = audioPeaks.filter(pt => pt >= start && pt < end).length;
+      if(peaksInWindow){
+        const peakDensity = peaksInWindow / (winDur / 10);
+        virality = Math.min(100, baseVirality + Math.round(5 * Math.min(1, peakDensity)));
+      }
+    }
     return {
       id:'c'+(i+1),
       title:String(c.title||'Untitled clip').slice(0,140),
@@ -1216,51 +1240,99 @@ const scoreSegmentViral = (text, segDurSec) => {
 };
 
 // x80: Local fallback — score timestamped segments, pick top N spread across duration.
-const analyzeLocal = (sourceText, targetCount, segments) => {
+// x84: accepts optional chapters [{t,title}] and audioMap {peaks:[]} for Phase B signals.
+const analyzeLocal = (sourceText, targetCount, segments, chapters, audioMap) => {
   const n = Math.max(1, Math.min(20, Number(targetCount)||10));
   const hasSegments = Array.isArray(segments) && segments.length > 0;
+  const chaps = Array.isArray(chapters) && chapters.length >= 3 ? chapters : [];
+  const peaks = (audioMap && Array.isArray(audioMap.peaks)) ? audioMap.peaks : [];
+  const HOOK_TITLE_KW = /\b(why|how|secret|truth|nobody|everyone|never|always|biggest|worst|best|stop|start|hidden|surprising|actually|listen|think about|shocking|crazy|insane|amazing|unbelievable|real reason|turns out|twist|reveal)\b/i;
+
+  const applyAudioBoost = (virality, start, end) => {
+    if(!peaks.length) return virality;
+    const winDur = Math.max(1, end - start);
+    const peaksInWindow = peaks.filter(pt => pt >= start && pt < end).length;
+    if(!peaksInWindow) return virality;
+    const peakDensity = peaksInWindow / (winDur / 10);
+    return virality + Math.min(5, Math.round(5 * peakDensity));
+  };
+
   if(hasSegments){
     const { lines, totalDur } = buildTimedTranscript(segments, 60000);
     void lines;
-    // Chunk segments into 30-150s candidate windows, step 25s
-    const windowMin = 30, windowMax = 150, step = 25;
-    const TOPIC_SHIFT = /\b(let me tell you|let's talk|moving on|next|by the way|here's the thing|so|but|now|imagine|think about)\b/i;
+    const windowMin = 30, windowMax = 180;
     const candidates = [];
-    for(let startT = 0; startT < totalDur; startT += step){
-      let endT = Math.min(totalDur, startT + windowMax);
-      let winSegs = segments.filter(s => {
-        const t = Number(s.t)||0;
-        return t >= startT && t < endT;
-      });
-      if(!winSegs.length) continue;
-      // Topic-boundary: if a shift phrase appears in the first 8s, snap start to that segment
-      const earlySegs = winSegs.filter(s => (Number(s.t)||0) - startT <= 8);
-      for(const es of earlySegs){
-        if(TOPIC_SHIFT.test(es.text || '')){
-          const snapT = Number(es.t)||startT;
-          winSegs = segments.filter(s => { const t = Number(s.t)||0; return t >= snapT && t < endT; });
-          break;
+
+    if(chaps.length >= 3){
+      // x84: use chapter spans as candidate windows
+      let i = 0;
+      while(i < chaps.length){
+        const chapStart = chaps[i].t;
+        const chapEnd = i + 1 < chaps.length ? chaps[i+1].t : totalDur;
+        const span = chapEnd - chapStart;
+        if(span < windowMin && i + 1 < chaps.length){
+          // merge with next chapter
+          i++;
+          continue;
         }
-      }
-      // Topic-boundary: if last segment doesn't end on sentence punctuation, extend up to +30s
-      const lastSeg = winSegs[winSegs.length - 1];
-      if(lastSeg && !/[.!?]$/.test((lastSeg.text || '').trim())){
-        const extendTo = Math.min(totalDur, endT + 30);
-        const extSegs = segments.filter(s => { const t = Number(s.t)||0; return t >= endT && t < extendTo; });
-        for(const es of extSegs){
-          winSegs.push(es);
-          if(/[.!?]$/.test((es.text || '').trim())){ break; }
+        const clampedEnd = Math.min(totalDur, chapStart + windowMax);
+        const actualEnd = span > windowMax ? clampedEnd : Math.min(totalDur, chapEnd);
+        const winSegs = segments.filter(s => { const t = Number(s.t)||0; return t >= chapStart && t < actualEnd; });
+        if(winSegs.length){
+          const winText = winSegs.map(s => s.text).join(' ').replace(/\s+/g,' ').trim();
+          if(winText.length >= 60){
+            const winDur = Math.max(windowMin, Math.min(windowMax, actualEnd - chapStart));
+            const score = scoreSegmentViral(winText, winDur);
+            const titleBoost = HOOK_TITLE_KW.test(chaps[i].title) ? 10 : 0;
+            const boostedVirality = Math.min(100, score.virality + titleBoost);
+            const boostFinal = applyAudioBoost(boostedVirality, chapStart, actualEnd);
+            candidates.push({ start: chapStart, end: actualEnd, text: winText, ...score, virality: boostFinal });
+          }
         }
-        endT = winSegs.length ? Math.min(totalDur, (Number(winSegs[winSegs.length-1].t)||0) + (Number(winSegs[winSegs.length-1].d)||5)) : endT;
+        i++;
       }
-      const actualStart = Number(winSegs[0].t)||startT;
-      const winText = winSegs.map(s => s.text).join(' ').replace(/\s+/g,' ').trim();
-      const winDur = Math.max(windowMin, Math.min(windowMax, endT - actualStart));
-      if(winText.length < 60) continue;
-      const score = scoreSegmentViral(winText, winDur);
-      const actualEnd = Math.min(totalDur, actualStart + Math.max(windowMin, Math.min(windowMax, winDur)));
-      candidates.push({ start: actualStart, end: actualEnd, text: winText, ...score });
     }
+
+    if(!candidates.length){
+      // sliding-window path (original x83 logic)
+      const step = 25;
+      const TOPIC_SHIFT = /\b(let me tell you|let's talk|moving on|next|by the way|here's the thing|so|but|now|imagine|think about)\b/i;
+      for(let startT = 0; startT < totalDur; startT += step){
+        let endT = Math.min(totalDur, startT + windowMax);
+        let winSegs = segments.filter(s => {
+          const t = Number(s.t)||0;
+          return t >= startT && t < endT;
+        });
+        if(!winSegs.length) continue;
+        const earlySegs = winSegs.filter(s => (Number(s.t)||0) - startT <= 8);
+        for(const es of earlySegs){
+          if(TOPIC_SHIFT.test(es.text || '')){
+            const snapT = Number(es.t)||startT;
+            winSegs = segments.filter(s => { const t = Number(s.t)||0; return t >= snapT && t < endT; });
+            break;
+          }
+        }
+        const lastSeg = winSegs[winSegs.length - 1];
+        if(lastSeg && !/[.!?]$/.test((lastSeg.text || '').trim())){
+          const extendTo = Math.min(totalDur, endT + 30);
+          const extSegs = segments.filter(s => { const t = Number(s.t)||0; return t >= endT && t < extendTo; });
+          for(const es of extSegs){
+            winSegs.push(es);
+            if(/[.!?]$/.test((es.text || '').trim())){ break; }
+          }
+          endT = winSegs.length ? Math.min(totalDur, (Number(winSegs[winSegs.length-1].t)||0) + (Number(winSegs[winSegs.length-1].d)||5)) : endT;
+        }
+        const actualStart = Number(winSegs[0].t)||startT;
+        const winText = winSegs.map(s => s.text).join(' ').replace(/\s+/g,' ').trim();
+        const winDur = Math.max(windowMin, Math.min(windowMax, endT - actualStart));
+        if(winText.length < 60) continue;
+        const score = scoreSegmentViral(winText, winDur);
+        const actualEnd = Math.min(totalDur, actualStart + Math.max(windowMin, Math.min(windowMax, winDur)));
+        const boostedVirality = applyAudioBoost(score.virality, actualStart, actualEnd);
+        candidates.push({ start: actualStart, end: actualEnd, text: winText, ...score, virality: boostedVirality });
+      }
+    }
+
     if(candidates.length === 0) return analyzeLocalFromText(sourceText, n);
     // Pick top N with spatial diversity — greedily select highest virality, skip windows that overlap prior picks by >50%
     candidates.sort((a,b) => b.virality - a.virality);
@@ -1333,12 +1405,93 @@ const analyzeLocalFromText = (sourceText, n) => {
   });
 };
 
+// x84: Web Audio energy analyzer for uploaded video/audio files.
+// Scrubs at 8x (4x Safari fallback) via AudioContext, samples RMS, records peaks.
+// Only runs once per file (keyed on name+size). Stores result on project.audioMap.
+const analyzeUploadedVideoAudio = (videoUrl, onDone) => {
+  return new Promise((resolve) => {
+    let audio;
+    let ctx;
+    let source;
+    let analyser;
+    const samples = [];
+    let rafId = null;
+
+    const cleanup = () => {
+      if(rafId !== null){ cancelAnimationFrame(rafId); rafId = null; }
+      try { if(source) source.disconnect(); } catch(_){}
+      try { if(ctx && ctx.state !== 'closed') ctx.close(); } catch(_){}
+      try { if(audio){ audio.pause(); audio.src = ''; } } catch(_){}
+    };
+
+    const finish = () => {
+      cleanup();
+      if(!samples.length){ resolve(null); return; }
+      const duration = samples[samples.length-1].t;
+      const rmsValues = samples.map(s => s.rms);
+      const mean = rmsValues.reduce((a,b) => a+b, 0) / rmsValues.length;
+      const variance = rmsValues.reduce((a,b) => a + (b-mean)*(b-mean), 0) / rmsValues.length;
+      const stddev = Math.sqrt(variance);
+      const threshold = mean + 1.5 * stddev;
+      const peaks = samples.filter(s => s.rms > threshold && s.rms > 0.15).map(s => +s.t.toFixed(2));
+      const result = { duration: +duration.toFixed(2), samples, peaks };
+      resolve(result);
+      if(onDone) onDone(result);
+    };
+
+    const tick = () => {
+      if(!analyser || !audio || audio.ended || audio.paused){ finish(); return; }
+      const buf = new Uint8Array(analyser.fftSize);
+      analyser.getByteTimeDomainData(buf);
+      let sumSq = 0;
+      for(let i = 0; i < buf.length; i++){
+        const v = (buf[i] - 128) / 128;
+        sumSq += v * v;
+      }
+      const rms = Math.sqrt(sumSq / buf.length);
+      samples.push({ t: audio.currentTime, rms: +rms.toFixed(4) });
+      rafId = requestAnimationFrame(tick);
+    };
+
+    try {
+      ctx = new (window.AudioContext || window.webkitAudioContext)();
+      analyser = ctx.createAnalyser();
+      analyser.fftSize = 2048;
+      analyser.smoothingTimeConstant = 0.4;
+
+      audio = document.createElement('audio');
+      audio.src = videoUrl;
+      audio.muted = true;
+      audio.preservesPitch = false;
+      audio.crossOrigin = 'anonymous';
+
+      audio.addEventListener('canplay', () => {
+        try {
+          source = ctx.createMediaElementSource(audio);
+          source.connect(analyser);
+          audio.playbackRate = 8;
+          audio.play().catch(() => {
+            try { audio.playbackRate = 4; audio.play().catch(() => { cleanup(); resolve(null); }); } catch(_){ cleanup(); resolve(null); }
+          });
+          rafId = requestAnimationFrame(tick);
+        } catch(_){ cleanup(); resolve(null); }
+      }, { once: true });
+
+      audio.addEventListener('ended', () => { finish(); }, { once: true });
+      audio.addEventListener('error', () => { cleanup(); resolve(null); }, { once: true });
+
+      audio.load();
+    } catch(_){ cleanup(); resolve(null); }
+  });
+};
+
 // x81: Two-stage viral detection. Stage 1: local pre-filter top 3N+5 candidates with ±2 neighbor context.
 // Stage 2: send candidate windows to Claude for final pick + exact timestamps.
+// x84: accepts optional chapters [{t,title}] and audioMap for Phase B signals.
 // Falls through to text-only path if no segments.
-const analyzeViaClaudeTwoStage = async (proxyUrl, sourceText, targetCount, segments, meta) => {
+const analyzeViaClaudeTwoStage = async (proxyUrl, sourceText, targetCount, segments, meta, chapters, audioMap) => {
   const hasSegments = Array.isArray(segments) && segments.length > 0;
-  if(!hasSegments) return analyzeViaClaude(proxyUrl, sourceText, targetCount, [], meta);
+  if(!hasSegments) return analyzeViaClaude(proxyUrl, sourceText, targetCount, [], meta, chapters, audioMap);
   const n = Math.max(1, Math.min(20, Number(targetCount)||10));
   const candidateCount = 3 * n + 5;
 
@@ -1361,7 +1514,7 @@ const analyzeViaClaudeTwoStage = async (proxyUrl, sourceText, targetCount, segme
   const candidateIdxs = Array.from(expandedSet).sort((a, b) => a - b);
   const candidateSegs = candidateIdxs.map(i => segments[i]);
 
-  return analyzeViaClaude(proxyUrl, sourceText, targetCount, candidateSegs, meta);
+  return analyzeViaClaude(proxyUrl, sourceText, targetCount, candidateSegs, meta, chapters, audioMap);
 };
 
 // MVP-B: Polish a Studio script scene via Claude
@@ -3181,7 +3334,7 @@ function buildClipExportText(clip, project){
   return out.join("\n");
 }
 
-function RepurposeIntake({ project, setProject, onProcessSource, processBusy, processStatus }){
+function RepurposeIntake({ project, setProject, onProcessSource, processBusy, processStatus, onFileUpload }){
   return (
     <div className="card p-5">
       <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -3295,7 +3448,8 @@ function RepurposeIntake({ project, setProject, onProcessSource, processBusy, pr
                       const f = e.target.files && e.target.files[0];
                       if(!f) return;
                       const url = URL.createObjectURL(f);
-                      setProject({ ...project, kind: "upload", uploadedVideoUrl: url, uploadedVideoName: f.name });
+                      setProject({ ...project, kind: "upload", uploadedVideoUrl: url, uploadedVideoName: f.name, audioMap: null });
+                      if(onFileUpload) onFileUpload(url, f);
                     }}
                   />
                 </label>
@@ -4785,6 +4939,19 @@ function RepurposeTab(){
   const [hookAltsBusyId, setHookAltsBusyId] = useState(null);
   const [processBusy, setProcessBusy] = useState(false);
   const [processStatus, setProcessStatus] = useState("");
+  const audioScanKeyRef = useRef(null);
+
+  const handleFileUpload = (url, file) => {
+    const scanKey = (file && file.name ? file.name : '') + ':' + (file && file.size ? file.size : '');
+    if(audioScanKeyRef.current === scanKey) return;
+    audioScanKeyRef.current = scanKey;
+    analyzeUploadedVideoAudio(url, (result) => {
+      if(!result) return;
+      const compact = { duration: result.duration, peaks: result.peaks };
+      setProject(p => ({ ...p, audioMap: compact }));
+      toast('Audio analysis complete — ' + result.peaks.length + ' peaks detected', 'success');
+    }).catch(() => {});
+  };
 
   const processSource = async () => {
     if(processBusy) return;
@@ -4807,6 +4974,7 @@ function RepurposeTab(){
             const data = await res.json();
             const tx = (data.transcript || data.description || "").trim();
             const segs = Array.isArray(data.segments) ? data.segments : [];
+            const chaps = Array.isArray(data.chapters) ? data.chapters : [];
             // If user already pasted text but we got real segments from YT, use the segments for timing.
             if(segs.length > 0){
               segments = segs;
@@ -4816,6 +4984,7 @@ function RepurposeTab(){
                 ...p,
                 transcriptText: hasPastedTranscript ? p.transcriptText : tx,
                 transcriptSegments: segs,
+                chapters: chaps,
                 name: p.name || data.title || "",
                 author: p.author || data.author || "",
                 durationSec: (!p.durationSec || p.durationSec === 5520) && data.lengthSeconds ? data.lengthSeconds : (p.durationSec || data.lengthSeconds || p.durationSec)
@@ -4850,13 +5019,15 @@ function RepurposeTab(){
         }
       }
       const target = Number(project.targetCount) || 10;
+      const chapters = Array.isArray(project.chapters) ? project.chapters : [];
+      const audioMap = project.audioMap || null;
       setProcessStatus(segments.length > 0 ? ("Analyzing " + segments.length + " segments…") : "Generating clips…");
       const path = getAnthropicPath();
       let clips = null;
       if(path){
-        try { clips = await analyzeViaClaudeTwoStage(path, text, target, segments, meta); } catch(e){ console.warn('[zs] analyzeViaClaudeTwoStage failed', e); clips = null; }
+        try { clips = await analyzeViaClaudeTwoStage(path, text, target, segments, meta, chapters, audioMap); } catch(e){ console.warn('[zs] analyzeViaClaudeTwoStage failed', e); clips = null; }
       }
-      if(!clips || !clips.length){ clips = analyzeLocal(text, target, segments); }
+      if(!clips || !clips.length){ clips = analyzeLocal(text, target, segments, chapters, audioMap); }
       if(!clips || !clips.length){ toast("No clips generated — try a different source", "error"); return; }
       setProject(p => ({ ...p, clips, durationSec: p.durationSec || (clips[clips.length-1].end + 60) }));
       setProcessStatus("Done — " + clips.length + " clips");
@@ -5217,7 +5388,7 @@ const removeClip = (clipId) => {
       </div>
 
       <div className="grid gap-4">
-        <RepurposeIntake project={project} setProject={setProject} onProcessSource={processSource} processBusy={processBusy} processStatus={processStatus} />
+        <RepurposeIntake project={project} setProject={setProject} onProcessSource={processSource} processBusy={processBusy} processStatus={processStatus} onFileUpload={handleFileUpload} />
         {isGodMode && <RepurposeAnalyzer project={project} setProject={setProject} />}
         {isGodMode && <RepurposeRealAnalyze project={project} setProject={setProject} />}
         <RepurposeTranscriptStrip project={project} />
