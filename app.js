@@ -1,4 +1,4 @@
-/* Zaidsaid — app.js v2.0 — x91: Repurpose — uploaded files now survive page refreshes. New IndexedDB blob store (zaidsaid/uploads, key repurpose:current) persists the File on upload; RepurposeTab useEffect on mount HEAD-checks the existing blob URL and rehydrates from IDB when it's dead, or clears the dangling reference + toasts "please re-upload" when IDB is empty too. processSource now reads the blob from IDB first, falling back to the blob URL. Remove button deletes the IDB entry. | x90: Repurpose — uploads now actually clip. processSource gate no longer bails on empty source when an uploaded video is present; on new file upload we clear stale transcript/chapters/clips/name; uploaded videos without a transcript auto-transcribe via ElevenLabs Scribe (/elevenlabs/v1/speech-to-text with model_id=scribe_v1, word-level timestamps grouped into ~6s segments) and feed the existing two-stage viral analyzer. New fuchsia "ElevenLabs Scribe (auto-transcribed)" source chip. | x89: Repurpose — YouTube downloader tool (paste URL → fetch progressive formats via worker InnerTube → quality dropdown → File System Access folder picker with streamed writable, falls back to <a download> when unsupported). Worker: /youtube-formats, /youtube-media. | x88: batch export respects selection + preset-aware video render — "Export selected as video" renders .webm per selected clip at its preset aspect ratio (9:16/1:1/16:9); fallback selection→approved→all; metadata (.txt) export kept as secondary. Fix stray /span> text below batch-export button. | x87: clip length range widened — 5s floor (viral reactions, one-liners) to 1800s / 30min ceiling (full topic arcs); removed rigid length-mix prompt in favor of idea-first sizing | x86: clip preview no-autoplay — remove YouTube loop=1&playlist (fixes whole-video loop), remove autoPlay on uploaded video, preview now shows clip-only paused state until user clicks play | x85: Phase B.1 — persist chapters on description-fallback, surface worker errors, transcript-source chip, length-variance prompt, analyzeLocal intro-skip, **remove dead RepurposeAnalyzer + RepurposeRealAnalyze god-mode components** | x84: Phase B — YT chapter-boundary detection (parseYouTubeChapters in worker; analyzeLocal uses chapter spans as candidate windows when ≥3 chapters; Claude receives chapter list for boundary alignment) + Web Audio energy analyzer (analyzeUploadedVideoAudio: 8x scrub AudioContext RMS scan on uploaded files; peaks boost analyzeLocal virality by +5*peakDensity) | x83: Smart Clipping v2 — two-stage viral detection + topic-boundary awareness + variable 30-180s clip length + unified Generate flow + target default 10 (range 3-20) | x82: preview fix — CSP frame-src, youtube-nocookie embed, thumbnail fallback | x80: Smart Clipping — viral moment detection. Worker /youtube-transcript returns segments[{t,d,text}]. analyzeViaClaude uses timestamped transcript with 4-dimension scoring (hook_power/emotional_impact/quotability/surprise_drama). analyzeLocal scores ~45-75s windows, picks top N with spatial diversity across full duration. YT iframe autoplay+loop within clip range; uploaded video autoplay muted with loop-on-end.
+/* Zaidsaid — app.js v2.0 — x92: Repurpose — big videos extract audio client-side before transcribing. Lazy-loads ffmpeg.wasm (@ffmpeg/ffmpeg@0.12.10 + @ffmpeg/core@0.12.6 from unpkg, ~30 MB one-time); any uploaded video >50 MB is reduced to mono 16 kHz 32 kbps MP3 (~14 MB/hr) before POSTing to /elevenlabs/v1/speech-to-text. Fixes 700+ MB uploads hanging on the Cloudflare Worker 500 MiB body limit. CSP widened for wasm-unsafe-eval, blob: workers, and unpkg connect. | x91: Repurpose — uploaded files now survive page refreshes. New IndexedDB blob store (zaidsaid/uploads, key repurpose:current) persists the File on upload; RepurposeTab useEffect on mount HEAD-checks the existing blob URL and rehydrates from IDB when it's dead, or clears the dangling reference + toasts "please re-upload" when IDB is empty too. processSource now reads the blob from IDB first, falling back to the blob URL. Remove button deletes the IDB entry. | x90: Repurpose — uploads now actually clip. processSource gate no longer bails on empty source when an uploaded video is present; on new file upload we clear stale transcript/chapters/clips/name; uploaded videos without a transcript auto-transcribe via ElevenLabs Scribe (/elevenlabs/v1/speech-to-text with model_id=scribe_v1, word-level timestamps grouped into ~6s segments) and feed the existing two-stage viral analyzer. New fuchsia "ElevenLabs Scribe (auto-transcribed)" source chip. | x89: Repurpose — YouTube downloader tool (paste URL → fetch progressive formats via worker InnerTube → quality dropdown → File System Access folder picker with streamed writable, falls back to <a download> when unsupported). Worker: /youtube-formats, /youtube-media. | x88: batch export respects selection + preset-aware video render — "Export selected as video" renders .webm per selected clip at its preset aspect ratio (9:16/1:1/16:9); fallback selection→approved→all; metadata (.txt) export kept as secondary. Fix stray /span> text below batch-export button. | x87: clip length range widened — 5s floor (viral reactions, one-liners) to 1800s / 30min ceiling (full topic arcs); removed rigid length-mix prompt in favor of idea-first sizing | x86: clip preview no-autoplay — remove YouTube loop=1&playlist (fixes whole-video loop), remove autoPlay on uploaded video, preview now shows clip-only paused state until user clicks play | x85: Phase B.1 — persist chapters on description-fallback, surface worker errors, transcript-source chip, length-variance prompt, analyzeLocal intro-skip, **remove dead RepurposeAnalyzer + RepurposeRealAnalyze god-mode components** | x84: Phase B — YT chapter-boundary detection (parseYouTubeChapters in worker; analyzeLocal uses chapter spans as candidate windows when ≥3 chapters; Claude receives chapter list for boundary alignment) + Web Audio energy analyzer (analyzeUploadedVideoAudio: 8x scrub AudioContext RMS scan on uploaded files; peaks boost analyzeLocal virality by +5*peakDensity) | x83: Smart Clipping v2 — two-stage viral detection + topic-boundary awareness + variable 30-180s clip length + unified Generate flow + target default 10 (range 3-20) | x82: preview fix — CSP frame-src, youtube-nocookie embed, thumbnail fallback | x80: Smart Clipping — viral moment detection. Worker /youtube-transcript returns segments[{t,d,text}]. analyzeViaClaude uses timestamped transcript with 4-dimension scoring (hook_power/emotional_impact/quotability/surprise_drama). analyzeLocal scores ~45-75s windows, picks top N with spatial diversity across full duration. YT iframe autoplay+loop within clip range; uploaded video autoplay muted with loop-on-end.
  * Security: localStorage namespaced as zaidsaid.v2.*, error boundary, no innerHTML, no eval, no fetch.
  * Archived v1 seed data preserved under ARCHIVE_* for later reuse.
  */
@@ -1537,6 +1537,68 @@ const analyzeUploadedVideoAudio = (videoUrl, onDone) => {
       audio.load();
     } catch(_){ cleanup(); resolve(null); }
   });
+};
+
+// x92: Extract a compressed audio-only blob from an uploaded video/audio file
+// via ffmpeg.wasm, so long videos don't hit Cloudflare Workers' request body
+// limit (500 MiB on paid). Output: ~32kbps mono 16kHz MP3 → ~14 MB per hour.
+// Lazy-loads ffmpeg.wasm from unpkg on first use; subsequent calls reuse the
+// same instance for the session.
+let __ffmpegInstance = null;
+// ffmpeg-loader.js exposes window.zsLoadFfmpeg (a native ESM module). Wait for
+// it to be defined — script type=module is deferred and may land after this
+// Babel-transformed script begins executing.
+const awaitFfmpegLoader = () => new Promise((resolve, reject) => {
+  if(window.zsLoadFfmpeg) return resolve(window.zsLoadFfmpeg);
+  const start = Date.now();
+  const t = setInterval(() => {
+    if(window.zsLoadFfmpeg){ clearInterval(t); resolve(window.zsLoadFfmpeg); }
+    else if(Date.now() - start > 10000){ clearInterval(t); reject(new Error("ffmpeg-loader.js failed to load")); }
+  }, 50);
+});
+const loadFfmpeg = async (onStatus) => {
+  if(__ffmpegInstance) return __ffmpegInstance;
+  if(onStatus) onStatus("Downloading audio-extraction engine (~30 MB, one-time)…");
+  const CORE = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd";
+  const loader = await awaitFfmpegLoader();
+  const mods = await loader();
+  const ffmpeg = new mods.FFmpeg();
+  await ffmpeg.load({
+    coreURL: await mods.toBlobURL(CORE + "/ffmpeg-core.js", "text/javascript"),
+    wasmURL: await mods.toBlobURL(CORE + "/ffmpeg-core.wasm", "application/wasm")
+  });
+  __ffmpegInstance = { ffmpeg, util: { fetchFile: mods.fetchFile, toBlobURL: mods.toBlobURL } };
+  return __ffmpegInstance;
+};
+const extractAudioAsMp3 = async (videoBlob, filename, onStatus, onProgress) => {
+  const { ffmpeg, util } = await loadFfmpeg(onStatus);
+  const ext = (filename || 'input.mp4').split('.').pop().toLowerCase().replace(/[^a-z0-9]/g, '') || 'mp4';
+  const inputName = "input." + ext;
+  const outputName = "output.mp3";
+  const progressHandler = ({ progress }) => { if(onProgress && typeof progress === 'number') onProgress(Math.min(0.99, progress)); };
+  ffmpeg.on && ffmpeg.on("progress", progressHandler);
+  try {
+    if(onStatus) onStatus("Loading file into extractor…");
+    await ffmpeg.writeFile(inputName, await util.fetchFile(videoBlob));
+    if(onStatus) onStatus("Extracting audio (mp4 → mono 16 kHz MP3)…");
+    // -vn drop video, libmp3lame mono 16kHz 32kbps is fine for speech-to-text.
+    await ffmpeg.exec([
+      "-i", inputName,
+      "-vn",
+      "-c:a", "libmp3lame",
+      "-b:a", "32k",
+      "-ac", "1",
+      "-ar", "16000",
+      outputName
+    ]);
+    const data = await ffmpeg.readFile(outputName);
+    // Clean up virtual FS (ignore errors).
+    try { await ffmpeg.deleteFile(inputName); } catch(_){}
+    try { await ffmpeg.deleteFile(outputName); } catch(_){}
+    return new Blob([data.buffer || data], { type: "audio/mpeg" });
+  } finally {
+    try { ffmpeg.off && ffmpeg.off("progress", progressHandler); } catch(_){}
+  }
 };
 
 // x90: Transcribe an uploaded video/audio file via ElevenLabs Scribe.
@@ -5207,8 +5269,37 @@ function RepurposeTab(){
             } catch(_){}
           }
           if(!blob) throw new Error("Couldn't read uploaded file. Choose the file again below and re-run.");
+
+          // x92: Big videos blow through CF Workers' 500 MiB body limit. Extract
+          // the audio track to a tiny MP3 first, then send only that upstream.
+          const EXTRACT_THRESHOLD = 50 * 1024 * 1024; // 50 MB
+          let uploadBlob = blob;
+          let uploadFilename = project.uploadedVideoName || 'upload.mp4';
+          const isVideo = (blob.type || '').startsWith('video/') || /\.(mp4|mov|mkv|webm|avi|m4v)$/i.test(uploadFilename);
+          if(isVideo && blob.size > EXTRACT_THRESHOLD){
+            try {
+              uploadBlob = await extractAudioAsMp3(
+                blob,
+                uploadFilename,
+                (s) => setProcessStatus(s),
+                (pct) => setProcessStatus("Extracting audio… " + Math.round(pct * 100) + "%")
+              );
+              uploadFilename = uploadFilename.replace(/\.[^.]+$/, '') + '.mp3';
+              const mb = (blob.size/1048576).toFixed(0);
+              const mb2 = (uploadBlob.size/1048576).toFixed(1);
+              toast('Audio extracted: ' + mb + ' MB → ' + mb2 + ' MB', 'success');
+              setProcessStatus("Transcribing extracted audio via ElevenLabs Scribe…");
+            } catch(e){
+              const msg = (e && e.message) || String(e);
+              if(blob.size > 400 * 1024 * 1024){
+                throw new Error("Audio extraction failed and the raw file is too big to upload: " + msg);
+              }
+              console.warn('[zs] audio extraction failed, falling back to raw upload:', e);
+              setProcessStatus("Audio extraction failed — falling back to raw upload, this may be slow.");
+            }
+          }
           const elevenBase = String(eleven.proxyUrl).replace(/\/elevenlabs\/?$/, '');
-          const stt = await transcribeUploadedFile(elevenBase, blob, project.uploadedVideoName || 'upload.mp4');
+          const stt = await transcribeUploadedFile(elevenBase, uploadBlob, uploadFilename);
           text = stt.text || '';
           segments = stt.segments || [];
           if(!text && !segments.length) throw new Error("Empty transcription — audio may be silent or unintelligible.");
