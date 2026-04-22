@@ -1,4 +1,4 @@
-/* Zaidsaid — app.js v2.0 — x90: Repurpose — uploads now actually clip. processSource gate no longer bails on empty source when an uploaded video is present; on new file upload we clear stale transcript/chapters/clips/name; uploaded videos without a transcript auto-transcribe via ElevenLabs Scribe (/elevenlabs/v1/speech-to-text with model_id=scribe_v1, word-level timestamps grouped into ~6s segments) and feed the existing two-stage viral analyzer. New fuchsia "ElevenLabs Scribe (auto-transcribed)" source chip. | x89: Repurpose — YouTube downloader tool (paste URL → fetch progressive formats via worker InnerTube → quality dropdown → File System Access folder picker with streamed writable, falls back to <a download> when unsupported). Worker: /youtube-formats, /youtube-media. | x88: batch export respects selection + preset-aware video render — "Export selected as video" renders .webm per selected clip at its preset aspect ratio (9:16/1:1/16:9); fallback selection→approved→all; metadata (.txt) export kept as secondary. Fix stray /span> text below batch-export button. | x87: clip length range widened — 5s floor (viral reactions, one-liners) to 1800s / 30min ceiling (full topic arcs); removed rigid length-mix prompt in favor of idea-first sizing | x86: clip preview no-autoplay — remove YouTube loop=1&playlist (fixes whole-video loop), remove autoPlay on uploaded video, preview now shows clip-only paused state until user clicks play | x85: Phase B.1 — persist chapters on description-fallback, surface worker errors, transcript-source chip, length-variance prompt, analyzeLocal intro-skip, **remove dead RepurposeAnalyzer + RepurposeRealAnalyze god-mode components** | x84: Phase B — YT chapter-boundary detection (parseYouTubeChapters in worker; analyzeLocal uses chapter spans as candidate windows when ≥3 chapters; Claude receives chapter list for boundary alignment) + Web Audio energy analyzer (analyzeUploadedVideoAudio: 8x scrub AudioContext RMS scan on uploaded files; peaks boost analyzeLocal virality by +5*peakDensity) | x83: Smart Clipping v2 — two-stage viral detection + topic-boundary awareness + variable 30-180s clip length + unified Generate flow + target default 10 (range 3-20) | x82: preview fix — CSP frame-src, youtube-nocookie embed, thumbnail fallback | x80: Smart Clipping — viral moment detection. Worker /youtube-transcript returns segments[{t,d,text}]. analyzeViaClaude uses timestamped transcript with 4-dimension scoring (hook_power/emotional_impact/quotability/surprise_drama). analyzeLocal scores ~45-75s windows, picks top N with spatial diversity across full duration. YT iframe autoplay+loop within clip range; uploaded video autoplay muted with loop-on-end.
+/* Zaidsaid — app.js v2.0 — x91: Repurpose — uploaded files now survive page refreshes. New IndexedDB blob store (zaidsaid/uploads, key repurpose:current) persists the File on upload; RepurposeTab useEffect on mount HEAD-checks the existing blob URL and rehydrates from IDB when it's dead, or clears the dangling reference + toasts "please re-upload" when IDB is empty too. processSource now reads the blob from IDB first, falling back to the blob URL. Remove button deletes the IDB entry. | x90: Repurpose — uploads now actually clip. processSource gate no longer bails on empty source when an uploaded video is present; on new file upload we clear stale transcript/chapters/clips/name; uploaded videos without a transcript auto-transcribe via ElevenLabs Scribe (/elevenlabs/v1/speech-to-text with model_id=scribe_v1, word-level timestamps grouped into ~6s segments) and feed the existing two-stage viral analyzer. New fuchsia "ElevenLabs Scribe (auto-transcribed)" source chip. | x89: Repurpose — YouTube downloader tool (paste URL → fetch progressive formats via worker InnerTube → quality dropdown → File System Access folder picker with streamed writable, falls back to <a download> when unsupported). Worker: /youtube-formats, /youtube-media. | x88: batch export respects selection + preset-aware video render — "Export selected as video" renders .webm per selected clip at its preset aspect ratio (9:16/1:1/16:9); fallback selection→approved→all; metadata (.txt) export kept as secondary. Fix stray /span> text below batch-export button. | x87: clip length range widened — 5s floor (viral reactions, one-liners) to 1800s / 30min ceiling (full topic arcs); removed rigid length-mix prompt in favor of idea-first sizing | x86: clip preview no-autoplay — remove YouTube loop=1&playlist (fixes whole-video loop), remove autoPlay on uploaded video, preview now shows clip-only paused state until user clicks play | x85: Phase B.1 — persist chapters on description-fallback, surface worker errors, transcript-source chip, length-variance prompt, analyzeLocal intro-skip, **remove dead RepurposeAnalyzer + RepurposeRealAnalyze god-mode components** | x84: Phase B — YT chapter-boundary detection (parseYouTubeChapters in worker; analyzeLocal uses chapter spans as candidate windows when ≥3 chapters; Claude receives chapter list for boundary alignment) + Web Audio energy analyzer (analyzeUploadedVideoAudio: 8x scrub AudioContext RMS scan on uploaded files; peaks boost analyzeLocal virality by +5*peakDensity) | x83: Smart Clipping v2 — two-stage viral detection + topic-boundary awareness + variable 30-180s clip length + unified Generate flow + target default 10 (range 3-20) | x82: preview fix — CSP frame-src, youtube-nocookie embed, thumbnail fallback | x80: Smart Clipping — viral moment detection. Worker /youtube-transcript returns segments[{t,d,text}]. analyzeViaClaude uses timestamped transcript with 4-dimension scoring (hook_power/emotional_impact/quotability/surprise_drama). analyzeLocal scores ~45-75s windows, picks top N with spatial diversity across full duration. YT iframe autoplay+loop within clip range; uploaded video autoplay muted with loop-on-end.
  * Security: localStorage namespaced as zaidsaid.v2.*, error boundary, no innerHTML, no eval, no fetch.
  * Archived v1 seed data preserved under ARCHIVE_* for later reuse.
  */
@@ -24,6 +24,55 @@ function useLocalState(key, initial){
   return [v, setV];
 }
 try { if (safeGet("__schema", 0) !== SCHEMA_VERSION) safeSet("__schema", SCHEMA_VERSION); } catch(e){}
+
+/* ---------------- IndexedDB blob store ----------------
+ * Keeps uploaded video/audio files across refreshes. Blob URLs die when the
+ * page context is destroyed; the File itself can be persisted to IDB and a
+ * fresh blob URL minted on next mount.
+ */
+const IDB_NAME = "zaidsaid";
+const IDB_STORE = "uploads";
+const IDB_VERSION = 1;
+const IDB_UPLOAD_KEY = "repurpose:current";
+const openIDB = () => new Promise((resolve, reject) => {
+  try {
+    const req = indexedDB.open(IDB_NAME, IDB_VERSION);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if(!db.objectStoreNames.contains(IDB_STORE)) db.createObjectStore(IDB_STORE);
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  } catch(e){ reject(e); }
+});
+const idbPut = async (key, value) => {
+  const db = await openIDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, "readwrite");
+    tx.objectStore(IDB_STORE).put(value, key);
+    tx.oncomplete = () => resolve(true);
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error);
+  });
+};
+const idbGet = async (key) => {
+  const db = await openIDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, "readonly");
+    const req = tx.objectStore(IDB_STORE).get(key);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+};
+const idbDelete = async (key) => {
+  const db = await openIDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, "readwrite");
+    tx.objectStore(IDB_STORE).delete(key);
+    tx.oncomplete = () => resolve(true);
+    tx.onerror = () => reject(tx.error);
+  });
+};
 
 /* ---------------- God mode (admin / power-user surface toggle) ----------------
  * Public MVP hides advanced controls (per-scene regen, full provider config,
@@ -3497,8 +3546,9 @@ function RepurposeIntake({ project, setProject, onProcessSource, processBusy, pr
                 <video src={project.uploadedVideoUrl} controls className="w-full rounded-lg border border-[color:var(--line)] bg-black max-h-[200px]" />
                 <div className="flex items-center justify-between gap-2">
                   <div className="truncate text-white/80 text-[12px]">{project.uploadedVideoName || "uploaded.mp4"}</div>
-                  <button type="button" className="chip" onClick={()=>{
+                  <button type="button" className="chip" onClick={async ()=>{
                     try { URL.revokeObjectURL(project.uploadedVideoUrl); } catch(e){}
+                    try { await idbDelete(IDB_UPLOAD_KEY); } catch(e){}
                     setProject({ ...project, uploadedVideoUrl: null, uploadedVideoName: null });
                   }}>Remove</button>
                 </div>
@@ -5060,7 +5110,9 @@ function RepurposeTab(){
   const [processStatus, setProcessStatus] = useState("");
   const audioScanKeyRef = useRef(null);
 
-  const handleFileUpload = (url, file) => {
+  const handleFileUpload = async (url, file) => {
+    // x91: persist the File to IDB so a refresh can rehydrate a fresh blob URL.
+    try { await idbPut(IDB_UPLOAD_KEY, file); } catch(_){ /* non-fatal */ }
     const scanKey = (file && file.name ? file.name : '') + ':' + (file && file.size ? file.size : '');
     if(audioScanKeyRef.current === scanKey) return;
     audioScanKeyRef.current = scanKey;
@@ -5071,6 +5123,40 @@ function RepurposeTab(){
       toast('Audio analysis complete — ' + result.peaks.length + ' peaks detected', 'success');
     }).catch(() => {});
   };
+
+  // x91: on mount, if we have a persisted upload name but the blob URL is dead
+  // (page refresh), rehydrate the blob from IDB and mint a fresh URL. If IDB is
+  // empty, clear the dangling reference so the upload area flips back to "Choose
+  // file" instead of a broken <video> tag.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if(project.kind !== 'upload' || !project.uploadedVideoName) return;
+      let alive = false;
+      if(project.uploadedVideoUrl){
+        try {
+          const r = await fetch(project.uploadedVideoUrl, { method: 'HEAD' });
+          alive = r.ok;
+        } catch(_){}
+      }
+      if(alive || cancelled) return;
+      try {
+        const blob = await idbGet(IDB_UPLOAD_KEY);
+        if(cancelled) return;
+        if(blob){
+          const newUrl = URL.createObjectURL(blob);
+          setProject(p => ({ ...p, uploadedVideoUrl: newUrl }));
+          toast('Restored uploaded file — ready to clip', 'success');
+        } else if(project.uploadedVideoUrl){
+          setProject(p => ({ ...p, uploadedVideoUrl: null, uploadedVideoName: null }));
+          toast('Uploaded file was lost across sessions — please choose the file again.', 'warn');
+        }
+      } catch(_){
+        if(!cancelled) setProject(p => ({ ...p, uploadedVideoUrl: null }));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const processSource = async () => {
     if(processBusy) return;
@@ -5111,9 +5197,16 @@ function RepurposeTab(){
         const durationMin = project.durationSec ? Math.ceil(project.durationSec / 60) : 0;
         setProcessStatus(durationMin ? ("Transcribing ~" + durationMin + " min via ElevenLabs Scribe…") : "Transcribing via ElevenLabs Scribe…");
         try {
-          const blobRes = await fetch(project.uploadedVideoUrl);
-          if(!blobRes.ok) throw new Error("Couldn't read uploaded file (did you refresh since uploading? Try re-uploading).");
-          const blob = await blobRes.blob();
+          // x91: prefer IDB (survives refresh) and fall back to the blob URL.
+          let blob = null;
+          try { blob = await idbGet(IDB_UPLOAD_KEY); } catch(_){}
+          if(!blob && project.uploadedVideoUrl){
+            try {
+              const blobRes = await fetch(project.uploadedVideoUrl);
+              if(blobRes.ok) blob = await blobRes.blob();
+            } catch(_){}
+          }
+          if(!blob) throw new Error("Couldn't read uploaded file. Choose the file again below and re-run.");
           const elevenBase = String(eleven.proxyUrl).replace(/\/elevenlabs\/?$/, '');
           const stt = await transcribeUploadedFile(elevenBase, blob, project.uploadedVideoName || 'upload.mp4');
           text = stt.text || '';
