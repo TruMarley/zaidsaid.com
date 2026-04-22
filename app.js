@@ -1,4 +1,4 @@
-/* Zaidsaid — app.js v2.0 — x88: batch export respects selection + preset-aware video render — "Export selected as video" renders .webm per selected clip at its preset aspect ratio (9:16/1:1/16:9); fallback selection→approved→all; metadata (.txt) export kept as secondary. Fix stray /span> text below batch-export button. | x87: clip length range widened — 5s floor (viral reactions, one-liners) to 1800s / 30min ceiling (full topic arcs); removed rigid length-mix prompt in favor of idea-first sizing | x86: clip preview no-autoplay — remove YouTube loop=1&playlist (fixes whole-video loop), remove autoPlay on uploaded video, preview now shows clip-only paused state until user clicks play | x85: Phase B.1 — persist chapters on description-fallback, surface worker errors, transcript-source chip, length-variance prompt, analyzeLocal intro-skip, **remove dead RepurposeAnalyzer + RepurposeRealAnalyze god-mode components** | x84: Phase B — YT chapter-boundary detection (parseYouTubeChapters in worker; analyzeLocal uses chapter spans as candidate windows when ≥3 chapters; Claude receives chapter list for boundary alignment) + Web Audio energy analyzer (analyzeUploadedVideoAudio: 8x scrub AudioContext RMS scan on uploaded files; peaks boost analyzeLocal virality by +5*peakDensity) | x83: Smart Clipping v2 — two-stage viral detection + topic-boundary awareness + variable 30-180s clip length + unified Generate flow + target default 10 (range 3-20) | x82: preview fix — CSP frame-src, youtube-nocookie embed, thumbnail fallback | x80: Smart Clipping — viral moment detection. Worker /youtube-transcript returns segments[{t,d,text}]. analyzeViaClaude uses timestamped transcript with 4-dimension scoring (hook_power/emotional_impact/quotability/surprise_drama). analyzeLocal scores ~45-75s windows, picks top N with spatial diversity across full duration. YT iframe autoplay+loop within clip range; uploaded video autoplay muted with loop-on-end.
+/* Zaidsaid — app.js v2.0 — x89: Repurpose — YouTube downloader tool (paste URL → fetch progressive formats via worker InnerTube → quality dropdown → File System Access folder picker with streamed writable, falls back to <a download> when unsupported). Worker: /youtube-formats, /youtube-media. | x88: batch export respects selection + preset-aware video render — "Export selected as video" renders .webm per selected clip at its preset aspect ratio (9:16/1:1/16:9); fallback selection→approved→all; metadata (.txt) export kept as secondary. Fix stray /span> text below batch-export button. | x87: clip length range widened — 5s floor (viral reactions, one-liners) to 1800s / 30min ceiling (full topic arcs); removed rigid length-mix prompt in favor of idea-first sizing | x86: clip preview no-autoplay — remove YouTube loop=1&playlist (fixes whole-video loop), remove autoPlay on uploaded video, preview now shows clip-only paused state until user clicks play | x85: Phase B.1 — persist chapters on description-fallback, surface worker errors, transcript-source chip, length-variance prompt, analyzeLocal intro-skip, **remove dead RepurposeAnalyzer + RepurposeRealAnalyze god-mode components** | x84: Phase B — YT chapter-boundary detection (parseYouTubeChapters in worker; analyzeLocal uses chapter spans as candidate windows when ≥3 chapters; Claude receives chapter list for boundary alignment) + Web Audio energy analyzer (analyzeUploadedVideoAudio: 8x scrub AudioContext RMS scan on uploaded files; peaks boost analyzeLocal virality by +5*peakDensity) | x83: Smart Clipping v2 — two-stage viral detection + topic-boundary awareness + variable 30-180s clip length + unified Generate flow + target default 10 (range 3-20) | x82: preview fix — CSP frame-src, youtube-nocookie embed, thumbnail fallback | x80: Smart Clipping — viral moment detection. Worker /youtube-transcript returns segments[{t,d,text}]. analyzeViaClaude uses timestamped transcript with 4-dimension scoring (hook_power/emotional_impact/quotability/surprise_drama). analyzeLocal scores ~45-75s windows, picks top N with spatial diversity across full duration. YT iframe autoplay+loop within clip range; uploaded video autoplay muted with loop-on-end.
  * Security: localStorage namespaced as zaidsaid.v2.*, error boundary, no innerHTML, no eval, no fetch.
  * Archived v1 seed data preserved under ARCHIVE_* for later reuse.
  */
@@ -4735,6 +4735,226 @@ function generateCommentSeedsLocal(clip){
 }
 /* ---- end Comment Seed Kit helpers ---- */
 
+function YouTubeDownloaderCard({ toast }){
+  const [urlIn, setUrlIn] = useState("");
+  const [formats, setFormats] = useState([]);
+  const [videoMeta, setVideoMeta] = useState(null);
+  const [itag, setItag] = useState(0);
+  const [dirHandle, setDirHandle] = useState(null);
+  const [dirName, setDirName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState("");
+  const [progress, setProgress] = useState(0);
+  const [errMsg, setErrMsg] = useState("");
+  const supportsDirPicker = typeof window !== "undefined" && typeof window.showDirectoryPicker === "function";
+
+  const workerBase = () => {
+    const path = getAnthropicPath();
+    return path ? path.replace(/\/anthropic\/?$/, "") : "https://zaidsaid-proxy.zaidsaid.workers.dev";
+  };
+
+  const fetchFormats = async () => {
+    setErrMsg("");
+    const v = (urlIn || "").trim();
+    if(!v){ toast && toast("Paste a YouTube URL first", "error"); return; }
+    setBusy(true); setStatus("Fetching formats…"); setProgress(0);
+    try {
+      const res = await fetch(workerBase() + "/youtube-formats?url=" + encodeURIComponent(v));
+      const data = await res.json().catch(() => ({}));
+      if(!res.ok) throw new Error(data.error || ("HTTP " + res.status));
+      const fs = Array.isArray(data.formats)
+        ? data.formats.slice().sort((a,b)=> (b.height||0) - (a.height||0) || (b.contentLength||0) - (a.contentLength||0))
+        : [];
+      if(!fs.length) throw new Error("No downloadable progressive formats returned — this video may be restricted.");
+      setFormats(fs);
+      setItag(fs[0].itag);
+      setVideoMeta({ title: data.title || "", author: data.author || "", videoId: data.videoId, lengthSeconds: data.lengthSeconds || 0 });
+      setStatus(fs.length + " formats available");
+      toast && toast("Fetched " + fs.length + " formats", "success");
+    } catch (err) {
+      const msg = String((err && err.message) || err);
+      setErrMsg(msg);
+      setStatus("");
+      toast && toast("Couldn't fetch formats: " + msg, "error");
+    } finally { setBusy(false); }
+  };
+
+  const pickFolder = async () => {
+    if(!supportsDirPicker){
+      toast && toast("Your browser doesn't support folder picking — file will go to your default Downloads folder.", "warn");
+      return;
+    }
+    try {
+      const handle = await window.showDirectoryPicker({ mode: "readwrite" });
+      setDirHandle(handle);
+      setDirName(handle.name || "(folder)");
+      toast && toast("Save folder set", "success");
+    } catch (err) {
+      if(err && err.name !== "AbortError") toast && toast("Folder picker error: " + (err && err.message), "error");
+    }
+  };
+
+  const startDownload = async () => {
+    setErrMsg("");
+    if(!videoMeta || !itag){ toast && toast("Fetch formats and pick a quality first", "error"); return; }
+    const fmt = formats.find(f => f.itag === itag);
+    const ext = (fmt && fmt.mimeType || "").includes("webm") ? "webm" : "mp4";
+    const safeTitle = (videoMeta.title || videoMeta.videoId).replace(/[^A-Za-z0-9._ -]+/g, "_").slice(0, 80) || videoMeta.videoId;
+    const filename = safeTitle + "." + ext;
+    setBusy(true); setProgress(0); setStatus("Starting download…");
+    try {
+      const mediaUrl = workerBase() + "/youtube-media?v=" + encodeURIComponent(videoMeta.videoId) + "&itag=" + itag;
+      const res = await fetch(mediaUrl);
+      if(!res.ok || !res.body){
+        let msg = "Server returned " + res.status;
+        try { const j = await res.json(); if(j && j.error) msg = j.error; } catch(_){}
+        throw new Error(msg);
+      }
+      const total = Number(res.headers.get("content-length")) || (fmt && fmt.contentLength) || 0;
+      const reader = res.body.getReader();
+
+      if(dirHandle){
+        const fileHandle = await dirHandle.getFileHandle(filename, { create: true });
+        const writable = await fileHandle.createWritable();
+        let received = 0;
+        while(true){
+          const { done, value } = await reader.read();
+          if(done) break;
+          await writable.write(value);
+          received += value.length;
+          if(total) setProgress(Math.round((received / total) * 100));
+          setStatus((received/1048576).toFixed(1) + " MB" + (total ? " of " + (total/1048576).toFixed(1) + " MB" : " downloaded"));
+        }
+        await writable.close();
+        setProgress(100);
+        setStatus("Saved to " + (dirName || "chosen folder") + " / " + filename);
+        toast && toast("Saved to " + (dirName || "chosen folder"), "success");
+      } else {
+        const chunks = [];
+        let received = 0;
+        while(true){
+          const { done, value } = await reader.read();
+          if(done) break;
+          chunks.push(value);
+          received += value.length;
+          if(total) setProgress(Math.round((received / total) * 100));
+          setStatus((received/1048576).toFixed(1) + " MB" + (total ? " of " + (total/1048576).toFixed(1) + " MB" : " downloaded"));
+        }
+        const blob = new Blob(chunks, { type: (fmt && fmt.mimeType) || "video/mp4" });
+        const blobUrl = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = blobUrl; a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => { try { URL.revokeObjectURL(blobUrl); a.remove(); } catch(e){} }, 1000);
+        setProgress(100);
+        setStatus("Download started — check your default Downloads folder (" + filename + ")");
+        toast && toast("Downloaded " + filename, "success");
+      }
+    } catch (err) {
+      const msg = String((err && err.message) || err);
+      setErrMsg(msg);
+      toast && toast("Download failed: " + msg, "error");
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="card p-5">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="min-w-0">
+          <div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Tool</div>
+          <div className="text-lg font-semibold">YouTube downloader</div>
+          <div className="text-[12px] text-[color:var(--muted)] mt-1">Paste a link, pick a quality, save to a folder on your computer. Progressive mp4 / webm only (up to ~720p for most videos).</div>
+        </div>
+      </div>
+      <div className="mt-4 grid md:grid-cols-3 gap-3">
+        <label className="md:col-span-2 block">
+          <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">YouTube URL</span>
+          <div className="mt-1 flex items-center gap-2 bg-transparent border border-[color:var(--line)] rounded-xl px-3 py-2 focus-within:border-white/20">
+            <span className="text-[color:var(--muted)]" aria-hidden>{I.link({size:14})}</span>
+            <input
+              value={urlIn}
+              onChange={(e)=>setUrlIn(e.target.value)}
+              onKeyDown={(e)=>{ if(e.key === "Enter" && !e.shiftKey){ e.preventDefault(); fetchFormats(); } }}
+              placeholder="https://youtube.com/watch?v=..."
+              className="flex-1 bg-transparent text-sm focus:outline-none"
+              disabled={busy}
+            />
+            <button type="button" className="btn btn-primary shrink-0" onClick={fetchFormats} disabled={busy || !urlIn.trim()} title="Press Enter">
+              {busy && !formats.length ? I.refresh({size:14}) : I.arrow({size:14})}
+              <span className="ml-1 text-[12px]">{busy && !formats.length ? "Fetching…" : "Fetch formats"}</span>
+            </button>
+          </div>
+        </label>
+        <label className="block">
+          <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Quality</span>
+          <select
+            value={itag || ""}
+            onChange={(e)=>setItag(parseInt(e.target.value||"0", 10)||0)}
+            className="mt-1 w-full bg-transparent border border-[color:var(--line)] rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-white/20"
+            disabled={busy || !formats.length}
+          >
+            {!formats.length && <option value="" style={{background:"#0b0b10"}}>— fetch formats first —</option>}
+            {formats.map(f => (
+              <option key={f.itag} value={f.itag} style={{background:"#0b0b10"}}>
+                {(f.qualityLabel || (f.height ? f.height + "p" : "unknown"))}
+                {(f.mimeType||"").includes("webm") ? " · webm" : " · mp4"}
+                {f.fps ? " · " + f.fps + "fps" : ""}
+                {f.contentLength ? " · " + (f.contentLength/1048576).toFixed(1) + " MB" : ""}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      {videoMeta && (
+        <div className="mt-3 text-[12px] text-[color:var(--muted)]">
+          <span className="text-white">{videoMeta.title || videoMeta.videoId}</span>
+          {videoMeta.author ? <> · {videoMeta.author}</> : null}
+          {videoMeta.lengthSeconds ? <> · {hmsFromSec(videoMeta.lengthSeconds)}</> : null}
+        </div>
+      )}
+      <div className="mt-3 flex items-center gap-2 flex-wrap">
+        <button
+          type="button"
+          className="btn"
+          onClick={pickFolder}
+          disabled={busy || !supportsDirPicker}
+          title={supportsDirPicker ? "Choose a folder to save the video into" : "This browser doesn't support folder picking — file will save to your default Downloads folder."}
+        >
+          {I.folder({size:14})}
+          <span className="ml-1 text-[12px]">{dirHandle ? ("Folder: " + dirName) : (supportsDirPicker ? "Choose folder" : "Folder picker unsupported")}</span>
+        </button>
+        {dirHandle && (
+          <button type="button" className="chip" onClick={()=>{ setDirHandle(null); setDirName(""); }}>Clear folder</button>
+        )}
+        <button
+          type="button"
+          className={"btn " + (busy || !itag ? "opacity-60 cursor-not-allowed" : "btn-primary")}
+          onClick={startDownload}
+          disabled={busy || !itag}
+        >
+          {I.arrow({size:14})}
+          <span className="ml-1 text-[12px]">{busy ? "Working…" : "Download"}</span>
+        </button>
+        {!supportsDirPicker && (
+          <span className="text-[11px] text-[color:var(--muted)]">Chrome/Edge support picking a folder. Other browsers save to the default Downloads folder.</span>
+        )}
+      </div>
+      {(progress > 0 || status) && (
+        <div className="mt-3">
+          {progress > 0 && progress < 100 && (
+            <div className="h-1 w-full rounded-full overflow-hidden bg-white/5">
+              <div className="h-full" style={{width: progress + "%", background: "linear-gradient(90deg,var(--brand),var(--brand2))"}} />
+            </div>
+          )}
+          {status && <div className="mt-1 text-[11px] text-[color:var(--muted)]">{status}</div>}
+        </div>
+      )}
+      {errMsg && <div className="mt-2 text-[12px] text-rose-300">Error: {errMsg}</div>}
+    </div>
+  );
+}
+
 function RepurposeTab(){
   const [project, setProject] = useLocalState("repurpose.project", REPURPOSE_SEED);
   useEffect(() => {
@@ -5258,6 +5478,7 @@ const removeClip = (clipId) => {
       </div>
 
       <div className="grid gap-4">
+        <YouTubeDownloaderCard toast={toast} />
         <RepurposeIntake project={project} setProject={setProject} onProcessSource={processSource} processBusy={processBusy} processStatus={processStatus} onFileUpload={handleFileUpload} />
         <RepurposeTranscriptStrip project={project} />
 
