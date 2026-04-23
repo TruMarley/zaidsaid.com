@@ -1,4 +1,4 @@
-/* Zaidsaid — app.js v2.0 — x104: Studio Export — 1080p H.264 MP4, aspect-aware. renderRealVideo now reads project.preset (vertical/square/landscape) and sizes the canvas to 1080×1920 / 1080×1080 / 1920×1080 respectively. After the canvas+MediaRecorder pass produces a webm blob (0-60% progress), reencodeWebmToPresetMP4 runs ffmpeg.wasm to scale+pad and encode libx264 H.264 at CRF 20 (60-100% progress). Output is set as window.__zs_lastBlob and offered as a .mp4 download named <project-slug>-<preset>.mp4. Visibility warning toasted at render start if the tab is hidden (rAF throttles in background tabs). On ffmpeg failure the error is surfaced and the raw webm is kept as a fallback download link. | x103c: Replace fetch(dataUrl).then(r=>r.blob()) with a direct base64 decoder. Our CSP `connect-src` doesn't list `data:`, so `fetch("data:...")` throws `TypeError: Failed to fetch` in Chrome. storeSceneImage / storeSceneAudio caught it and silently returned the original dataUrl — localStorage got polluted with base64 anyway despite x103's IDB offload and x103b's self-heal. New helper dataUrlToBlob parses `data:<mime>[;base64],<payload>` in pure JS (atob + Uint8Array) and returns a Blob. callers fall back to fetch only for non-data URLs. | x103b: Make openIDB self-heal when the zaidsaid DB exists at some version but is missing the `uploads` store. x103 assumed the store always existed because Repurpose creates it on first upload, but a Studio-first user (or anyone with a stale DB from an aborted upgrade) silently fails every idbPut with "object store not found", which drops scene.image back to the data-URL path and defeats the whole localStorage-offload purpose. Fix: openIDB now probes at the DB's current version, verifies the store is present, and if not bumps the version to create it. Also surfaces the silent storeSceneImage / storeSceneAudio fallback with console.warn so the next regression won't hide. | x103: Studio — IDB-offload scene images + audio. scene.image / scene.audio are now lightweight reference strings ("idb:studio:scene:{id}" / "idb:studio:scene:{id}:audio") pointing to Blob entries in the zaidsaid/uploads IndexedDB store. localStorage no longer holds base64 data URLs for Studio projects, keeping the stored JSON well under 20 KB regardless of asset count. New helpers idbSetStudioImage / idbGetStudioImage / idbDelStudioImage and idbSetStudioAudio / idbGetStudioAudio / idbDelStudioAudio parallel the existing repurpose:clip: convention. StepStoryboard converts any returned data URL / response blob to a Blob, persists it to IDB, and keeps a per-scene Map<sceneId, objectUrl> (sceneBlobUrls) for live preview. StepVoice does the same for audio (audioBlobUrls). StepExport's renderRealVideo reads IDB blobs when image/audio starts with "idb:", falling back to the legacy data URL path for pre-x103 projects so no existing state is broken. StudioTab hydrates both blob URL Maps on mount (clearing missing IDB refs with a toast) and revokes all URLs on unmount. resetProject and scene deletion also clean IDB entries. | x102: Share → YouTube now ships full viral-title + thumbnail tooling. generateYouTubeMetadataViaClaude schema extended to require titleVariants[5] (each using a different proven 2026 Shorts hook pattern — Contrarian Take, Shocking Statistic, Direct Promise, Question Hook, Before/After, Mistake Callout, Bold Claim, Expert Secret, Pattern Interrupt, Time-Bound Challenge) and a structured thumbnail object (headline/subject/background/palette/imagePrompt/reasoning) following MrBeast-era Shorts rules: one emotional face OR one iconic close-up, 2-3 word overlay, deep-dark background with a single neon accent. New renderThumbnailFromBrief() generates the base via Pollinations (explicitly 'no text, no watermarks') and composites clean headline + accent underline via OffscreenCanvas — diffusion models garble text, canvas overlays are razor-sharp. ShareMetadataModal now surfaces the 5 title variants as a ranked copy list, the full thumbnail brief, and a "Generate thumbnail" action that produces a 1080×1920 JPG download-ready image. | x101: clip boundaries now capture COMPLETE thoughts. Three-layer fix: (1) analyzeViaClaude tool schema now requires an `arc` field with setup / reveal / payoff descriptions + payoff_end timestamp — Claude must identify where the payoff sentence ends, not just hand-wave about "complete thoughts"; (2) system prompt hardened with an explicit example of the Move 37 failure pattern (ending on "...had a machine beaten one of the best human players two games in a row, it" mid-clause) paired with the corrected version ending on the "2,000 years of strategy" payoff; (3) new snapClipBoundaries() runs after Claude returns, walking the segment list forward from clip.end to the next true sentence terminator (no dangling conj./pronoun) within 30s, and backing clip.start to the current sentence's start if it lands mid-sentence. Result: clip.end is guaranteed to sit on a period/!/? and the payoff beat is guaranteed present. Also adds a "Fix cuts" toolbar chip that re-snaps already-generated clips against the current transcript — no regeneration needed for existing projects. | x100: Share → YouTube now auto-generates an optimized metadata bundle (title / description / hashtags / SEO tags / thumbnail idea) via Claude Sonnet 4.6 using (a) the clip hook + caption + preset + virality score, (b) the surrounding transcript window, and (c) live trending context pulled from /trends/{google,reddit,hn,x}. A ShareMetadataModal renders the bundle with per-field Copy buttons so the user can paste each field into YouTube Studio's Details panel. Video download now goes through the hidden-tab-safe recordClipViaCaptureStream → reencodeWebmToPresetMP4 pipeline from x99f instead of the broken renderClipVideoFromUpload — shares produce real 1080p H.264 MP4 files. | x99f: batch export rebuilt as two-pass (captureStream → ffmpeg), works in hidden tabs + outputs 1080p H.264 MP4. Root cause of the 0-byte downloads: x99d/e's renderClipVideoFromUpload drives canvas.drawImage via requestAnimationFrame, and rAF throttles to ~1 Hz as soon as the tab loses focus. canvas.captureStream() then emits ≤1 frame/sec, MediaRecorder packs a 1-frame blob, and the user gets a .webm that won't play. Fix (a) recordClipViaCaptureStream plays the uploaded source muted and pipes `<video>.captureStream()` straight into MediaRecorder — video playback + MediaStream tracks are NOT bound by rAF, so this keeps running in hidden/backgrounded tabs; (b) reencodeWebmToPresetMP4 uses ffmpeg.wasm to scale+pad the VP9 recording to the target preset and encode libx264 at CRF 20 for real 1080p H.264 MP4 output — ffmpeg.wasm decodes VP9 fine (only AV1 from the raw YouTube MP4 was the blind spot). Also bumped downloadBlob's revokeObjectURL delay from 500 ms → 60 s so Chrome's download manager isn't cut off mid-write on big blobs. Overlay burn-in dropped from batch export — per-clip "Render video" chip still has it for single previews. | x99e: fix autoplay block in renderClipVideoFromUpload. The canvas/MediaRecorder render created a fresh <video src={blob}>, seeked, then called `src.play()` — but with `muted=false`, Chrome's autoplay policy threw `NotAllowedError: play() failed because the user didn't interact with the document first` once the original user gesture was consumed by the async awaits. Setting `muted=true` lets play() succeed without a gesture; the audio is still captured via `<video>.captureStream()` since muted only gates speaker output, not decoded audio tracks. | x99d: fix 0-byte batch export on AV1 sources. YouTube's progressive MP4s are AV1; cutClipFromSource's `-c copy` preserved that codec, then reencodeClipForPreset (libx264 transcode) silently failed because ffmpeg.wasm 5.1.4 has no AV1 decoder (config lacks libdav1d). ffmpeg.exec returned exit=1 but the old code ignored it, readFile returned 0 bytes, and we shipped empty MP4s. Fix (a) exportClipsAsVideo now prefers renderClipVideoFromUpload (canvas + MediaRecorder, uses browser-native AV1 decoding via <video>) on the uploaded source, falling back to the ffmpeg per-clip re-encode only when that fails; (b) reencodeClipForPreset now throws on non-zero exit or 0-byte output instead of returning an empty blob. Trade-off: outputs are .webm VP9/VP8 at 720p (renderClipVideoFromUpload dims) rather than .mp4 H.264 1080p; acceptable for the MVP, bigger resolution is an easy follow-up. | x99c: switch ffmpeg core from UMD to ESM. @ffmpeg/ffmpeg@0.12.10's worker.js is always instantiated as `{type:"module"}`, and module Workers can't call `importScripts`, so worker.js falls through to `await import(coreURL)`. The UMD build registers `self.createFFmpegCore` as a side effect but has no ESM `default` export, so the worker throws `ERROR_IMPORT_FAILURE`. Using `/esm/ffmpeg-core.js` (which has a proper default export) lets the module import complete. | x99b: self-host @ffmpeg/ffmpeg + @ffmpeg/util. Chrome refuses to construct a Worker from a cross-origin URL, CSP or CORS headers notwithstanding; @ffmpeg/ffmpeg@0.12.10 does `new Worker(new URL("./worker.js", import.meta.url), {type:"module"})` relative to its own module URL, so loading it from unpkg makes the Worker cross-origin and it throws `Failed to construct 'Worker': Script … cannot be accessed from origin 'https://zaidsaid.com'`. The ESM bundle now lives in ./vendor/{ffmpeg,util}/esm/. @ffmpeg/core WASM still loads from unpkg via toBlobURL (blob: URLs are same-origin from the Worker's perspective). | x99: tried adding `https://unpkg.com` to CSP `worker-src` — necessary but not sufficient, Chrome still blocked the cross-origin worker. | x98: Phase D — trending-context scoring. Worker routes /trends/{google,reddit,hn,x} (HN + Reddit + Google free; X via Apify needs APIFY_TOKEN). Client extracts 3-8 topic keywords via Claude tool_use, fetches trend matches, folds into analyzeViaClaudeTwoStage with convergent-attention boost. | x97: Phase C — multi-modal virality signals. WebCodecs scene-cut detection in-browser; /gemini-video-highlights worker route (Gemini 2.5 Flash, graceful no-key); /sensevoice worker route (Replicate SenseVoice for laughter/applause, graceful no-key). Claude scoring extended to boost clips matching ≥2 signal types. | x96: Phase E — preset-aware per-clip re-encoding via ffmpeg.wasm (scale+pad for 9:16/1:1/16:9) + JSZip batch download when multiple clips selected. Replaces the old MediaRecorder .webm pipeline for clips that have a per-clip mp4 blob. | x95: Phase B UI cleanup: collapsed intake to URL/File, folded YT downloader into URL expandable, per-clip actions 9→3, removed fake waveform, toolbar pruned. | x94: clear stale clips at Generate start + narrow reseed effect so demo doesn't overwrite a user's upload on refresh. | x93: Repurpose — real per-clip mp4 cuts + thumbnail frames. cutClipFromSource (ffmpeg.wasm, -ss after -i, -c copy with libx264 fallback <5 min) + grabFrameThumb (off-DOM canvas) + generateClipAssets (sequential, IDB-backed). processSource fires generateClipAssets after setProject for upload flows. RepurposeTab hydrates clipBlobUrls Map from IDB on mount; RepurposeClipPreview shows pre-cut <video controls> when blob ready. removeClip deletes IDB entries + revokes URLs. | x92: Repurpose — big videos extract audio client-side before transcribing. Lazy-loads ffmpeg.wasm (@ffmpeg/ffmpeg@0.12.10 + @ffmpeg/core@0.12.6 from unpkg, ~30 MB one-time); any uploaded video >50 MB is reduced to mono 16 kHz 32 kbps MP3 (~14 MB/hr) before POSTing to /elevenlabs/v1/speech-to-text. Fixes 700+ MB uploads hanging on the Cloudflare Worker 500 MiB body limit. CSP widened for wasm-unsafe-eval, blob: workers, and unpkg connect. | x91: Repurpose — uploaded files now survive page refreshes. New IndexedDB blob store (zaidsaid/uploads, key repurpose:current) persists the File on upload; RepurposeTab useEffect on mount HEAD-checks the existing blob URL and rehydrates from IDB when it's dead, or clears the dangling reference + toasts "please re-upload" when IDB is empty too. processSource now reads the blob from IDB first, falling back to the blob URL. Remove button deletes the IDB entry. | x90: Repurpose — uploads now actually clip. processSource gate no longer bails on empty source when an uploaded video is present; on new file upload we clear stale transcript/chapters/clips/name; uploaded videos without a transcript auto-transcribe via ElevenLabs Scribe (/elevenlabs/v1/speech-to-text with model_id=scribe_v1, word-level timestamps grouped into ~6s segments) and feed the existing two-stage viral analyzer. New fuchsia "ElevenLabs Scribe (auto-transcribed)" source chip. | x89: Repurpose — YouTube downloader tool (paste URL → fetch progressive formats via worker InnerTube → quality dropdown → File System Access folder picker with streamed writable, falls back to <a download> when unsupported). Worker: /youtube-formats, /youtube-media. | x88: batch export respects selection + preset-aware video render — "Export selected as video" renders .webm per selected clip at its preset aspect ratio (9:16/1:1/16:9); fallback selection→approved→all; metadata (.txt) export kept as secondary. Fix stray /span> text below batch-export button. | x87: clip length range widened — 5s floor (viral reactions, one-liners) to 1800s / 30min ceiling (full topic arcs); removed rigid length-mix prompt in favor of idea-first sizing | x86: clip preview no-autoplay — remove YouTube loop=1&playlist (fixes whole-video loop), remove autoPlay on uploaded video, preview now shows clip-only paused state until user clicks play | x85: Phase B.1 — persist chapters on description-fallback, surface worker errors, transcript-source chip, length-variance prompt, analyzeLocal intro-skip, **remove dead RepurposeAnalyzer + RepurposeRealAnalyze god-mode components** | x84: Phase B — YT chapter-boundary detection (parseYouTubeChapters in worker; analyzeLocal uses chapter spans as candidate windows when ≥3 chapters; Claude receives chapter list for boundary alignment) + Web Audio energy analyzer (analyzeUploadedVideoAudio: 8x scrub AudioContext RMS scan on uploaded files; peaks boost analyzeLocal virality by +5*peakDensity) | x83: Smart Clipping v2 — two-stage viral detection + topic-boundary awareness + variable 30-180s clip length + unified Generate flow + target default 10 (range 3-20) | x82: preview fix — CSP frame-src, youtube-nocookie embed, thumbnail fallback | x80: Smart Clipping — viral moment detection. Worker /youtube-transcript returns segments[{t,d,text}]. analyzeViaClaude uses timestamped transcript with 4-dimension scoring (hook_power/emotional_impact/quotability/surprise_drama). analyzeLocal scores ~45-75s windows, picks top N with spatial diversity across full duration. YT iframe autoplay+loop within clip range; uploaded video autoplay muted with loop-on-end.
+/* Zaidsaid — app.js v2.0 — x105: Architecture tab reshaped to match the real 8 Studio stages (research / script / storyboard / assets / motion / voice / timeline / export) and to declare providers honestly by kind: `included` (user's Anthropic subscription, no per-call meter), `free` (Pollinations Flux, browser SpeechSynthesis, local Canvas Ken Burns, ffmpeg.wasm), or `byok` (ElevenLabs / Stability / Pexels — requires a user-supplied key). Removes the fantasy stages (Outline / Avatar / B-roll / Captions / Edit / Publish) that had no downstream code, and the Free-only/Balanced/Premium toggle that wasn't actually rewiring anything. Default mix: Claude (included) on the two text stages, free on everything else — per-run cost is $0.00 out of the box with the user's Anthropic subscription. PROVIDER_META collapsed to the 12 IDs that real code paths consume; old "openai" / "heygen" / "local-llm" etc. entries deleted. StudioStageProvider sanitizes stale arch.picks so legacy stored state doesn't render orphan providers. | x104: Studio Export — 1080p H.264 MP4, aspect-aware. renderRealVideo now reads project.preset (vertical/square/landscape) and sizes the canvas to 1080×1920 / 1080×1080 / 1920×1080 respectively. After the canvas+MediaRecorder pass produces a webm blob (0-60% progress), reencodeWebmToPresetMP4 runs ffmpeg.wasm to scale+pad and encode libx264 H.264 at CRF 20 (60-100% progress). Output is set as window.__zs_lastBlob and offered as a .mp4 download named <project-slug>-<preset>.mp4. Visibility warning toasted at render start if the tab is hidden (rAF throttles in background tabs). On ffmpeg failure the error is surfaced and the raw webm is kept as a fallback download link. | x103c: Replace fetch(dataUrl).then(r=>r.blob()) with a direct base64 decoder. Our CSP `connect-src` doesn't list `data:`, so `fetch("data:...")` throws `TypeError: Failed to fetch` in Chrome. storeSceneImage / storeSceneAudio caught it and silently returned the original dataUrl — localStorage got polluted with base64 anyway despite x103's IDB offload and x103b's self-heal. New helper dataUrlToBlob parses `data:<mime>[;base64],<payload>` in pure JS (atob + Uint8Array) and returns a Blob. callers fall back to fetch only for non-data URLs. | x103b: Make openIDB self-heal when the zaidsaid DB exists at some version but is missing the `uploads` store. x103 assumed the store always existed because Repurpose creates it on first upload, but a Studio-first user (or anyone with a stale DB from an aborted upgrade) silently fails every idbPut with "object store not found", which drops scene.image back to the data-URL path and defeats the whole localStorage-offload purpose. Fix: openIDB now probes at the DB's current version, verifies the store is present, and if not bumps the version to create it. Also surfaces the silent storeSceneImage / storeSceneAudio fallback with console.warn so the next regression won't hide. | x103: Studio — IDB-offload scene images + audio. scene.image / scene.audio are now lightweight reference strings ("idb:studio:scene:{id}" / "idb:studio:scene:{id}:audio") pointing to Blob entries in the zaidsaid/uploads IndexedDB store. localStorage no longer holds base64 data URLs for Studio projects, keeping the stored JSON well under 20 KB regardless of asset count. New helpers idbSetStudioImage / idbGetStudioImage / idbDelStudioImage and idbSetStudioAudio / idbGetStudioAudio / idbDelStudioAudio parallel the existing repurpose:clip: convention. StepStoryboard converts any returned data URL / response blob to a Blob, persists it to IDB, and keeps a per-scene Map<sceneId, objectUrl> (sceneBlobUrls) for live preview. StepVoice does the same for audio (audioBlobUrls). StepExport's renderRealVideo reads IDB blobs when image/audio starts with "idb:", falling back to the legacy data URL path for pre-x103 projects so no existing state is broken. StudioTab hydrates both blob URL Maps on mount (clearing missing IDB refs with a toast) and revokes all URLs on unmount. resetProject and scene deletion also clean IDB entries. | x102: Share → YouTube now ships full viral-title + thumbnail tooling. generateYouTubeMetadataViaClaude schema extended to require titleVariants[5] (each using a different proven 2026 Shorts hook pattern — Contrarian Take, Shocking Statistic, Direct Promise, Question Hook, Before/After, Mistake Callout, Bold Claim, Expert Secret, Pattern Interrupt, Time-Bound Challenge) and a structured thumbnail object (headline/subject/background/palette/imagePrompt/reasoning) following MrBeast-era Shorts rules: one emotional face OR one iconic close-up, 2-3 word overlay, deep-dark background with a single neon accent. New renderThumbnailFromBrief() generates the base via Pollinations (explicitly 'no text, no watermarks') and composites clean headline + accent underline via OffscreenCanvas — diffusion models garble text, canvas overlays are razor-sharp. ShareMetadataModal now surfaces the 5 title variants as a ranked copy list, the full thumbnail brief, and a "Generate thumbnail" action that produces a 1080×1920 JPG download-ready image. | x101: clip boundaries now capture COMPLETE thoughts. Three-layer fix: (1) analyzeViaClaude tool schema now requires an `arc` field with setup / reveal / payoff descriptions + payoff_end timestamp — Claude must identify where the payoff sentence ends, not just hand-wave about "complete thoughts"; (2) system prompt hardened with an explicit example of the Move 37 failure pattern (ending on "...had a machine beaten one of the best human players two games in a row, it" mid-clause) paired with the corrected version ending on the "2,000 years of strategy" payoff; (3) new snapClipBoundaries() runs after Claude returns, walking the segment list forward from clip.end to the next true sentence terminator (no dangling conj./pronoun) within 30s, and backing clip.start to the current sentence's start if it lands mid-sentence. Result: clip.end is guaranteed to sit on a period/!/? and the payoff beat is guaranteed present. Also adds a "Fix cuts" toolbar chip that re-snaps already-generated clips against the current transcript — no regeneration needed for existing projects. | x100: Share → YouTube now auto-generates an optimized metadata bundle (title / description / hashtags / SEO tags / thumbnail idea) via Claude Sonnet 4.6 using (a) the clip hook + caption + preset + virality score, (b) the surrounding transcript window, and (c) live trending context pulled from /trends/{google,reddit,hn,x}. A ShareMetadataModal renders the bundle with per-field Copy buttons so the user can paste each field into YouTube Studio's Details panel. Video download now goes through the hidden-tab-safe recordClipViaCaptureStream → reencodeWebmToPresetMP4 pipeline from x99f instead of the broken renderClipVideoFromUpload — shares produce real 1080p H.264 MP4 files. | x99f: batch export rebuilt as two-pass (captureStream → ffmpeg), works in hidden tabs + outputs 1080p H.264 MP4. Root cause of the 0-byte downloads: x99d/e's renderClipVideoFromUpload drives canvas.drawImage via requestAnimationFrame, and rAF throttles to ~1 Hz as soon as the tab loses focus. canvas.captureStream() then emits ≤1 frame/sec, MediaRecorder packs a 1-frame blob, and the user gets a .webm that won't play. Fix (a) recordClipViaCaptureStream plays the uploaded source muted and pipes `<video>.captureStream()` straight into MediaRecorder — video playback + MediaStream tracks are NOT bound by rAF, so this keeps running in hidden/backgrounded tabs; (b) reencodeWebmToPresetMP4 uses ffmpeg.wasm to scale+pad the VP9 recording to the target preset and encode libx264 at CRF 20 for real 1080p H.264 MP4 output — ffmpeg.wasm decodes VP9 fine (only AV1 from the raw YouTube MP4 was the blind spot). Also bumped downloadBlob's revokeObjectURL delay from 500 ms → 60 s so Chrome's download manager isn't cut off mid-write on big blobs. Overlay burn-in dropped from batch export — per-clip "Render video" chip still has it for single previews. | x99e: fix autoplay block in renderClipVideoFromUpload. The canvas/MediaRecorder render created a fresh <video src={blob}>, seeked, then called `src.play()` — but with `muted=false`, Chrome's autoplay policy threw `NotAllowedError: play() failed because the user didn't interact with the document first` once the original user gesture was consumed by the async awaits. Setting `muted=true` lets play() succeed without a gesture; the audio is still captured via `<video>.captureStream()` since muted only gates speaker output, not decoded audio tracks. | x99d: fix 0-byte batch export on AV1 sources. YouTube's progressive MP4s are AV1; cutClipFromSource's `-c copy` preserved that codec, then reencodeClipForPreset (libx264 transcode) silently failed because ffmpeg.wasm 5.1.4 has no AV1 decoder (config lacks libdav1d). ffmpeg.exec returned exit=1 but the old code ignored it, readFile returned 0 bytes, and we shipped empty MP4s. Fix (a) exportClipsAsVideo now prefers renderClipVideoFromUpload (canvas + MediaRecorder, uses browser-native AV1 decoding via <video>) on the uploaded source, falling back to the ffmpeg per-clip re-encode only when that fails; (b) reencodeClipForPreset now throws on non-zero exit or 0-byte output instead of returning an empty blob. Trade-off: outputs are .webm VP9/VP8 at 720p (renderClipVideoFromUpload dims) rather than .mp4 H.264 1080p; acceptable for the MVP, bigger resolution is an easy follow-up. | x99c: switch ffmpeg core from UMD to ESM. @ffmpeg/ffmpeg@0.12.10's worker.js is always instantiated as `{type:"module"}`, and module Workers can't call `importScripts`, so worker.js falls through to `await import(coreURL)`. The UMD build registers `self.createFFmpegCore` as a side effect but has no ESM `default` export, so the worker throws `ERROR_IMPORT_FAILURE`. Using `/esm/ffmpeg-core.js` (which has a proper default export) lets the module import complete. | x99b: self-host @ffmpeg/ffmpeg + @ffmpeg/util. Chrome refuses to construct a Worker from a cross-origin URL, CSP or CORS headers notwithstanding; @ffmpeg/ffmpeg@0.12.10 does `new Worker(new URL("./worker.js", import.meta.url), {type:"module"})` relative to its own module URL, so loading it from unpkg makes the Worker cross-origin and it throws `Failed to construct 'Worker': Script … cannot be accessed from origin 'https://zaidsaid.com'`. The ESM bundle now lives in ./vendor/{ffmpeg,util}/esm/. @ffmpeg/core WASM still loads from unpkg via toBlobURL (blob: URLs are same-origin from the Worker's perspective). | x99: tried adding `https://unpkg.com` to CSP `worker-src` — necessary but not sufficient, Chrome still blocked the cross-origin worker. | x98: Phase D — trending-context scoring. Worker routes /trends/{google,reddit,hn,x} (HN + Reddit + Google free; X via Apify needs APIFY_TOKEN). Client extracts 3-8 topic keywords via Claude tool_use, fetches trend matches, folds into analyzeViaClaudeTwoStage with convergent-attention boost. | x97: Phase C — multi-modal virality signals. WebCodecs scene-cut detection in-browser; /gemini-video-highlights worker route (Gemini 2.5 Flash, graceful no-key); /sensevoice worker route (Replicate SenseVoice for laughter/applause, graceful no-key). Claude scoring extended to boost clips matching ≥2 signal types. | x96: Phase E — preset-aware per-clip re-encoding via ffmpeg.wasm (scale+pad for 9:16/1:1/16:9) + JSZip batch download when multiple clips selected. Replaces the old MediaRecorder .webm pipeline for clips that have a per-clip mp4 blob. | x95: Phase B UI cleanup: collapsed intake to URL/File, folded YT downloader into URL expandable, per-clip actions 9→3, removed fake waveform, toolbar pruned. | x94: clear stale clips at Generate start + narrow reseed effect so demo doesn't overwrite a user's upload on refresh. | x93: Repurpose — real per-clip mp4 cuts + thumbnail frames. cutClipFromSource (ffmpeg.wasm, -ss after -i, -c copy with libx264 fallback <5 min) + grabFrameThumb (off-DOM canvas) + generateClipAssets (sequential, IDB-backed). processSource fires generateClipAssets after setProject for upload flows. RepurposeTab hydrates clipBlobUrls Map from IDB on mount; RepurposeClipPreview shows pre-cut <video controls> when blob ready. removeClip deletes IDB entries + revokes URLs. | x92: Repurpose — big videos extract audio client-side before transcribing. Lazy-loads ffmpeg.wasm (@ffmpeg/ffmpeg@0.12.10 + @ffmpeg/core@0.12.6 from unpkg, ~30 MB one-time); any uploaded video >50 MB is reduced to mono 16 kHz 32 kbps MP3 (~14 MB/hr) before POSTing to /elevenlabs/v1/speech-to-text. Fixes 700+ MB uploads hanging on the Cloudflare Worker 500 MiB body limit. CSP widened for wasm-unsafe-eval, blob: workers, and unpkg connect. | x91: Repurpose — uploaded files now survive page refreshes. New IndexedDB blob store (zaidsaid/uploads, key repurpose:current) persists the File on upload; RepurposeTab useEffect on mount HEAD-checks the existing blob URL and rehydrates from IDB when it's dead, or clears the dangling reference + toasts "please re-upload" when IDB is empty too. processSource now reads the blob from IDB first, falling back to the blob URL. Remove button deletes the IDB entry. | x90: Repurpose — uploads now actually clip. processSource gate no longer bails on empty source when an uploaded video is present; on new file upload we clear stale transcript/chapters/clips/name; uploaded videos without a transcript auto-transcribe via ElevenLabs Scribe (/elevenlabs/v1/speech-to-text with model_id=scribe_v1, word-level timestamps grouped into ~6s segments) and feed the existing two-stage viral analyzer. New fuchsia "ElevenLabs Scribe (auto-transcribed)" source chip. | x89: Repurpose — YouTube downloader tool (paste URL → fetch progressive formats via worker InnerTube → quality dropdown → File System Access folder picker with streamed writable, falls back to <a download> when unsupported). Worker: /youtube-formats, /youtube-media. | x88: batch export respects selection + preset-aware video render — "Export selected as video" renders .webm per selected clip at its preset aspect ratio (9:16/1:1/16:9); fallback selection→approved→all; metadata (.txt) export kept as secondary. Fix stray /span> text below batch-export button. | x87: clip length range widened — 5s floor (viral reactions, one-liners) to 1800s / 30min ceiling (full topic arcs); removed rigid length-mix prompt in favor of idea-first sizing | x86: clip preview no-autoplay — remove YouTube loop=1&playlist (fixes whole-video loop), remove autoPlay on uploaded video, preview now shows clip-only paused state until user clicks play | x85: Phase B.1 — persist chapters on description-fallback, surface worker errors, transcript-source chip, length-variance prompt, analyzeLocal intro-skip, **remove dead RepurposeAnalyzer + RepurposeRealAnalyze god-mode components** | x84: Phase B — YT chapter-boundary detection (parseYouTubeChapters in worker; analyzeLocal uses chapter spans as candidate windows when ≥3 chapters; Claude receives chapter list for boundary alignment) + Web Audio energy analyzer (analyzeUploadedVideoAudio: 8x scrub AudioContext RMS scan on uploaded files; peaks boost analyzeLocal virality by +5*peakDensity) | x83: Smart Clipping v2 — two-stage viral detection + topic-boundary awareness + variable 30-180s clip length + unified Generate flow + target default 10 (range 3-20) | x82: preview fix — CSP frame-src, youtube-nocookie embed, thumbnail fallback | x80: Smart Clipping — viral moment detection. Worker /youtube-transcript returns segments[{t,d,text}]. analyzeViaClaude uses timestamped transcript with 4-dimension scoring (hook_power/emotional_impact/quotability/surprise_drama). analyzeLocal scores ~45-75s windows, picks top N with spatial diversity across full duration. YT iframe autoplay+loop within clip range; uploaded video autoplay muted with loop-on-end.
  * Security: localStorage namespaced as zaidsaid.v2.*, error boundary, no innerHTML, no eval, no fetch.
  * Archived v1 seed data preserved under ARCHIVE_* for later reuse.
  */
@@ -892,17 +892,22 @@ function sceneRegenerateBlurbs(field){
 
 function StudioStageProvider({ step, setTab }){
   // Map Studio steps to Architecture pipeline stages
+  // x105: MAP Studio step ids → Architecture stage ids (now 1:1 match with
+  // the real 8 stages). Legacy aliases (edit/mix/captions/publish) fall
+  // through to sensible closest-fit stages so nothing crashes on old state.
   const MAP = {
     research: "research",
     script: "script",
     storyboard: "storyboard",
-    assets: "broll",
-    motion: "broll",
+    assets: "assets",
+    motion: "motion",
     voice: "voice",
-    edit: "edit",
-    mix: "edit",
-    captions: "captions",
-    publish: "publish"
+    timeline: "timeline",
+    export: "export",
+    edit: "timeline",
+    mix: "voice",
+    captions: "script",
+    publish: "export"
   };
   const picks = (() => {
     try { return JSON.parse(localStorage.getItem("zaidsaid.v2.arch.picks") || "{}"); } catch(e){ return {}; }
@@ -912,7 +917,7 @@ function StudioStageProvider({ step, setTab }){
   const providerId = picks[archId] || (stageDef ? stageDef.defaultProvider : null);
   const meta = (providerId && typeof PROVIDER_META !== "undefined") ? PROVIDER_META[providerId] : null;
   if (!stageDef) return null;
-  const isLocal = meta && meta.kind === "local";
+  const kindStyle = meta ? (typeof PROVIDER_KIND_STYLE !== "undefined" ? PROVIDER_KIND_STYLE[meta.kind] : null) : null;
   return (
     <div className="card p-3 flex items-center gap-3 flex-wrap">
       <span className="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center">{(I[stageDef.icon] || I.spark)({size:14})}</span>
@@ -920,10 +925,10 @@ function StudioStageProvider({ step, setTab }){
         <div className="text-[11px] uppercase tracking-wider text-[color:var(--muted)]">Provider for this stage</div>
         <div className="text-sm font-semibold truncate">{meta ? meta.label : (providerId || "(none selected)")}</div>
       </div>
-      {meta && (
-        <span className={"text-[10px] px-2 py-0.5 rounded-full border " + (isLocal ? "border-emerald-500/30 text-emerald-300" : "border-sky-500/30 text-sky-300")}>{isLocal ? "LOCAL / FREE" : "CLOUD"}</span>
+      {kindStyle && (
+        <span className={"text-[10px] px-2 py-0.5 rounded-full border " + kindStyle.cls}>{kindStyle.badge}</span>
       )}
-      <div className="text-[11px] text-[color:var(--muted)]">Latency ~{(isLocal ? stageDef.latency * 0.7 : stageDef.latency).toFixed(1)}s · Cost {isLocal ? "$0.00" : ("$"+stageDef.cost.toFixed(2))}</div>
+      <div className="text-[11px] text-[color:var(--muted)]">Latency ~{stageDef.latency.toFixed(1)}s</div>
       <div className="flex-1"></div>
       <button onClick={()=>setTab && setTab("architecture")} className="btn btn-ghost text-xs">{I.blocks({size:12})} Change in Architecture</button>
       <button onClick={()=>setTab && setTab("settings")} className="btn btn-ghost text-xs">{I.grip({size:12})} Proxy URL</button>
@@ -8543,125 +8548,110 @@ function ProjectDrawer({ open, j, onClose, onDuplicate, onDelete, onStatus, onAd
     </Drawer>
   );
 }
+// x105: Architecture reshaped to match the real 8 Studio stages and the actual
+// provider wiring. `claude` uses the user's Anthropic subscription via the
+// worker proxy — treated as "included", not paid-per-call. Everything else
+// free/local: Pollinations for images, browser SpeechSynthesis for voice,
+// Canvas Ken Burns for motion, ffmpeg.wasm for export.
 const PIPELINE_STAGES = [
-  { id:"research", label:"Research", icon:"search", providers:["local-llm","openai","claude","perplexity"], defaultProvider:"openai", latency:2.1, cost:0.02, desc:"Gather sources, extract facts, cluster by topic." },
-  { id:"outline", label:"Outline", icon:"layers", providers:["local-llm","openai","claude"], defaultProvider:"claude", latency:1.4, cost:0.01, desc:"Beat-by-beat structure with hook, beats, CTA." },
-  { id:"script", label:"Script", icon:"edit", providers:["local-llm","openai","claude"], defaultProvider:"claude", latency:3.2, cost:0.04, desc:"Voice-matched copy with pacing marks and SSML hints." },
-  { id:"storyboard", label:"Storyboard", icon:"layers", providers:["local-draw","flux","stability"], defaultProvider:"flux", latency:8.0, cost:0.08, desc:"Shot descriptions + rough frames per beat." },
-  { id:"voice", label:"Voice", icon:"mic", providers:["local-tts","elevenlabs","openai"], defaultProvider:"elevenlabs", latency:4.5, cost:0.06, desc:"TTS render or voice clone per character." },
-  { id:"avatar", label:"Avatar", icon:"avatar", providers:["local-avatar","heygen","synthesia"], defaultProvider:"heygen", latency:22.0, cost:0.35, desc:"Lip-synced avatar video from voice + portrait." },
-  { id:"broll", label:"B-roll", icon:"play", providers:["archive","runway","kling"], defaultProvider:"runway", latency:30.0, cost:0.50, desc:"Generate or pull supporting clips per beat." },
-  { id:"captions", label:"Captions", icon:"comment", providers:["local-whisper","whisper","deepgram"], defaultProvider:"local-whisper", latency:1.1, cost:0.00, desc:"Word-timed transcription with styled renders." },
-  { id:"edit", label:"Edit", icon:"spark", providers:["local-ffmpeg"], defaultProvider:"local-ffmpeg", latency:12.0, cost:0.00, desc:"Cut, sync, transitions, pacing corrections." },
-  { id:"publish", label:"Publish", icon:"globe", providers:["manual","buffer","youtube-api"], defaultProvider:"manual", latency:2.0, cost:0.00, desc:"Schedule or post to selected platforms." }
+  { id:"research",   label:"Research",   icon:"search", providers:["claude","grok"],                     defaultProvider:"claude",           latency:2.5, cost:0.00, desc:"Sub-agent: gather sources + extract trending angles. Uses your Anthropic subscription." },
+  { id:"script",     label:"Script",     icon:"edit",   providers:["claude","grok"],                     defaultProvider:"claude",           latency:3.0, cost:0.00, desc:"Sub-agent: write the beat-by-beat narration. Voice-matched copy with hooks + payoffs." },
+  { id:"storyboard", label:"Storyboard", icon:"layers", providers:["flux-free","stability"],             defaultProvider:"flux-free",        latency:8.0, cost:0.00, desc:"Sub-agent: shot descriptions per beat + images from Pollinations Flux (free)." },
+  { id:"assets",     label:"Assets",     icon:"link",   providers:["reuse-scene","pexels"],              defaultProvider:"reuse-scene",      latency:0.5, cost:0.00, desc:"B-roll per scene. Reuses scene image (free) or pulls from Pexels stock (free with key)." },
+  { id:"motion",     label:"Motion",     icon:"spark",  providers:["local-ken-burns","pollinations-wan"],defaultProvider:"local-ken-burns",  latency:0.5, cost:0.00, desc:"Ken Burns pan/zoom animation in the canvas (free). Optional image→video via Pollinations Wan." },
+  { id:"voice",      label:"Voice",      icon:"mic",    providers:["browser-tts","elevenlabs"],          defaultProvider:"browser-tts",      latency:1.5, cost:0.00, desc:"Free browser SpeechSynthesis by default. ElevenLabs if you add a key in Settings." },
+  { id:"timeline",   label:"Timeline",   icon:"layers", providers:["local"],                             defaultProvider:"local",            latency:0.0, cost:0.00, desc:"Local arrangement — reorder scenes, set durations, add transitions. No API." },
+  { id:"export",     label:"Export",     icon:"play",   providers:["ffmpeg-wasm"],                       defaultProvider:"ffmpeg-wasm",      latency:8.0, cost:0.00, desc:"ffmpeg.wasm renders 1080p H.264 MP4 matching the preset. All client-side." }
 ];
 
+// x105: provider metadata. `kind: "included"` = runs through the user's
+// Anthropic subscription via our Cloudflare Worker proxy (treated as
+// always-on, no per-call metering in our UI). `kind: "free"` = free public
+// API / browser built-in / local compute. `kind: "byok"` = user supplies
+// their own key in Settings.
 const PROVIDER_META = {
-  "local-llm":   { label:"Local LLM (free)",   kind:"local", pricingNote:"runs on your machine" },
-  "openai":      { label:"OpenAI",             kind:"cloud", pricingNote:"per 1K tokens" },
-  "claude":      { label:"Claude",             kind:"cloud", pricingNote:"per 1K tokens" },
-  "perplexity":  { label:"Perplexity",         kind:"cloud", pricingNote:"per query" },
-  "local-draw":  { label:"Local draw (free)",  kind:"local", pricingNote:"placeholder frames" },
-  "flux":        { label:"Flux",               kind:"cloud", pricingNote:"per image" },
-  "stability":   { label:"Stability",          kind:"cloud", pricingNote:"per image" },
-  "local-tts":   { label:"Web Speech TTS (free)", kind:"local", pricingNote:"browser-native" },
-  "elevenlabs":  { label:"ElevenLabs",         kind:"cloud", pricingNote:"per 1K chars" },
-  "local-avatar":{ label:"Portrait loop (free)", kind:"local", pricingNote:"no lip-sync" },
-  "heygen":      { label:"HeyGen",             kind:"cloud", pricingNote:"per minute" },
-  "synthesia":   { label:"Synthesia",          kind:"cloud", pricingNote:"per minute" },
-  "archive":     { label:"Your archive (free)",kind:"local", pricingNote:"uses prior renders" },
-  "runway":      { label:"Runway Gen-3",       kind:"cloud", pricingNote:"per second" },
-  "kling":       { label:"Kling",              kind:"cloud", pricingNote:"per second" },
-  "local-whisper":{ label:"Whisper.cpp (free)",kind:"local", pricingNote:"runs locally" },
-  "whisper":     { label:"OpenAI Whisper",     kind:"cloud", pricingNote:"per minute" },
-  "deepgram":    { label:"Deepgram",           kind:"cloud", pricingNote:"per minute" },
-  "local-ffmpeg":{ label:"ffmpeg (free)",      kind:"local", pricingNote:"runs locally" },
-  "manual":      { label:"Manual (free)",      kind:"local", pricingNote:"you upload" },
-  "buffer":      { label:"Buffer",             kind:"cloud", pricingNote:"per seat" },
-  "youtube-api": { label:"YouTube Data API",   kind:"cloud", pricingNote:"quota-based" }
+  "claude":             { label:"Claude (Anthropic)",    kind:"included", pricingNote:"runs through your Anthropic subscription" },
+  "grok":               { label:"Grok (xAI, free tier)", kind:"free",     pricingNote:"free tier via xAI — backup LLM" },
+  "flux-free":          { label:"Pollinations Flux",     kind:"free",     pricingNote:"free image endpoint — no key needed" },
+  "stability":          { label:"Stability SD3",         kind:"byok",     pricingNote:"requires Stability API key (out of credits on this account)" },
+  "reuse-scene":        { label:"Reuse scene image",     kind:"free",     pricingNote:"zero extra cost — uses storyboard art" },
+  "pexels":             { label:"Pexels stock",          kind:"byok",     pricingNote:"free API key, unlimited photos + videos" },
+  "local-ken-burns":    { label:"Canvas Ken Burns",      kind:"free",     pricingNote:"client-side pan/zoom — no API" },
+  "pollinations-wan":   { label:"Pollinations Wan-fast", kind:"free",     pricingNote:"free image→video (low quota)" },
+  "browser-tts":        { label:"Browser SpeechSynthesis", kind:"free",   pricingNote:"built into Chrome — no key, OK quality" },
+  "elevenlabs":         { label:"ElevenLabs",            kind:"byok",     pricingNote:"10K chars/mo free with key; paid thereafter" },
+  "local":              { label:"Local (client-side)",   kind:"free",     pricingNote:"no API" },
+  "ffmpeg-wasm":        { label:"ffmpeg.wasm",           kind:"free",     pricingNote:"30 MB one-time download, runs in browser" }
+};
+
+// x105: palette per provider kind — matches the new semantics.
+const PROVIDER_KIND_STYLE = {
+  "included": { badge:"INCLUDED", cls:"border-indigo-500/40 text-indigo-200 bg-indigo-500/10" },
+  "free":     { badge:"FREE",     cls:"border-emerald-500/40 text-emerald-200 bg-emerald-500/10" },
+  "byok":     { badge:"BYO-KEY",  cls:"border-amber-500/40 text-amber-200 bg-amber-500/10" }
 };
 
 function ArchitectureTab(){
   const [picks, setPicks] = React.useState(() => {
-    try { const raw = localStorage.getItem("zaidsaid.v2.arch.picks"); if (raw) return JSON.parse(raw); } catch(e){}
+    // x105: sanitize existing picks against the current PIPELINE_STAGES shape.
+    // Old stored state may reference removed providers (openai, heygen, local-llm, etc.);
+    // fall back to each stage's defaultProvider for any unknown value so the UI
+    // never renders an orphaned row.
+    let stored = {};
+    try { stored = JSON.parse(localStorage.getItem("zaidsaid.v2.arch.picks") || "{}"); } catch(e){}
     const init = {};
-    PIPELINE_STAGES.forEach(s => { init[s.id] = s.defaultProvider; });
+    PIPELINE_STAGES.forEach(s => {
+      const v = stored[s.id];
+      init[s.id] = (v && s.providers.includes(v)) ? v : s.defaultProvider;
+    });
     return init;
   });
   const [active, setActive] = React.useState(PIPELINE_STAGES[0].id);
-  const [mode, setMode] = React.useState("balanced"); // free | balanced | premium
 
   React.useEffect(() => {
     try { localStorage.setItem("zaidsaid.v2.arch.picks", JSON.stringify(picks)); } catch(e){}
   }, [picks]);
 
-  const applyMode = (m) => {
-    setMode(m);
-    const next = {};
-    PIPELINE_STAGES.forEach(s => {
-      if (m === "free") {
-        const local = s.providers.find(p => (PROVIDER_META[p]||{}).kind === "local");
-        next[s.id] = local || s.providers[0];
-      } else if (m === "premium") {
-        const cloud = s.providers.filter(p => (PROVIDER_META[p]||{}).kind === "cloud");
-        next[s.id] = cloud[cloud.length-1] || s.defaultProvider;
-      } else {
-        next[s.id] = s.defaultProvider;
-      }
-    });
-    setPicks(next);
-  };
-
-  const totalLatency = PIPELINE_STAGES.reduce((sum, s) => {
-    const isLocal = (PROVIDER_META[picks[s.id]]||{}).kind === "local";
-    return sum + (isLocal ? s.latency * 0.7 : s.latency);
-  }, 0);
-  const totalCost = PIPELINE_STAGES.reduce((sum, s) => {
-    const isLocal = (PROVIDER_META[picks[s.id]]||{}).kind === "local";
-    return sum + (isLocal ? 0 : s.cost);
-  }, 0);
-
+  const totalLatency = PIPELINE_STAGES.reduce((sum, s) => sum + (s.latency || 0), 0);
   const activeStage = PIPELINE_STAGES.find(s => s.id === active);
+  const includedCount = PIPELINE_STAGES.filter(s => (PROVIDER_META[picks[s.id]]||{}).kind === "included").length;
+  const freeCount     = PIPELINE_STAGES.filter(s => (PROVIDER_META[picks[s.id]]||{}).kind === "free").length;
+  const byokCount     = PIPELINE_STAGES.filter(s => (PROVIDER_META[picks[s.id]]||{}).kind === "byok").length;
 
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <div className="text-xl font-semibold">Architecture</div>
-          <div className="text-xs text-[color:var(--muted)]">Every pipeline stage, every provider. Click a stage to swap providers. Saved under zaidsaid.v2.arch.picks.</div>
-        </div>
-        <div className="flex gap-1 rounded-xl border border-white/10 p-1">
-          {[["free","Free-only"],["balanced","Balanced"],["premium","Premium"]].map(([id,label]) => (
-            <button key={id} onClick={()=>applyMode(id)} className={"px-3 py-1.5 rounded-lg text-xs " + (mode === id ? "bg-white/10" : "")}>{label}</button>
-          ))}
+          <div className="text-xs text-[color:var(--muted)] mt-1">The 8-stage Studio pipeline, one sub-agent per stage. Claude stages use your Anthropic subscription. Every other stage is free or uses a BYOK free tier — no per-run cost out-of-the-box.</div>
         </div>
       </div>
 
       <div className="grid md:grid-cols-3 gap-3">
-        <div className="card p-4"><div className="text-[11px] uppercase tracking-wider text-[color:var(--muted)]">Est. end-to-end latency</div><div className="text-2xl font-semibold mt-1">{totalLatency.toFixed(1)}s</div><div className="text-[11px] text-[color:var(--muted)] mt-1">{PIPELINE_STAGES.length} stages · sequential estimate</div></div>
-        <div className="card p-4"><div className="text-[11px] uppercase tracking-wider text-[color:var(--muted)]">Est. cost per run</div><div className="text-2xl font-semibold mt-1">${totalCost.toFixed(2)}</div><div className="text-[11px] text-[color:var(--muted)] mt-1">local stages cost $0</div></div>
-        <div className="card p-4"><div className="text-[11px] uppercase tracking-wider text-[color:var(--muted)]">Local vs cloud</div><div className="text-2xl font-semibold mt-1">{PIPELINE_STAGES.filter(s => (PROVIDER_META[picks[s.id]]||{}).kind === "local").length} / {PIPELINE_STAGES.length}</div><div className="text-[11px] text-[color:var(--muted)] mt-1">local stages selected</div></div>
+        <div className="card p-4"><div className="text-[11px] uppercase tracking-wider text-[color:var(--muted)]">Est. end-to-end latency</div><div className="text-2xl font-semibold mt-1">{totalLatency.toFixed(1)}s</div><div className="text-[11px] text-[color:var(--muted)] mt-1">{PIPELINE_STAGES.length} stages · sequential</div></div>
+        <div className="card p-4"><div className="text-[11px] uppercase tracking-wider text-[color:var(--muted)]">Per-run cost</div><div className="text-2xl font-semibold mt-1">$0.00</div><div className="text-[11px] text-[color:var(--muted)] mt-1">Anthropic subscription + free APIs</div></div>
+        <div className="card p-4"><div className="text-[11px] uppercase tracking-wider text-[color:var(--muted)]">Stage mix</div><div className="text-sm font-semibold mt-2 flex gap-2 flex-wrap">{includedCount>0 && <span className={"chip " + PROVIDER_KIND_STYLE.included.cls}>{includedCount} included</span>}{freeCount>0 && <span className={"chip " + PROVIDER_KIND_STYLE.free.cls}>{freeCount} free</span>}{byokCount>0 && <span className={"chip " + PROVIDER_KIND_STYLE.byok.cls}>{byokCount} BYO-key</span>}</div></div>
       </div>
 
       <div className="card p-4">
-        <div className="text-[11px] uppercase tracking-wider text-[color:var(--muted)] mb-3">Pipeline</div>
+        <div className="text-[11px] uppercase tracking-wider text-[color:var(--muted)] mb-3">Pipeline — 8 stages, one sub-agent each</div>
         <div className="flex gap-2 overflow-x-auto pb-2">
           {PIPELINE_STAGES.map((s, i) => {
             const p = picks[s.id];
-            const meta = PROVIDER_META[p] || { label: p, kind:"cloud" };
+            const meta = PROVIDER_META[p] || { label: p, kind:"free" };
+            const kindStyle = PROVIDER_KIND_STYLE[meta.kind] || PROVIDER_KIND_STYLE.free;
             const isActive = s.id === active;
-            const isLocal = meta.kind === "local";
             return (
               <React.Fragment key={s.id}>
-                <button onClick={()=>setActive(s.id)} className={"shrink-0 w-40 text-left p-3 rounded-xl border transition " + (isActive ? "border-indigo-400 bg-indigo-500/10" : "border-white/10 hover:border-white/30")}>
+                <button onClick={()=>setActive(s.id)} className={"shrink-0 w-44 text-left p-3 rounded-xl border transition " + (isActive ? "border-indigo-400 bg-indigo-500/10" : "border-white/10 hover:border-white/30")}>
                   <div className="flex items-center gap-2">
-                    <span className="w-6 h-6 rounded-md bg-white/10 flex items-center justify-center">{(I[s.icon] || I.spark)({size:12})}</span>
+                    <span className="w-6 h-6 rounded-md bg-white/10 flex items-center justify-center text-[10px] font-bold text-[color:var(--muted)]">{String(i+1).padStart(2,'0')}</span>
                     <span className="text-xs font-semibold">{s.label}</span>
                   </div>
                   <div className="text-[10px] text-[color:var(--muted)] mt-2 truncate">{meta.label}</div>
                   <div className="mt-2 flex items-center gap-1">
-                    <span className={"text-[9px] px-1.5 py-0.5 rounded-full border " + (isLocal ? "border-emerald-500/30 text-emerald-300" : "border-sky-500/30 text-sky-300")}>{isLocal ? "LOCAL" : "CLOUD"}</span>
-                    <span className="text-[10px] text-[color:var(--muted)]">{(isLocal ? s.latency * 0.7 : s.latency).toFixed(1)}s</span>
+                    <span className={"text-[9px] px-1.5 py-0.5 rounded-full border " + kindStyle.cls}>{kindStyle.badge}</span>
+                    <span className="text-[10px] text-[color:var(--muted)]">{s.latency.toFixed(1)}s</span>
                   </div>
                 </button>
                 {i < PIPELINE_STAGES.length - 1 && <span className="self-center opacity-40 shrink-0">{"→"}</span>}
@@ -8674,29 +8664,31 @@ function ArchitectureTab(){
       {activeStage && (
         <div className="card p-4">
           <div className="flex items-center gap-2 mb-2">
-            <span className="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center">{(I[activeStage.icon] || I.spark)({size:16})}</span>
+            <span className="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center text-xs font-bold text-[color:var(--muted)]">{String(PIPELINE_STAGES.findIndex(s=>s.id===activeStage.id)+1).padStart(2,'0')}</span>
             <div>
               <div className="font-semibold">{activeStage.label}</div>
               <div className="text-[11px] text-[color:var(--muted)]">{activeStage.desc}</div>
             </div>
           </div>
-          <div className="text-[11px] uppercase tracking-wider text-[color:var(--muted)] mt-3 mb-2">Swap provider</div>
+          <div className="text-[11px] uppercase tracking-wider text-[color:var(--muted)] mt-3 mb-2">Provider</div>
           <div className="grid md:grid-cols-2 gap-2">
             {activeStage.providers.map(p => {
-              const meta = PROVIDER_META[p] || { label:p, kind:"cloud", pricingNote:"" };
+              const meta = PROVIDER_META[p] || { label:p, kind:"free", pricingNote:"" };
+              const kindStyle = PROVIDER_KIND_STYLE[meta.kind] || PROVIDER_KIND_STYLE.free;
               const isPicked = picks[activeStage.id] === p;
+              const isSingle = activeStage.providers.length === 1;
               return (
-                <button key={p} onClick={()=>setPicks(x => ({ ...x, [activeStage.id]: p }))} className={"text-left p-3 rounded-lg border " + (isPicked ? "border-indigo-400 bg-indigo-500/10" : "border-white/10 hover:border-white/20")}>
+                <button key={p} disabled={isSingle} onClick={()=>setPicks(x => ({ ...x, [activeStage.id]: p }))} className={"text-left p-3 rounded-lg border " + (isPicked ? "border-indigo-400 bg-indigo-500/10" : "border-white/10 hover:border-white/20") + (isSingle ? " cursor-default" : "")}>
                   <div className="flex items-center justify-between">
                     <div className="text-sm font-semibold">{meta.label}</div>
-                    <span className={"text-[10px] px-2 py-0.5 rounded-full border " + (meta.kind === "local" ? "border-emerald-500/30 text-emerald-300" : "border-sky-500/30 text-sky-300")}>{meta.kind.toUpperCase()}</span>
+                    <span className={"text-[10px] px-2 py-0.5 rounded-full border " + kindStyle.cls}>{kindStyle.badge}</span>
                   </div>
                   <div className="text-[11px] text-[color:var(--muted)] mt-1">{meta.pricingNote}</div>
                 </button>
               );
             })}
           </div>
-          <div className="mt-3 text-[11px] text-[color:var(--muted)]">Latency estimate: <span className="text-white">{activeStage.latency}s</span> · Unit cost: <span className="text-white">${activeStage.cost.toFixed(2)}</span></div>
+          <div className="mt-3 text-[11px] text-[color:var(--muted)]">Latency estimate: <span className="text-white">{activeStage.latency.toFixed(1)}s</span></div>
         </div>
       )}
     </div>
