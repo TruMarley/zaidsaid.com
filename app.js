@@ -1,4 +1,4 @@
-/* Zaidsaid — app.js v2.0 — x100: Repurpose — Share → YouTube now auto-generates an optimized metadata bundle (title / description / hashtags / SEO tags / thumbnail idea) via Claude Sonnet 4.6 using (a) the clip hook + caption + preset + virality score, (b) the surrounding transcript window, and (c) live trending context pulled from /trends/{google,reddit,hn,x}. A ShareMetadataModal renders the bundle with per-field Copy buttons so the user can paste each field into YouTube Studio's Details panel. Video download now goes through the hidden-tab-safe recordClipViaCaptureStream → reencodeWebmToPresetMP4 pipeline from x99f instead of the broken renderClipVideoFromUpload — shares produce real 1080p H.264 MP4 files. | x99f: batch export rebuilt as two-pass (captureStream → ffmpeg), works in hidden tabs + outputs 1080p H.264 MP4. Root cause of the 0-byte downloads: x99d/e's renderClipVideoFromUpload drives canvas.drawImage via requestAnimationFrame, and rAF throttles to ~1 Hz as soon as the tab loses focus. canvas.captureStream() then emits ≤1 frame/sec, MediaRecorder packs a 1-frame blob, and the user gets a .webm that won't play. Fix (a) recordClipViaCaptureStream plays the uploaded source muted and pipes `<video>.captureStream()` straight into MediaRecorder — video playback + MediaStream tracks are NOT bound by rAF, so this keeps running in hidden/backgrounded tabs; (b) reencodeWebmToPresetMP4 uses ffmpeg.wasm to scale+pad the VP9 recording to the target preset and encode libx264 at CRF 20 for real 1080p H.264 MP4 output — ffmpeg.wasm decodes VP9 fine (only AV1 from the raw YouTube MP4 was the blind spot). Also bumped downloadBlob's revokeObjectURL delay from 500 ms → 60 s so Chrome's download manager isn't cut off mid-write on big blobs. Overlay burn-in dropped from batch export — per-clip "Render video" chip still has it for single previews. | x99e: fix autoplay block in renderClipVideoFromUpload. The canvas/MediaRecorder render created a fresh <video src={blob}>, seeked, then called `src.play()` — but with `muted=false`, Chrome's autoplay policy threw `NotAllowedError: play() failed because the user didn't interact with the document first` once the original user gesture was consumed by the async awaits. Setting `muted=true` lets play() succeed without a gesture; the audio is still captured via `<video>.captureStream()` since muted only gates speaker output, not decoded audio tracks. | x99d: fix 0-byte batch export on AV1 sources. YouTube's progressive MP4s are AV1; cutClipFromSource's `-c copy` preserved that codec, then reencodeClipForPreset (libx264 transcode) silently failed because ffmpeg.wasm 5.1.4 has no AV1 decoder (config lacks libdav1d). ffmpeg.exec returned exit=1 but the old code ignored it, readFile returned 0 bytes, and we shipped empty MP4s. Fix (a) exportClipsAsVideo now prefers renderClipVideoFromUpload (canvas + MediaRecorder, uses browser-native AV1 decoding via <video>) on the uploaded source, falling back to the ffmpeg per-clip re-encode only when that fails; (b) reencodeClipForPreset now throws on non-zero exit or 0-byte output instead of returning an empty blob. Trade-off: outputs are .webm VP9/VP8 at 720p (renderClipVideoFromUpload dims) rather than .mp4 H.264 1080p; acceptable for the MVP, bigger resolution is an easy follow-up. | x99c: switch ffmpeg core from UMD to ESM. @ffmpeg/ffmpeg@0.12.10's worker.js is always instantiated as `{type:"module"}`, and module Workers can't call `importScripts`, so worker.js falls through to `await import(coreURL)`. The UMD build registers `self.createFFmpegCore` as a side effect but has no ESM `default` export, so the worker throws `ERROR_IMPORT_FAILURE`. Using `/esm/ffmpeg-core.js` (which has a proper default export) lets the module import complete. | x99b: self-host @ffmpeg/ffmpeg + @ffmpeg/util. Chrome refuses to construct a Worker from a cross-origin URL, CSP or CORS headers notwithstanding; @ffmpeg/ffmpeg@0.12.10 does `new Worker(new URL("./worker.js", import.meta.url), {type:"module"})` relative to its own module URL, so loading it from unpkg makes the Worker cross-origin and it throws `Failed to construct 'Worker': Script … cannot be accessed from origin 'https://zaidsaid.com'`. The ESM bundle now lives in ./vendor/{ffmpeg,util}/esm/. @ffmpeg/core WASM still loads from unpkg via toBlobURL (blob: URLs are same-origin from the Worker's perspective). | x99: tried adding `https://unpkg.com` to CSP `worker-src` — necessary but not sufficient, Chrome still blocked the cross-origin worker. | x98: Phase D — trending-context scoring. Worker routes /trends/{google,reddit,hn,x} (HN + Reddit + Google free; X via Apify needs APIFY_TOKEN). Client extracts 3-8 topic keywords via Claude tool_use, fetches trend matches, folds into analyzeViaClaudeTwoStage with convergent-attention boost. | x97: Phase C — multi-modal virality signals. WebCodecs scene-cut detection in-browser; /gemini-video-highlights worker route (Gemini 2.5 Flash, graceful no-key); /sensevoice worker route (Replicate SenseVoice for laughter/applause, graceful no-key). Claude scoring extended to boost clips matching ≥2 signal types. | x96: Phase E — preset-aware per-clip re-encoding via ffmpeg.wasm (scale+pad for 9:16/1:1/16:9) + JSZip batch download when multiple clips selected. Replaces the old MediaRecorder .webm pipeline for clips that have a per-clip mp4 blob. | x95: Phase B UI cleanup: collapsed intake to URL/File, folded YT downloader into URL expandable, per-clip actions 9→3, removed fake waveform, toolbar pruned. | x94: clear stale clips at Generate start + narrow reseed effect so demo doesn't overwrite a user's upload on refresh. | x93: Repurpose — real per-clip mp4 cuts + thumbnail frames. cutClipFromSource (ffmpeg.wasm, -ss after -i, -c copy with libx264 fallback <5 min) + grabFrameThumb (off-DOM canvas) + generateClipAssets (sequential, IDB-backed). processSource fires generateClipAssets after setProject for upload flows. RepurposeTab hydrates clipBlobUrls Map from IDB on mount; RepurposeClipPreview shows pre-cut <video controls> when blob ready. removeClip deletes IDB entries + revokes URLs. | x92: Repurpose — big videos extract audio client-side before transcribing. Lazy-loads ffmpeg.wasm (@ffmpeg/ffmpeg@0.12.10 + @ffmpeg/core@0.12.6 from unpkg, ~30 MB one-time); any uploaded video >50 MB is reduced to mono 16 kHz 32 kbps MP3 (~14 MB/hr) before POSTing to /elevenlabs/v1/speech-to-text. Fixes 700+ MB uploads hanging on the Cloudflare Worker 500 MiB body limit. CSP widened for wasm-unsafe-eval, blob: workers, and unpkg connect. | x91: Repurpose — uploaded files now survive page refreshes. New IndexedDB blob store (zaidsaid/uploads, key repurpose:current) persists the File on upload; RepurposeTab useEffect on mount HEAD-checks the existing blob URL and rehydrates from IDB when it's dead, or clears the dangling reference + toasts "please re-upload" when IDB is empty too. processSource now reads the blob from IDB first, falling back to the blob URL. Remove button deletes the IDB entry. | x90: Repurpose — uploads now actually clip. processSource gate no longer bails on empty source when an uploaded video is present; on new file upload we clear stale transcript/chapters/clips/name; uploaded videos without a transcript auto-transcribe via ElevenLabs Scribe (/elevenlabs/v1/speech-to-text with model_id=scribe_v1, word-level timestamps grouped into ~6s segments) and feed the existing two-stage viral analyzer. New fuchsia "ElevenLabs Scribe (auto-transcribed)" source chip. | x89: Repurpose — YouTube downloader tool (paste URL → fetch progressive formats via worker InnerTube → quality dropdown → File System Access folder picker with streamed writable, falls back to <a download> when unsupported). Worker: /youtube-formats, /youtube-media. | x88: batch export respects selection + preset-aware video render — "Export selected as video" renders .webm per selected clip at its preset aspect ratio (9:16/1:1/16:9); fallback selection→approved→all; metadata (.txt) export kept as secondary. Fix stray /span> text below batch-export button. | x87: clip length range widened — 5s floor (viral reactions, one-liners) to 1800s / 30min ceiling (full topic arcs); removed rigid length-mix prompt in favor of idea-first sizing | x86: clip preview no-autoplay — remove YouTube loop=1&playlist (fixes whole-video loop), remove autoPlay on uploaded video, preview now shows clip-only paused state until user clicks play | x85: Phase B.1 — persist chapters on description-fallback, surface worker errors, transcript-source chip, length-variance prompt, analyzeLocal intro-skip, **remove dead RepurposeAnalyzer + RepurposeRealAnalyze god-mode components** | x84: Phase B — YT chapter-boundary detection (parseYouTubeChapters in worker; analyzeLocal uses chapter spans as candidate windows when ≥3 chapters; Claude receives chapter list for boundary alignment) + Web Audio energy analyzer (analyzeUploadedVideoAudio: 8x scrub AudioContext RMS scan on uploaded files; peaks boost analyzeLocal virality by +5*peakDensity) | x83: Smart Clipping v2 — two-stage viral detection + topic-boundary awareness + variable 30-180s clip length + unified Generate flow + target default 10 (range 3-20) | x82: preview fix — CSP frame-src, youtube-nocookie embed, thumbnail fallback | x80: Smart Clipping — viral moment detection. Worker /youtube-transcript returns segments[{t,d,text}]. analyzeViaClaude uses timestamped transcript with 4-dimension scoring (hook_power/emotional_impact/quotability/surprise_drama). analyzeLocal scores ~45-75s windows, picks top N with spatial diversity across full duration. YT iframe autoplay+loop within clip range; uploaded video autoplay muted with loop-on-end.
+/* Zaidsaid — app.js v2.0 — x101: Repurpose — clip boundaries now capture COMPLETE thoughts. Three-layer fix: (1) analyzeViaClaude tool schema now requires an `arc` field with setup / reveal / payoff descriptions + payoff_end timestamp — Claude must identify where the payoff sentence ends, not just hand-wave about "complete thoughts"; (2) system prompt hardened with an explicit example of the Move 37 failure pattern (ending on "...had a machine beaten one of the best human players two games in a row, it" mid-clause) paired with the corrected version ending on the "2,000 years of strategy" payoff; (3) new snapClipBoundaries() runs after Claude returns, walking the segment list forward from clip.end to the next true sentence terminator (no dangling conj./pronoun) within 30s, and backing clip.start to the current sentence's start if it lands mid-sentence. Result: clip.end is guaranteed to sit on a period/!/? and the payoff beat is guaranteed present. Also adds a "Fix cuts" toolbar chip that re-snaps already-generated clips against the current transcript — no regeneration needed for existing projects. | x100: Share → YouTube now auto-generates an optimized metadata bundle (title / description / hashtags / SEO tags / thumbnail idea) via Claude Sonnet 4.6 using (a) the clip hook + caption + preset + virality score, (b) the surrounding transcript window, and (c) live trending context pulled from /trends/{google,reddit,hn,x}. A ShareMetadataModal renders the bundle with per-field Copy buttons so the user can paste each field into YouTube Studio's Details panel. Video download now goes through the hidden-tab-safe recordClipViaCaptureStream → reencodeWebmToPresetMP4 pipeline from x99f instead of the broken renderClipVideoFromUpload — shares produce real 1080p H.264 MP4 files. | x99f: batch export rebuilt as two-pass (captureStream → ffmpeg), works in hidden tabs + outputs 1080p H.264 MP4. Root cause of the 0-byte downloads: x99d/e's renderClipVideoFromUpload drives canvas.drawImage via requestAnimationFrame, and rAF throttles to ~1 Hz as soon as the tab loses focus. canvas.captureStream() then emits ≤1 frame/sec, MediaRecorder packs a 1-frame blob, and the user gets a .webm that won't play. Fix (a) recordClipViaCaptureStream plays the uploaded source muted and pipes `<video>.captureStream()` straight into MediaRecorder — video playback + MediaStream tracks are NOT bound by rAF, so this keeps running in hidden/backgrounded tabs; (b) reencodeWebmToPresetMP4 uses ffmpeg.wasm to scale+pad the VP9 recording to the target preset and encode libx264 at CRF 20 for real 1080p H.264 MP4 output — ffmpeg.wasm decodes VP9 fine (only AV1 from the raw YouTube MP4 was the blind spot). Also bumped downloadBlob's revokeObjectURL delay from 500 ms → 60 s so Chrome's download manager isn't cut off mid-write on big blobs. Overlay burn-in dropped from batch export — per-clip "Render video" chip still has it for single previews. | x99e: fix autoplay block in renderClipVideoFromUpload. The canvas/MediaRecorder render created a fresh <video src={blob}>, seeked, then called `src.play()` — but with `muted=false`, Chrome's autoplay policy threw `NotAllowedError: play() failed because the user didn't interact with the document first` once the original user gesture was consumed by the async awaits. Setting `muted=true` lets play() succeed without a gesture; the audio is still captured via `<video>.captureStream()` since muted only gates speaker output, not decoded audio tracks. | x99d: fix 0-byte batch export on AV1 sources. YouTube's progressive MP4s are AV1; cutClipFromSource's `-c copy` preserved that codec, then reencodeClipForPreset (libx264 transcode) silently failed because ffmpeg.wasm 5.1.4 has no AV1 decoder (config lacks libdav1d). ffmpeg.exec returned exit=1 but the old code ignored it, readFile returned 0 bytes, and we shipped empty MP4s. Fix (a) exportClipsAsVideo now prefers renderClipVideoFromUpload (canvas + MediaRecorder, uses browser-native AV1 decoding via <video>) on the uploaded source, falling back to the ffmpeg per-clip re-encode only when that fails; (b) reencodeClipForPreset now throws on non-zero exit or 0-byte output instead of returning an empty blob. Trade-off: outputs are .webm VP9/VP8 at 720p (renderClipVideoFromUpload dims) rather than .mp4 H.264 1080p; acceptable for the MVP, bigger resolution is an easy follow-up. | x99c: switch ffmpeg core from UMD to ESM. @ffmpeg/ffmpeg@0.12.10's worker.js is always instantiated as `{type:"module"}`, and module Workers can't call `importScripts`, so worker.js falls through to `await import(coreURL)`. The UMD build registers `self.createFFmpegCore` as a side effect but has no ESM `default` export, so the worker throws `ERROR_IMPORT_FAILURE`. Using `/esm/ffmpeg-core.js` (which has a proper default export) lets the module import complete. | x99b: self-host @ffmpeg/ffmpeg + @ffmpeg/util. Chrome refuses to construct a Worker from a cross-origin URL, CSP or CORS headers notwithstanding; @ffmpeg/ffmpeg@0.12.10 does `new Worker(new URL("./worker.js", import.meta.url), {type:"module"})` relative to its own module URL, so loading it from unpkg makes the Worker cross-origin and it throws `Failed to construct 'Worker': Script … cannot be accessed from origin 'https://zaidsaid.com'`. The ESM bundle now lives in ./vendor/{ffmpeg,util}/esm/. @ffmpeg/core WASM still loads from unpkg via toBlobURL (blob: URLs are same-origin from the Worker's perspective). | x99: tried adding `https://unpkg.com` to CSP `worker-src` — necessary but not sufficient, Chrome still blocked the cross-origin worker. | x98: Phase D — trending-context scoring. Worker routes /trends/{google,reddit,hn,x} (HN + Reddit + Google free; X via Apify needs APIFY_TOKEN). Client extracts 3-8 topic keywords via Claude tool_use, fetches trend matches, folds into analyzeViaClaudeTwoStage with convergent-attention boost. | x97: Phase C — multi-modal virality signals. WebCodecs scene-cut detection in-browser; /gemini-video-highlights worker route (Gemini 2.5 Flash, graceful no-key); /sensevoice worker route (Replicate SenseVoice for laughter/applause, graceful no-key). Claude scoring extended to boost clips matching ≥2 signal types. | x96: Phase E — preset-aware per-clip re-encoding via ffmpeg.wasm (scale+pad for 9:16/1:1/16:9) + JSZip batch download when multiple clips selected. Replaces the old MediaRecorder .webm pipeline for clips that have a per-clip mp4 blob. | x95: Phase B UI cleanup: collapsed intake to URL/File, folded YT downloader into URL expandable, per-clip actions 9→3, removed fake waveform, toolbar pruned. | x94: clear stale clips at Generate start + narrow reseed effect so demo doesn't overwrite a user's upload on refresh. | x93: Repurpose — real per-clip mp4 cuts + thumbnail frames. cutClipFromSource (ffmpeg.wasm, -ss after -i, -c copy with libx264 fallback <5 min) + grabFrameThumb (off-DOM canvas) + generateClipAssets (sequential, IDB-backed). processSource fires generateClipAssets after setProject for upload flows. RepurposeTab hydrates clipBlobUrls Map from IDB on mount; RepurposeClipPreview shows pre-cut <video controls> when blob ready. removeClip deletes IDB entries + revokes URLs. | x92: Repurpose — big videos extract audio client-side before transcribing. Lazy-loads ffmpeg.wasm (@ffmpeg/ffmpeg@0.12.10 + @ffmpeg/core@0.12.6 from unpkg, ~30 MB one-time); any uploaded video >50 MB is reduced to mono 16 kHz 32 kbps MP3 (~14 MB/hr) before POSTing to /elevenlabs/v1/speech-to-text. Fixes 700+ MB uploads hanging on the Cloudflare Worker 500 MiB body limit. CSP widened for wasm-unsafe-eval, blob: workers, and unpkg connect. | x91: Repurpose — uploaded files now survive page refreshes. New IndexedDB blob store (zaidsaid/uploads, key repurpose:current) persists the File on upload; RepurposeTab useEffect on mount HEAD-checks the existing blob URL and rehydrates from IDB when it's dead, or clears the dangling reference + toasts "please re-upload" when IDB is empty too. processSource now reads the blob from IDB first, falling back to the blob URL. Remove button deletes the IDB entry. | x90: Repurpose — uploads now actually clip. processSource gate no longer bails on empty source when an uploaded video is present; on new file upload we clear stale transcript/chapters/clips/name; uploaded videos without a transcript auto-transcribe via ElevenLabs Scribe (/elevenlabs/v1/speech-to-text with model_id=scribe_v1, word-level timestamps grouped into ~6s segments) and feed the existing two-stage viral analyzer. New fuchsia "ElevenLabs Scribe (auto-transcribed)" source chip. | x89: Repurpose — YouTube downloader tool (paste URL → fetch progressive formats via worker InnerTube → quality dropdown → File System Access folder picker with streamed writable, falls back to <a download> when unsupported). Worker: /youtube-formats, /youtube-media. | x88: batch export respects selection + preset-aware video render — "Export selected as video" renders .webm per selected clip at its preset aspect ratio (9:16/1:1/16:9); fallback selection→approved→all; metadata (.txt) export kept as secondary. Fix stray /span> text below batch-export button. | x87: clip length range widened — 5s floor (viral reactions, one-liners) to 1800s / 30min ceiling (full topic arcs); removed rigid length-mix prompt in favor of idea-first sizing | x86: clip preview no-autoplay — remove YouTube loop=1&playlist (fixes whole-video loop), remove autoPlay on uploaded video, preview now shows clip-only paused state until user clicks play | x85: Phase B.1 — persist chapters on description-fallback, surface worker errors, transcript-source chip, length-variance prompt, analyzeLocal intro-skip, **remove dead RepurposeAnalyzer + RepurposeRealAnalyze god-mode components** | x84: Phase B — YT chapter-boundary detection (parseYouTubeChapters in worker; analyzeLocal uses chapter spans as candidate windows when ≥3 chapters; Claude receives chapter list for boundary alignment) + Web Audio energy analyzer (analyzeUploadedVideoAudio: 8x scrub AudioContext RMS scan on uploaded files; peaks boost analyzeLocal virality by +5*peakDensity) | x83: Smart Clipping v2 — two-stage viral detection + topic-boundary awareness + variable 30-180s clip length + unified Generate flow + target default 10 (range 3-20) | x82: preview fix — CSP frame-src, youtube-nocookie embed, thumbnail fallback | x80: Smart Clipping — viral moment detection. Worker /youtube-transcript returns segments[{t,d,text}]. analyzeViaClaude uses timestamped transcript with 4-dimension scoring (hook_power/emotional_impact/quotability/surprise_drama). analyzeLocal scores ~45-75s windows, picks top N with spatial diversity across full duration. YT iframe autoplay+loop within clip range; uploaded video autoplay muted with loop-on-end.
  * Security: localStorage namespaced as zaidsaid.v2.*, error boundary, no innerHTML, no eval, no fetch.
  * Archived v1 seed data preserved under ARCHIVE_* for later reuse.
  */
@@ -1151,10 +1151,65 @@ const parsePastedTranscript = (text) => {
 // x80: MVP-F — Viral clip detection via Claude with timestamped segments + 4-dimension scoring
 // x84: accepts optional chapters [{t,title}] and audioMap for Phase B signals.
 // x98: accepts optional signals {audioEvents, scenes, visualHighlights, trendingMatches} for Phase C/D.
+// x101: Snap clip boundaries to completed thoughts. The LLM frequently sets clip.end
+// at a tick that splits the payoff sentence in half ("revealed an entirely new strategy
+// that no human had even…" — cuts off mid-clause). We walk the segment list around
+// the LLM's chosen end forward until we hit a true sentence terminator, capped at
+// maxExtendEnd seconds. Similarly back up from clip.start if it lands mid-sentence.
+const SENTENCE_END_RE = /[.!?…][\s"'")\]]*$/;
+const INCOMPLETE_CONJ_RE = /\b(but|and|because|so|that|which|when|if|while|although|though|as|with|to|of|for|in|on|at|it|its|this|these|those|was|were|had|has|have|will|would|could|should|may|might)\s*$/i;
+
+const snapClipBoundaries = (clip, segments, opts) => {
+  if(!Array.isArray(segments) || segments.length === 0) return clip;
+  const maxExtendEnd = (opts && opts.maxExtendEnd != null) ? opts.maxExtendEnd : 25;
+  const maxBackStart = (opts && opts.maxBackStart != null) ? opts.maxBackStart : 6;
+  const start = Number(clip.start) || 0;
+  const end = Number(clip.end) || (start + 60);
+
+  // END SNAP — walk forward through segments until one ends with a terminator AND
+  // doesn't trail into a dangling conjunction, capped at maxExtendEnd.
+  let idx = segments.findIndex(s => (s.t + (s.d || 0)) >= end);
+  if(idx < 0) idx = segments.length - 1;
+  let newEnd = end;
+  for(let i = idx; i < segments.length; i++){
+    const s = segments[i];
+    const segEnd = s.t + (s.d || 0);
+    if(segEnd - end > maxExtendEnd) break;
+    const txt = String(s.text || '').trim();
+    newEnd = Math.max(newEnd, segEnd);
+    const terminated = SENTENCE_END_RE.test(txt);
+    const danglingConj = INCOMPLETE_CONJ_RE.test(txt);
+    if(terminated && !danglingConj) break;
+  }
+  // Small tail buffer so TTS doesn't chomp the last consonant.
+  newEnd = Math.min(newEnd + 0.25, (segments[segments.length-1].t + (segments[segments.length-1].d||0)));
+
+  // START SNAP — if clip.start lands mid-sentence (previous segment doesn't end
+  // with a terminator), back up to the start of the current sentence. Helps the
+  // viewer catch the subject of the hook.
+  let startIdx = segments.findIndex(s => s.t <= start && (s.t + (s.d || 0)) > start);
+  if(startIdx < 0) startIdx = segments.findIndex(s => s.t >= start);
+  if(startIdx > 0){
+    let newStart = segments[startIdx].t;
+    for(let i = startIdx - 1; i >= 0; i--){
+      if(start - segments[i].t > maxBackStart) break;
+      const prevTxt = String(segments[i].text || '').trim();
+      if(SENTENCE_END_RE.test(prevTxt) && !INCOMPLETE_CONJ_RE.test(prevTxt)){
+        // Prior segment ends cleanly — the current segment is the start of a new
+        // sentence. Leave the start where it is.
+        break;
+      }
+      newStart = segments[i].t;
+    }
+    clip = { ...clip, start: Math.max(0, +newStart.toFixed(2)) };
+  }
+  return { ...clip, end: +newEnd.toFixed(2) };
+};
+
 const analyzeViaClaude = async (proxyUrl, sourceText, targetCount, segments, meta, chapters, audioMap, signals) => {
   const tools = [{
     name:'emit_clips',
-    description:'Return the N best viral short-form clip candidates with 4-dimension scoring.',
+    description:'Return the N best viral short-form clip candidates with 4-dimension scoring and full thought arcs.',
     input_schema:{
       type:'object',
       properties:{
@@ -1166,15 +1221,26 @@ const analyzeViaClaude = async (proxyUrl, sourceText, targetCount, segments, met
               title:{type:'string', description:'Punchy 3-8 word title'},
               hook:{type:'string', description:'Exact opening line from the transcript that pulls viewers in'},
               caption:{type:'string', description:'1-sentence social caption summarizing the clip'},
-              start:{type:'number', description:'Clip start time in seconds'},
-              end:{type:'number', description:'Clip end time in seconds'},
+              start:{type:'number', description:'Clip start time in seconds — aligned to the first word of the hook sentence, NEVER mid-sentence'},
+              end:{type:'number', description:'Clip end time in seconds — aligned to the last word of the payoff sentence (the one at arc.payoff_end). NEVER end mid-sentence or before the payoff completes. Verify: the transcript token immediately before clip.end ends with a period, exclamation, or question mark.'},
+              arc:{
+                type:'object',
+                description:'The clip is a complete narrative arc. Identify the three beats so boundaries capture the whole idea.',
+                properties:{
+                  setup:{type:'string', description:"One-line description of the setup beat (context/stakes)"},
+                  reveal:{type:'string', description:"One-line description of the reveal/turn beat (the thing that happens or the core claim)"},
+                  payoff:{type:'string', description:"One-line description of the payoff beat (why it matters, the punchline, the lesson, the resolution)"},
+                  payoff_end:{type:'number', description:"Timestamp in seconds where the payoff sentence ENDS (hits a period/!/?). clip.end must be >= this."}
+                },
+                required:['setup','reveal','payoff','payoff_end']
+              },
               hook_power:{type:'number', description:'0-10: does the opening demand attention?'},
               emotional_impact:{type:'number', description:'0-10: shock, excitement, controversy, vulnerability'},
               quotability:{type:'number', description:'0-10: standalone memorable phrase'},
               surprise_drama:{type:'number', description:'0-10: unexpected reveal, conflict, or twist'},
               preset:{type:'string', enum:['vertical','square','landscape']}
             },
-            required:['title','hook','caption','start','end','hook_power','emotional_impact','quotability','surprise_drama','preset']
+            required:['title','hook','caption','start','end','arc','hook_power','emotional_impact','quotability','surprise_drama','preset']
           }
         }
       },
@@ -1199,14 +1265,17 @@ const analyzeViaClaude = async (proxyUrl, sourceText, targetCount, segments, met
       '- visualHighlights: [{t, d, reason, mood}] — model-identified dynamic moments\n\n' +
       'When a candidate clip window aligns with ≥2 distinct signal types (e.g., scene cut + laughter), boost its virality by 8. When it matches a mood of {funny, shocking, emotional, dramatic}, additionally boost by 5.'
     : '';
-  const sys = 'You are a viral short-form video strategist extracting TikTok/Reels/Shorts clips from long-form content. For each clip you pick:\n\n' +
-    '(a) TOPIC BOUNDARY — Identify the EXACT transcript segment where the viral moment\'s conversation/thought begins (usually a hook line, topic shift, or question). Identify where the thought concludes (answer, punchline, resolution, or topic change). Set clip.start and clip.end to those exact timestamps so the clip captures the COMPLETE thought — never cut mid-sentence, never start mid-answer.\n\n' +
-    '(b) LENGTH — pick to match the idea, no target length. Valid range: 5 seconds (a single viral reaction, one-liner, or beat drop) to 1800 seconds / 30 minutes (a full topic arc, extended story, or complete discussion). Guidance: viral hooks are often 30-90s, full thoughts 2-5min, deep segments 10-30min. Never pad. A 7-second perfect moment beats a 60-second padded one. A 20-minute complete arc beats a chopped 3-minute excerpt. Trust the content — if the idea finishes at 12 seconds, end the clip at 12 seconds.\n\n' +
-    '(c) SELF-CONTAINED — the viewer sees this cold. It must make sense without any prior context.\n\n' +
-    '(d) HOOK + PAYOFF — opens with a hook (question, bold claim, conflict, or surprising fact) and closes on a payoff (answer, punchline, or resolution).\n\n' +
+  const sys = 'You are a viral short-form video strategist extracting TikTok/Reels/Shorts clips from long-form content. The clips you return are what ship to the user — poor boundaries are unusable. Your single most important job is capturing COMPLETE thoughts, not snippets.\n\n' +
+    '(a) COMPLETE THOUGHT — Every clip is a three-beat arc: SETUP (context/stakes) → REVEAL (the claim, event, or turn) → PAYOFF (why it matters, the punchline, the resolution, the stat that lands). For each clip you MUST fill arc.setup / arc.reveal / arc.payoff with one-line descriptions, and arc.payoff_end with the exact second the PAYOFF SENTENCE ends (where the speaker hits a period / ! / ?). clip.end MUST be >= arc.payoff_end. Never end the clip mid-sentence, mid-clause, or on a conjunction/pronoun. If you are unsure a clip has a real payoff, do not return it. Common failure mode: hearing a strong hook, extending 20-30s, and cutting before the speaker delivers the line that makes the hook worth it. Do not do that. The payoff is the reason the clip exists.\n\n' +
+    '(b) BOUNDARY DISCIPLINE — clip.start must align to the first word of the setup sentence (or the hook sentence if the clip starts directly on the hook). clip.end must align to the last word of the payoff sentence — the transcript token right before clip.end should end with a period, exclamation, or question mark. Never cut on "...and", "...but", "...it", "...that", "...which", etc.\n\n' +
+    '(c) LENGTH — pick to match the idea, no target length. Valid range: 5 seconds (a single viral reaction or beat drop) to 1800 seconds / 30 minutes (a full topic arc). Viral hooks are often 45-120s, full thoughts 2-5min, deep segments 10-30min. A 90s clip that completes the idea beats a 25s clip that cuts off the payoff every time. Add 5-15s of tail rather than cut short.\n\n' +
+    '(d) SELF-CONTAINED — the viewer sees this cold. It must make sense without any prior context.\n\n' +
     '(e) DISTRIBUTE — clips must span DIFFERENT moments across the full video. Do not cluster near the start.\n\n' +
+    '(f) SKIP INTROS — Never set clip.start before the first substantive content. Skip boilerplate intros, sponsor reads, \'welcome back\', table of contents, and podcast cold-opens. If chapter[0] title contains intro/welcome/sponsor/start, begin picks from chapter[1].\n\n' +
     'Score each clip 0-10 on: hook_power, emotional_impact, quotability, surprise_drama. Return ONLY via emit_clips tool.\n\n' +
-    '(g) SKIP INTROS — Never set clip.start before the first substantive content. Skip boilerplate intros, sponsor reads, \'welcome back\', table of contents, and podcast cold-opens. If chapter[0] title contains intro/welcome/sponsor/start, begin picks from chapter[1].' +
+    'EXAMPLE of the failure to avoid:\n' +
+    '  BAD: start=215, end=240, hook="That single move, later known as Move 37, would reshape the game of Go", ends on "...Not only had a machine beaten one of the best human players two games in a row, it" — cuts off mid-clause, no payoff.\n' +
+    '  GOOD: start=215, end=246.5, arc.payoff_end=246.2, ends on "...had also revealed an entirely new strategy that no human had even considered in more than 2,000 years." — complete sentence, the stat is the payoff that lands.' +
     chapSysAddendum + signalsSysAddendum;
   const signalsUserBlock = hasSignals
     ? '\n\nMulti-modal signals:\n' +
@@ -1256,9 +1325,18 @@ const analyzeViaClaude = async (proxyUrl, sourceText, targetCount, segments, met
     const qu = Math.max(0,Math.min(10,Number(c.quotability)||0));
     const sd = Math.max(0,Math.min(10,Number(c.surprise_drama)||0));
     const baseVirality = Math.round((hp*0.35 + ei*0.30 + qu*0.20 + sd*0.15) * 10);
-    const start = Math.max(0, Number(c.start)||0);
-    let end = Number(c.end)||start+60;
-    if(end <= start) end = start + 60;
+    const rawStart = Math.max(0, Number(c.start)||0);
+    let rawEnd = Number(c.end)||rawStart+60;
+    if(rawEnd <= rawStart) rawEnd = rawStart + 60;
+    // x101: honor arc.payoff_end if the LLM provided it and the declared end falls short.
+    const arc = c.arc && typeof c.arc === 'object' ? c.arc : null;
+    if(arc && Number(arc.payoff_end) > rawEnd){
+      rawEnd = Math.min(rawStart + 1800, Number(arc.payoff_end) + 0.5);
+    }
+    // Snap to sentence boundaries so we never cut off the payoff or start mid-clause.
+    const snapped = snapClipBoundaries({ start: rawStart, end: rawEnd }, segments, { maxExtendEnd: 30, maxBackStart: 6 });
+    let start = snapped.start;
+    let end = snapped.end;
     if(end - start > 1800) end = start + 1800;
     if(end - start < 5) end = start + 5;
     let virality = baseVirality;
@@ -1294,6 +1372,12 @@ const analyzeViaClaude = async (proxyUrl, sourceText, targetCount, segments, met
       end: +end.toFixed(2),
       virality,
       scores: { hook_power: hp, emotional_impact: ei, quotability: qu, surprise_drama: sd },
+      arc: arc ? {
+        setup: String(arc.setup||'').slice(0,200),
+        reveal: String(arc.reveal||'').slice(0,200),
+        payoff: String(arc.payoff||'').slice(0,200),
+        payoff_end: Number(arc.payoff_end) || null
+      } : null,
       preset:['vertical','square','landscape'].includes(c.preset)?c.preset:'vertical',
       status:'draft'
     };
@@ -6702,6 +6786,19 @@ const removeClip = (clipId) => {
               <div className="text-lg font-semibold">{project.clips.length} clips · top pick {Math.max(...project.clips.map(c=>c.virality))} virality</div>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
+              <button className="chip" onClick={() => {
+                const segs = project.transcriptSegments || [];
+                if(segs.length === 0){ toast("No transcript segments to snap against", "warn"); return; }
+                let changed = 0;
+                const snapped = project.clips.map(c => {
+                  const s = snapClipBoundaries({ start: c.start, end: c.end }, segs, { maxExtendEnd: 30, maxBackStart: 6 });
+                  if(Math.abs(s.start - c.start) > 0.05 || Math.abs(s.end - c.end) > 0.05){ changed++; return { ...c, start: s.start, end: s.end }; }
+                  return c;
+                });
+                if(changed === 0){ toast("All clips already aligned to sentence boundaries", "info"); return; }
+                setProject(p => ({ ...p, clips: snapped }));
+                toast("Re-snapped " + changed + " clip" + (changed===1?'':'s') + " to complete thoughts", "success");
+              }} disabled={!project.clips || project.clips.length===0}>Fix cuts</button>
               <button className="chip" onClick={generateAllCaptions} disabled={captionsBusy || !project.clips || project.clips.length===0}>{captionsBusy ? "Generating…" : "Generate captions"}</button>
               {captionsSource && (
                 <span className={"chip " + (captionsSource === "claude" ? "text-emerald-200 !border-emerald-400/30 bg-emerald-500/10" : "text-sky-200 !border-sky-400/30 bg-sky-500/10")}>{captionsSource === "claude" ? "Claude" : "Local"}</span>
