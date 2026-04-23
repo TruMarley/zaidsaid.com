@@ -1,4 +1,4 @@
-/* Zaidsaid — app.js v2.0 — x99f: Repurpose — batch export rebuilt as two-pass (captureStream → ffmpeg), works in hidden tabs + outputs 1080p H.264 MP4. Root cause of the 0-byte downloads: x99d/e's renderClipVideoFromUpload drives canvas.drawImage via requestAnimationFrame, and rAF throttles to ~1 Hz as soon as the tab loses focus. canvas.captureStream() then emits ≤1 frame/sec, MediaRecorder packs a 1-frame blob, and the user gets a .webm that won't play. Fix (a) recordClipViaCaptureStream plays the uploaded source muted and pipes `<video>.captureStream()` straight into MediaRecorder — video playback + MediaStream tracks are NOT bound by rAF, so this keeps running in hidden/backgrounded tabs; (b) reencodeWebmToPresetMP4 uses ffmpeg.wasm to scale+pad the VP9 recording to the target preset and encode libx264 at CRF 20 for real 1080p H.264 MP4 output — ffmpeg.wasm decodes VP9 fine (only AV1 from the raw YouTube MP4 was the blind spot). Also bumped downloadBlob's revokeObjectURL delay from 500 ms → 60 s so Chrome's download manager isn't cut off mid-write on big blobs. Overlay burn-in dropped from batch export — per-clip "Render video" chip still has it for single previews. | x99e: fix autoplay block in renderClipVideoFromUpload. The canvas/MediaRecorder render created a fresh <video src={blob}>, seeked, then called `src.play()` — but with `muted=false`, Chrome's autoplay policy threw `NotAllowedError: play() failed because the user didn't interact with the document first` once the original user gesture was consumed by the async awaits. Setting `muted=true` lets play() succeed without a gesture; the audio is still captured via `<video>.captureStream()` since muted only gates speaker output, not decoded audio tracks. | x99d: fix 0-byte batch export on AV1 sources. YouTube's progressive MP4s are AV1; cutClipFromSource's `-c copy` preserved that codec, then reencodeClipForPreset (libx264 transcode) silently failed because ffmpeg.wasm 5.1.4 has no AV1 decoder (config lacks libdav1d). ffmpeg.exec returned exit=1 but the old code ignored it, readFile returned 0 bytes, and we shipped empty MP4s. Fix (a) exportClipsAsVideo now prefers renderClipVideoFromUpload (canvas + MediaRecorder, uses browser-native AV1 decoding via <video>) on the uploaded source, falling back to the ffmpeg per-clip re-encode only when that fails; (b) reencodeClipForPreset now throws on non-zero exit or 0-byte output instead of returning an empty blob. Trade-off: outputs are .webm VP9/VP8 at 720p (renderClipVideoFromUpload dims) rather than .mp4 H.264 1080p; acceptable for the MVP, bigger resolution is an easy follow-up. | x99c: switch ffmpeg core from UMD to ESM. @ffmpeg/ffmpeg@0.12.10's worker.js is always instantiated as `{type:"module"}`, and module Workers can't call `importScripts`, so worker.js falls through to `await import(coreURL)`. The UMD build registers `self.createFFmpegCore` as a side effect but has no ESM `default` export, so the worker throws `ERROR_IMPORT_FAILURE`. Using `/esm/ffmpeg-core.js` (which has a proper default export) lets the module import complete. | x99b: self-host @ffmpeg/ffmpeg + @ffmpeg/util. Chrome refuses to construct a Worker from a cross-origin URL, CSP or CORS headers notwithstanding; @ffmpeg/ffmpeg@0.12.10 does `new Worker(new URL("./worker.js", import.meta.url), {type:"module"})` relative to its own module URL, so loading it from unpkg makes the Worker cross-origin and it throws `Failed to construct 'Worker': Script … cannot be accessed from origin 'https://zaidsaid.com'`. The ESM bundle now lives in ./vendor/{ffmpeg,util}/esm/. @ffmpeg/core WASM still loads from unpkg via toBlobURL (blob: URLs are same-origin from the Worker's perspective). | x99: tried adding `https://unpkg.com` to CSP `worker-src` — necessary but not sufficient, Chrome still blocked the cross-origin worker. | x98: Phase D — trending-context scoring. Worker routes /trends/{google,reddit,hn,x} (HN + Reddit + Google free; X via Apify needs APIFY_TOKEN). Client extracts 3-8 topic keywords via Claude tool_use, fetches trend matches, folds into analyzeViaClaudeTwoStage with convergent-attention boost. | x97: Phase C — multi-modal virality signals. WebCodecs scene-cut detection in-browser; /gemini-video-highlights worker route (Gemini 2.5 Flash, graceful no-key); /sensevoice worker route (Replicate SenseVoice for laughter/applause, graceful no-key). Claude scoring extended to boost clips matching ≥2 signal types. | x96: Phase E — preset-aware per-clip re-encoding via ffmpeg.wasm (scale+pad for 9:16/1:1/16:9) + JSZip batch download when multiple clips selected. Replaces the old MediaRecorder .webm pipeline for clips that have a per-clip mp4 blob. | x95: Phase B UI cleanup: collapsed intake to URL/File, folded YT downloader into URL expandable, per-clip actions 9→3, removed fake waveform, toolbar pruned. | x94: clear stale clips at Generate start + narrow reseed effect so demo doesn't overwrite a user's upload on refresh. | x93: Repurpose — real per-clip mp4 cuts + thumbnail frames. cutClipFromSource (ffmpeg.wasm, -ss after -i, -c copy with libx264 fallback <5 min) + grabFrameThumb (off-DOM canvas) + generateClipAssets (sequential, IDB-backed). processSource fires generateClipAssets after setProject for upload flows. RepurposeTab hydrates clipBlobUrls Map from IDB on mount; RepurposeClipPreview shows pre-cut <video controls> when blob ready. removeClip deletes IDB entries + revokes URLs. | x92: Repurpose — big videos extract audio client-side before transcribing. Lazy-loads ffmpeg.wasm (@ffmpeg/ffmpeg@0.12.10 + @ffmpeg/core@0.12.6 from unpkg, ~30 MB one-time); any uploaded video >50 MB is reduced to mono 16 kHz 32 kbps MP3 (~14 MB/hr) before POSTing to /elevenlabs/v1/speech-to-text. Fixes 700+ MB uploads hanging on the Cloudflare Worker 500 MiB body limit. CSP widened for wasm-unsafe-eval, blob: workers, and unpkg connect. | x91: Repurpose — uploaded files now survive page refreshes. New IndexedDB blob store (zaidsaid/uploads, key repurpose:current) persists the File on upload; RepurposeTab useEffect on mount HEAD-checks the existing blob URL and rehydrates from IDB when it's dead, or clears the dangling reference + toasts "please re-upload" when IDB is empty too. processSource now reads the blob from IDB first, falling back to the blob URL. Remove button deletes the IDB entry. | x90: Repurpose — uploads now actually clip. processSource gate no longer bails on empty source when an uploaded video is present; on new file upload we clear stale transcript/chapters/clips/name; uploaded videos without a transcript auto-transcribe via ElevenLabs Scribe (/elevenlabs/v1/speech-to-text with model_id=scribe_v1, word-level timestamps grouped into ~6s segments) and feed the existing two-stage viral analyzer. New fuchsia "ElevenLabs Scribe (auto-transcribed)" source chip. | x89: Repurpose — YouTube downloader tool (paste URL → fetch progressive formats via worker InnerTube → quality dropdown → File System Access folder picker with streamed writable, falls back to <a download> when unsupported). Worker: /youtube-formats, /youtube-media. | x88: batch export respects selection + preset-aware video render — "Export selected as video" renders .webm per selected clip at its preset aspect ratio (9:16/1:1/16:9); fallback selection→approved→all; metadata (.txt) export kept as secondary. Fix stray /span> text below batch-export button. | x87: clip length range widened — 5s floor (viral reactions, one-liners) to 1800s / 30min ceiling (full topic arcs); removed rigid length-mix prompt in favor of idea-first sizing | x86: clip preview no-autoplay — remove YouTube loop=1&playlist (fixes whole-video loop), remove autoPlay on uploaded video, preview now shows clip-only paused state until user clicks play | x85: Phase B.1 — persist chapters on description-fallback, surface worker errors, transcript-source chip, length-variance prompt, analyzeLocal intro-skip, **remove dead RepurposeAnalyzer + RepurposeRealAnalyze god-mode components** | x84: Phase B — YT chapter-boundary detection (parseYouTubeChapters in worker; analyzeLocal uses chapter spans as candidate windows when ≥3 chapters; Claude receives chapter list for boundary alignment) + Web Audio energy analyzer (analyzeUploadedVideoAudio: 8x scrub AudioContext RMS scan on uploaded files; peaks boost analyzeLocal virality by +5*peakDensity) | x83: Smart Clipping v2 — two-stage viral detection + topic-boundary awareness + variable 30-180s clip length + unified Generate flow + target default 10 (range 3-20) | x82: preview fix — CSP frame-src, youtube-nocookie embed, thumbnail fallback | x80: Smart Clipping — viral moment detection. Worker /youtube-transcript returns segments[{t,d,text}]. analyzeViaClaude uses timestamped transcript with 4-dimension scoring (hook_power/emotional_impact/quotability/surprise_drama). analyzeLocal scores ~45-75s windows, picks top N with spatial diversity across full duration. YT iframe autoplay+loop within clip range; uploaded video autoplay muted with loop-on-end.
+/* Zaidsaid — app.js v2.0 — x100: Repurpose — Share → YouTube now auto-generates an optimized metadata bundle (title / description / hashtags / SEO tags / thumbnail idea) via Claude Sonnet 4.6 using (a) the clip hook + caption + preset + virality score, (b) the surrounding transcript window, and (c) live trending context pulled from /trends/{google,reddit,hn,x}. A ShareMetadataModal renders the bundle with per-field Copy buttons so the user can paste each field into YouTube Studio's Details panel. Video download now goes through the hidden-tab-safe recordClipViaCaptureStream → reencodeWebmToPresetMP4 pipeline from x99f instead of the broken renderClipVideoFromUpload — shares produce real 1080p H.264 MP4 files. | x99f: batch export rebuilt as two-pass (captureStream → ffmpeg), works in hidden tabs + outputs 1080p H.264 MP4. Root cause of the 0-byte downloads: x99d/e's renderClipVideoFromUpload drives canvas.drawImage via requestAnimationFrame, and rAF throttles to ~1 Hz as soon as the tab loses focus. canvas.captureStream() then emits ≤1 frame/sec, MediaRecorder packs a 1-frame blob, and the user gets a .webm that won't play. Fix (a) recordClipViaCaptureStream plays the uploaded source muted and pipes `<video>.captureStream()` straight into MediaRecorder — video playback + MediaStream tracks are NOT bound by rAF, so this keeps running in hidden/backgrounded tabs; (b) reencodeWebmToPresetMP4 uses ffmpeg.wasm to scale+pad the VP9 recording to the target preset and encode libx264 at CRF 20 for real 1080p H.264 MP4 output — ffmpeg.wasm decodes VP9 fine (only AV1 from the raw YouTube MP4 was the blind spot). Also bumped downloadBlob's revokeObjectURL delay from 500 ms → 60 s so Chrome's download manager isn't cut off mid-write on big blobs. Overlay burn-in dropped from batch export — per-clip "Render video" chip still has it for single previews. | x99e: fix autoplay block in renderClipVideoFromUpload. The canvas/MediaRecorder render created a fresh <video src={blob}>, seeked, then called `src.play()` — but with `muted=false`, Chrome's autoplay policy threw `NotAllowedError: play() failed because the user didn't interact with the document first` once the original user gesture was consumed by the async awaits. Setting `muted=true` lets play() succeed without a gesture; the audio is still captured via `<video>.captureStream()` since muted only gates speaker output, not decoded audio tracks. | x99d: fix 0-byte batch export on AV1 sources. YouTube's progressive MP4s are AV1; cutClipFromSource's `-c copy` preserved that codec, then reencodeClipForPreset (libx264 transcode) silently failed because ffmpeg.wasm 5.1.4 has no AV1 decoder (config lacks libdav1d). ffmpeg.exec returned exit=1 but the old code ignored it, readFile returned 0 bytes, and we shipped empty MP4s. Fix (a) exportClipsAsVideo now prefers renderClipVideoFromUpload (canvas + MediaRecorder, uses browser-native AV1 decoding via <video>) on the uploaded source, falling back to the ffmpeg per-clip re-encode only when that fails; (b) reencodeClipForPreset now throws on non-zero exit or 0-byte output instead of returning an empty blob. Trade-off: outputs are .webm VP9/VP8 at 720p (renderClipVideoFromUpload dims) rather than .mp4 H.264 1080p; acceptable for the MVP, bigger resolution is an easy follow-up. | x99c: switch ffmpeg core from UMD to ESM. @ffmpeg/ffmpeg@0.12.10's worker.js is always instantiated as `{type:"module"}`, and module Workers can't call `importScripts`, so worker.js falls through to `await import(coreURL)`. The UMD build registers `self.createFFmpegCore` as a side effect but has no ESM `default` export, so the worker throws `ERROR_IMPORT_FAILURE`. Using `/esm/ffmpeg-core.js` (which has a proper default export) lets the module import complete. | x99b: self-host @ffmpeg/ffmpeg + @ffmpeg/util. Chrome refuses to construct a Worker from a cross-origin URL, CSP or CORS headers notwithstanding; @ffmpeg/ffmpeg@0.12.10 does `new Worker(new URL("./worker.js", import.meta.url), {type:"module"})` relative to its own module URL, so loading it from unpkg makes the Worker cross-origin and it throws `Failed to construct 'Worker': Script … cannot be accessed from origin 'https://zaidsaid.com'`. The ESM bundle now lives in ./vendor/{ffmpeg,util}/esm/. @ffmpeg/core WASM still loads from unpkg via toBlobURL (blob: URLs are same-origin from the Worker's perspective). | x99: tried adding `https://unpkg.com` to CSP `worker-src` — necessary but not sufficient, Chrome still blocked the cross-origin worker. | x98: Phase D — trending-context scoring. Worker routes /trends/{google,reddit,hn,x} (HN + Reddit + Google free; X via Apify needs APIFY_TOKEN). Client extracts 3-8 topic keywords via Claude tool_use, fetches trend matches, folds into analyzeViaClaudeTwoStage with convergent-attention boost. | x97: Phase C — multi-modal virality signals. WebCodecs scene-cut detection in-browser; /gemini-video-highlights worker route (Gemini 2.5 Flash, graceful no-key); /sensevoice worker route (Replicate SenseVoice for laughter/applause, graceful no-key). Claude scoring extended to boost clips matching ≥2 signal types. | x96: Phase E — preset-aware per-clip re-encoding via ffmpeg.wasm (scale+pad for 9:16/1:1/16:9) + JSZip batch download when multiple clips selected. Replaces the old MediaRecorder .webm pipeline for clips that have a per-clip mp4 blob. | x95: Phase B UI cleanup: collapsed intake to URL/File, folded YT downloader into URL expandable, per-clip actions 9→3, removed fake waveform, toolbar pruned. | x94: clear stale clips at Generate start + narrow reseed effect so demo doesn't overwrite a user's upload on refresh. | x93: Repurpose — real per-clip mp4 cuts + thumbnail frames. cutClipFromSource (ffmpeg.wasm, -ss after -i, -c copy with libx264 fallback <5 min) + grabFrameThumb (off-DOM canvas) + generateClipAssets (sequential, IDB-backed). processSource fires generateClipAssets after setProject for upload flows. RepurposeTab hydrates clipBlobUrls Map from IDB on mount; RepurposeClipPreview shows pre-cut <video controls> when blob ready. removeClip deletes IDB entries + revokes URLs. | x92: Repurpose — big videos extract audio client-side before transcribing. Lazy-loads ffmpeg.wasm (@ffmpeg/ffmpeg@0.12.10 + @ffmpeg/core@0.12.6 from unpkg, ~30 MB one-time); any uploaded video >50 MB is reduced to mono 16 kHz 32 kbps MP3 (~14 MB/hr) before POSTing to /elevenlabs/v1/speech-to-text. Fixes 700+ MB uploads hanging on the Cloudflare Worker 500 MiB body limit. CSP widened for wasm-unsafe-eval, blob: workers, and unpkg connect. | x91: Repurpose — uploaded files now survive page refreshes. New IndexedDB blob store (zaidsaid/uploads, key repurpose:current) persists the File on upload; RepurposeTab useEffect on mount HEAD-checks the existing blob URL and rehydrates from IDB when it's dead, or clears the dangling reference + toasts "please re-upload" when IDB is empty too. processSource now reads the blob from IDB first, falling back to the blob URL. Remove button deletes the IDB entry. | x90: Repurpose — uploads now actually clip. processSource gate no longer bails on empty source when an uploaded video is present; on new file upload we clear stale transcript/chapters/clips/name; uploaded videos without a transcript auto-transcribe via ElevenLabs Scribe (/elevenlabs/v1/speech-to-text with model_id=scribe_v1, word-level timestamps grouped into ~6s segments) and feed the existing two-stage viral analyzer. New fuchsia "ElevenLabs Scribe (auto-transcribed)" source chip. | x89: Repurpose — YouTube downloader tool (paste URL → fetch progressive formats via worker InnerTube → quality dropdown → File System Access folder picker with streamed writable, falls back to <a download> when unsupported). Worker: /youtube-formats, /youtube-media. | x88: batch export respects selection + preset-aware video render — "Export selected as video" renders .webm per selected clip at its preset aspect ratio (9:16/1:1/16:9); fallback selection→approved→all; metadata (.txt) export kept as secondary. Fix stray /span> text below batch-export button. | x87: clip length range widened — 5s floor (viral reactions, one-liners) to 1800s / 30min ceiling (full topic arcs); removed rigid length-mix prompt in favor of idea-first sizing | x86: clip preview no-autoplay — remove YouTube loop=1&playlist (fixes whole-video loop), remove autoPlay on uploaded video, preview now shows clip-only paused state until user clicks play | x85: Phase B.1 — persist chapters on description-fallback, surface worker errors, transcript-source chip, length-variance prompt, analyzeLocal intro-skip, **remove dead RepurposeAnalyzer + RepurposeRealAnalyze god-mode components** | x84: Phase B — YT chapter-boundary detection (parseYouTubeChapters in worker; analyzeLocal uses chapter spans as candidate windows when ≥3 chapters; Claude receives chapter list for boundary alignment) + Web Audio energy analyzer (analyzeUploadedVideoAudio: 8x scrub AudioContext RMS scan on uploaded files; peaks boost analyzeLocal virality by +5*peakDensity) | x83: Smart Clipping v2 — two-stage viral detection + topic-boundary awareness + variable 30-180s clip length + unified Generate flow + target default 10 (range 3-20) | x82: preview fix — CSP frame-src, youtube-nocookie embed, thumbnail fallback | x80: Smart Clipping — viral moment detection. Worker /youtube-transcript returns segments[{t,d,text}]. analyzeViaClaude uses timestamped transcript with 4-dimension scoring (hook_power/emotional_impact/quotability/surprise_drama). analyzeLocal scores ~45-75s windows, picks top N with spatial diversity across full duration. YT iframe autoplay+loop within clip range; uploaded video autoplay muted with loop-on-end.
  * Security: localStorage namespaced as zaidsaid.v2.*, error boundary, no innerHTML, no eval, no fetch.
  * Archived v1 seed data preserved under ARCHIVE_* for later reuse.
  */
@@ -2260,6 +2260,86 @@ const fetchTrendingContext = async (base, keywords) => {
     total += r.matches.length;
     return r.matches.length > 0;
   });
+};
+
+// x100: YouTube metadata generator — pulls clip hook/caption + transcript excerpt + live
+// trending context and asks Claude to write a ready-to-publish title / description /
+// hashtags / SEO tags bundle tuned for the target format (shorts vs long).
+const generateYouTubeMetadataViaClaude = async (proxyUrl, clip, project, format) => {
+  if(!proxyUrl) throw new Error("no anthropic proxy configured");
+  const fmt = (format === "long" || format === "youtube") ? "long" : "shorts";
+  const workerBase = proxyUrl.replace(/\/anthropic\/?$/, "");
+  // Step 1: keywords + trending context (best effort; OK if trending fetches 404).
+  let trending = [];
+  try {
+    const kws = await extractTopicKeywords(proxyUrl, project.transcriptText || "", null);
+    if(kws && kws.length) trending = await fetchTrendingContext(workerBase, kws);
+  } catch(e) { console.warn("[zs] trend fetch failed for YT metadata", e); }
+  const trendingSummary = (trending || []).slice(0, 6).flatMap(r => (r.matches || []).slice(0,2).map(m => m.source + ": " + (m.title||'').slice(0,80))).slice(0, 10).join(" | ") || "none available";
+  // Step 2: build a tight transcript excerpt centered on the clip.
+  const segs = Array.isArray(project.transcriptSegments) ? project.transcriptSegments : [];
+  let excerpt = "";
+  if(segs.length){
+    const window = segs.filter(s => s.t >= (clip.start || 0) - 8 && s.t <= (clip.end || 0) + 8);
+    excerpt = window.map(s => s.text).join(" ").slice(0, 1200);
+  } else if(project.transcriptText){
+    excerpt = project.transcriptText.slice(0, 1200);
+  }
+  const durSec = Math.max(1, Math.round((clip.end || 0) - (clip.start || 0)));
+  const tool = {
+    name: "emit_youtube_metadata",
+    description: "Generate YouTube metadata bundle tuned for " + fmt + " distribution.",
+    input_schema: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: fmt === "shorts" ? "Under 70 chars, curiosity gap in the first 3-4 words, no clickbait lies, no generic intros. Emoji OK at the end if it adds." : "Under 100 chars, benefit/outcome in the first half, emoji only if it strengthens the claim." },
+        description: { type: "string", description: "First line = one-sentence hook that earns the click. Then 2-3 short paragraphs: what the clip shows, why it still matters right now, and a credit line for the original source. DO NOT include hashtags here — they go in the hashtags array." },
+        hashtags: { type: "array", items: { type: "string" }, description: "12-15 hashtags in priority order (specific → broad). No leading #. Include at least one very-broad tag (AI, tech) and at least one very-specific tag tied to the clip subject. Include 'Shorts' if format is shorts." },
+        tags: { type: "array", items: { type: "string" }, description: "8-12 longer SEO tags for YouTube's backend tag field (comma-separated when pasted). These are search phrases viewers type, distinct from hashtags." },
+        thumbnailIdea: { type: "string", description: "One-sentence description of an ideal custom thumbnail. Reference a visual from the hook moment if possible." }
+      },
+      required: ["title", "description", "hashtags", "tags", "thumbnailIdea"]
+    }
+  };
+  const system = "You write YouTube metadata that wins discovery and CTR without lying. You optimize for the specific clip provided — you never produce generic template copy. Base every claim on the clip hook/caption/transcript; if trending context overlaps the topic, weave it in naturally. Return via emit_youtube_metadata only.";
+  const userMsg = [
+    "Target format: YouTube " + (fmt === "shorts" ? "Shorts (vertical, <60s)" : "long-form (horizontal)"),
+    "Clip duration: " + durSec + "s",
+    "Source video: " + (project.name || "unknown") + (project.author ? " — by " + project.author : ""),
+    "Clip title (working): " + (clip.title || "—"),
+    "Hook (first 3s spoken): " + (clip.hook || "—"),
+    "Caption: " + (clip.caption || "—"),
+    "Virality score (0-100): " + (clip.virality || 0),
+    "Live trending overlap (now): " + trendingSummary,
+    "",
+    "Transcript around the clip:",
+    excerpt || "(no transcript available)"
+  ].join("\n");
+  const res = await fetch(proxyUrl.replace(/\/$/, "") + "/v1/messages", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: "claude-sonnet-4-6",
+      max_tokens: 2500,
+      system,
+      tools: [tool],
+      tool_choice: { type: "tool", name: "emit_youtube_metadata" },
+      messages: [{ role: "user", content: userMsg }]
+    })
+  });
+  if(!res.ok) throw new Error("claude " + res.status);
+  const data = await res.json();
+  const block = (data.content || []).find(c => c.type === "tool_use" && c.name === "emit_youtube_metadata");
+  if(!block || !block.input) throw new Error("no emit_youtube_metadata tool_use");
+  const m = block.input;
+  return {
+    title: String(m.title || "").slice(0, fmt === "shorts" ? 100 : 100),
+    description: String(m.description || "").slice(0, 4800),
+    hashtags: Array.isArray(m.hashtags) ? m.hashtags.map(h => String(h).replace(/^#/, "").trim()).filter(Boolean).slice(0, 15) : [],
+    tags: Array.isArray(m.tags) ? m.tags.map(t => String(t).trim()).filter(Boolean).slice(0, 12) : [],
+    thumbnailIdea: String(m.thumbnailIdea || "").slice(0, 240),
+    trendingUsed: trending.length
+  };
 };
 
 // MVP-B: Polish a Studio script scene via Claude
@@ -6219,28 +6299,52 @@ function RepurposeTab(){
     }
   };
   const [shareBusyId, setShareBusyId] = useState(null);
+  const [shareMetadata, setShareMetadata] = useState(null); // { platform, title, description, hashtags, tags, thumbnailIdea }
   const shareClip = async (clipId, platform) => {
     if(shareBusyId) return;
     const clip = project.clips.find(c => c.id === clipId);
     if(!clip) return;
     setShareBusyId(clipId + ":" + platform);
     try {
-      const caption = buildClipExportText(clip, project);
-      try { await navigator.clipboard.writeText(caption); } catch(e){}
+      // YouTube / Shorts: generate platform-tuned metadata (title, description, hashtags, SEO tags)
+      // via Claude with live trending context, render a playable 1080p MP4, open YT upload page,
+      // surface a modal the user copies from per field.
+      const isYouTube = platform === "youtube" || platform === "shorts";
+      let metadata = null;
+      let safeTitle = (clip.title || "clip").replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "clip";
+      if(isYouTube){
+        const path = getAnthropicPath();
+        if(path){
+          try {
+            toast("Generating YouTube metadata (scanning trending topics)…", "info");
+            metadata = await generateYouTubeMetadataViaClaude(path, clip, project, platform === "shorts" ? "shorts" : "long");
+            safeTitle = metadata.title.replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 48) || safeTitle;
+          } catch(e){
+            console.warn("[zs] YT metadata failed, falling back to clip caption", e);
+          }
+        }
+      }
+      // Clipboard payload: for YT we put the description body so user can paste into description;
+      // title/tags surface in the modal with individual copy buttons.
+      const clipboardText = metadata
+        ? (metadata.description + "\n\n" + metadata.hashtags.map(h => "#" + h.replace(/^#/, "")).join(" "))
+        : buildClipExportText(clip, project);
+      try { await navigator.clipboard.writeText(clipboardText); } catch(e){}
+      // Render a real 1080p MP4 via the hidden-tab-safe pipeline (x99f). No more 0-byte files.
       let downloaded = false;
       if(project.uploadedVideoUrl){
         try {
-          const blob = await renderClipVideoFromUpload(project.uploadedVideoUrl, clip, null, { overlay: { hook: clip.hook } });
-          const url = URL.createObjectURL(blob);
+          const recBlob = await recordClipViaCaptureStream(project.uploadedVideoUrl, clip, null);
+          const outBlob = await reencodeWebmToPresetMP4(recBlob, clip.preset || "vertical", null);
+          const url = URL.createObjectURL(outBlob);
           const a = document.createElement("a");
           a.href = url;
-          const safeTitle = (clip.title || "clip").replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "clip";
-          a.download = safeTitle + "-" + platform + ".webm";
+          a.download = safeTitle + "-" + platform + ".mp4";
           document.body.appendChild(a);
           a.click();
-          setTimeout(() => { try { document.body.removeChild(a); URL.revokeObjectURL(url); } catch(e){} }, 500);
+          setTimeout(() => { try { document.body.removeChild(a); URL.revokeObjectURL(url); } catch(e){} }, 60000);
           downloaded = true;
-        } catch(e){ /* non-fatal */ }
+        } catch(e){ console.warn("[zs] share render failed", e); }
       }
       const UPLOAD_URLS = {
         tiktok: "https://www.tiktok.com/upload?lang=en",
@@ -6252,11 +6356,16 @@ function RepurposeTab(){
       };
       const url = UPLOAD_URLS[platform];
       if(url){ try { window.open(url, "_blank", "noopener,noreferrer"); } catch(e){} }
-      const bits = [];
-      if(downloaded) bits.push("video downloaded");
-      bits.push("caption copied");
-      if(!project.uploadedVideoUrl) bits.push("(upload source to include video)");
-      toast("Share → " + platform + " — " + bits.join(", "), "success");
+      if(metadata){
+        setShareMetadata({ platform, clipId, ...metadata });
+        toast((downloaded ? "1080p MP4 in Downloads · " : "") + "YT metadata generated — copy each field from the panel", "success");
+      } else {
+        const bits = [];
+        if(downloaded) bits.push("video downloaded");
+        bits.push("caption copied");
+        if(!project.uploadedVideoUrl) bits.push("(upload source to include video)");
+        toast("Share → " + platform + " — " + bits.join(", "), "success");
+      }
     } catch(e){
       toast("Share failed: " + (e && e.message || "unknown"), "error");
     } finally {
@@ -6710,6 +6819,69 @@ const removeClip = (clipId) => {
               Video export re-encodes each selected clip via ffmpeg.wasm at the chosen preset (9:16 / 1:1 / 16:9). Multiple clips download as a zip. Metadata export is text only.
             </span>
           </div>
+        </div>
+        {shareMetadata && (
+          <ShareMetadataModal
+            meta={shareMetadata}
+            onClose={() => setShareMetadata(null)}
+            toast={toast}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ShareMetadataModal({ meta, onClose, toast }){
+  const copyField = async (label, text) => {
+    try { await navigator.clipboard.writeText(text); toast("Copied " + label, "success"); }
+    catch(e){ toast("Copy failed — select & copy manually", "warn"); }
+  };
+  const hashLine = (meta.hashtags || []).map(h => "#" + h.replace(/^#/, "")).join(" ");
+  const tagsLine = (meta.tags || []).join(", ");
+  const descForClipboard = meta.description + (hashLine ? "\n\n" + hashLine : "");
+  const platformLabel = meta.platform === "shorts" ? "YouTube Shorts" : meta.platform === "youtube" ? "YouTube" : meta.platform;
+  return (
+    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-start justify-center p-4 overflow-y-auto" onClick={onClose}>
+      <div className="bg-[color:var(--panel)] border border-[color:var(--line)] rounded-2xl p-6 max-w-2xl w-full mt-10 zs-fade-in" onClick={(e)=>e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="text-xl font-bold">{platformLabel} metadata</h3>
+            <p className="text-[12px] text-[color:var(--muted)] mt-1">AI-generated from your clip + live trending context. Copy each field into the upload page.</p>
+          </div>
+          <button className="chip" onClick={onClose} aria-label="Close">×</button>
+        </div>
+        <div className="space-y-3">
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-[12px] font-semibold text-[color:var(--muted)]">Title ({meta.title.length}/100)</label>
+              <button className="chip" onClick={() => copyField("title", meta.title)}>Copy title</button>
+            </div>
+            <div className="p-3 rounded-lg bg-[color:var(--panel2)] border border-[color:var(--line)] text-sm">{meta.title}</div>
+          </div>
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-[12px] font-semibold text-[color:var(--muted)]">Description (with hashtags)</label>
+              <button className="chip" onClick={() => copyField("description", descForClipboard)}>Copy description</button>
+            </div>
+            <div className="p-3 rounded-lg bg-[color:var(--panel2)] border border-[color:var(--line)] text-[13px] whitespace-pre-wrap max-h-64 overflow-y-auto">{descForClipboard}</div>
+          </div>
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-[12px] font-semibold text-[color:var(--muted)]">SEO tags ({(meta.tags||[]).length})</label>
+              <button className="chip" onClick={() => copyField("SEO tags", tagsLine)}>Copy tags</button>
+            </div>
+            <div className="p-3 rounded-lg bg-[color:var(--panel2)] border border-[color:var(--line)] text-[12px] text-[color:var(--muted)]">{tagsLine || "—"}</div>
+          </div>
+          {meta.thumbnailIdea && (
+            <div>
+              <label className="text-[12px] font-semibold text-[color:var(--muted)] block mb-1">Thumbnail idea</label>
+              <div className="p-3 rounded-lg bg-[color:var(--panel2)] border border-[color:var(--line)] text-[12px] italic text-[color:var(--muted)]">{meta.thumbnailIdea}</div>
+            </div>
+          )}
+          {meta.trendingUsed > 0 && (
+            <div className="text-[11px] text-[color:var(--muted)]">Folded in {meta.trendingUsed} trending signals from Google / HN / Reddit / X.</div>
+          )}
         </div>
       </div>
     </div>
