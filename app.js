@@ -2189,12 +2189,25 @@ const reencodeWebmToPresetMP4 = async (srcWebmBlob, presetId, onProgress) => {
 
 const SC_PRESET_DIMS = { vertical: [1080, 1920], square: [1080, 1080], landscape: [1920, 1080] };
 
+// x108: MediaPipe's vision bundle is ESM-only. Babel standalone rewrites
+// dynamic import() into require(), which throws in the browser. So we defer
+// the import() to a native <script type="module"> (./mediapipe-loader.js)
+// and expose window.zsLoadMediaPipe(), which this helper awaits.
+const awaitMediaPipeLoader = () => new Promise((resolve, reject) => {
+  if(window.zsLoadMediaPipe) return resolve(window.zsLoadMediaPipe);
+  const start = Date.now();
+  const t = setInterval(() => {
+    if(window.zsLoadMediaPipe){ clearInterval(t); resolve(window.zsLoadMediaPipe); }
+    else if(Date.now() - start > 10000){ clearInterval(t); reject(new Error("mediapipe-loader.js failed to load")); }
+  }, 50);
+});
+
 let _faceDetectorPromise = null;
 const loadFaceDetector = () => {
   if(_faceDetectorPromise) return _faceDetectorPromise;
   _faceDetectorPromise = (async () => {
-    const base = new URL("./vendor/mediapipe/vision/", window.location.href).href;
-    const { FilesetResolver, FaceDetector } = await import(base + "vision_bundle.mjs");
+    const loader = await awaitMediaPipeLoader();
+    const { FilesetResolver, FaceDetector, base } = await loader();
     const vision = await FilesetResolver.forVisionTasks(base);
     const fd = await FaceDetector.createFromOptions(vision, {
       baseOptions: {
