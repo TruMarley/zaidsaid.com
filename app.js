@@ -1,4 +1,4 @@
-/* Zaidsaid — app.js v2.0 — x107: Clipping precision pass — one-call Claude agent cites signals. runClippingPrecisionPass (module scope) takes the output of analyzeViaClaudeTwoStage plus pre-computed signals (scene_cuts, audio_events, visual_highlights, audio_peaks, trending) and makes exactly ONE Claude Sonnet 4.6 call using tool_choice: emit_refined_clips. Returns a parallel array of { id, precisionScore 0-100, verdict: strong|medium|weak, evidence:[{type,t,note}] } keyed by clip.id. processSource merges refinements back after snapClipBoundaries and toasts the verdict breakdown. New toolbar chips: "Precision pass ON|OFF" (default ON, localStorage-persisted) and "Show weak" (default OFF — hides weak clips until toggled). Per-clip card gains a collapsible "Why this clip?" evidence panel below the caption. Cache bump mvp_god_x106 → x107. | x106: Research sub-agent wired. runResearchSubAgent (module scope) runs a multi-step Claude Sonnet 4.6 tool-use loop: extract_keywords → fetch_trending → emit_research. Returns grounded claims + creative brief fields. StepResearch.runResearch calls it and emits per-step progress chips. project.research[] gains a `keyword` field. project._researchTrending[] stores the raw trending data for downstream use. StudioInputAccepter.callAnthropic injects research + trending context into the video_brief user message when project.research.length > 0 (Script stage), with a system prompt addendum instructing Claude to ground beats in the RESEARCH block. Local fallback path unchanged — used when Anthropic proxy is unconfigured or the sub-agent throws. | x105: Architecture tab reshaped to match the real 8 Studio stages (research / script / storyboard / assets / motion / voice / timeline / export) and to declare providers honestly by kind: `included` (user's Anthropic subscription, no per-call meter), `free` (Pollinations Flux, browser SpeechSynthesis, local Canvas Ken Burns, ffmpeg.wasm), or `byok` (ElevenLabs / Stability / Pexels — requires a user-supplied key). Removes the fantasy stages (Outline / Avatar / B-roll / Captions / Edit / Publish) that had no downstream code, and the Free-only/Balanced/Premium toggle that wasn't actually rewiring anything. Default mix: Claude (included) on the two text stages, free on everything else — per-run cost is $0.00 out of the box with the user's Anthropic subscription. PROVIDER_META collapsed to the 12 IDs that real code paths consume; old "openai" / "heygen" / "local-llm" etc. entries deleted. StudioStageProvider sanitizes stale arch.picks so legacy stored state doesn't render orphan providers. | x104: Studio Export — 1080p H.264 MP4, aspect-aware. renderRealVideo now reads project.preset (vertical/square/landscape) and sizes the canvas to 1080×1920 / 1080×1080 / 1920×1080 respectively. After the canvas+MediaRecorder pass produces a webm blob (0-60% progress), reencodeWebmToPresetMP4 runs ffmpeg.wasm to scale+pad and encode libx264 H.264 at CRF 20 (60-100% progress). Output is set as window.__zs_lastBlob and offered as a .mp4 download named <project-slug>-<preset>.mp4. Visibility warning toasted at render start if the tab is hidden (rAF throttles in background tabs). On ffmpeg failure the error is surfaced and the raw webm is kept as a fallback download link. | x103c: Replace fetch(dataUrl).then(r=>r.blob()) with a direct base64 decoder. Our CSP `connect-src` doesn't list `data:`, so `fetch("data:...")` throws `TypeError: Failed to fetch` in Chrome. storeSceneImage / storeSceneAudio caught it and silently returned the original dataUrl — localStorage got polluted with base64 anyway despite x103's IDB offload and x103b's self-heal. New helper dataUrlToBlob parses `data:<mime>[;base64],<payload>` in pure JS (atob + Uint8Array) and returns a Blob. callers fall back to fetch only for non-data URLs. | x103b: Make openIDB self-heal when the zaidsaid DB exists at some version but is missing the `uploads` store. x103 assumed the store always existed because Repurpose creates it on first upload, but a Studio-first user (or anyone with a stale DB from an aborted upgrade) silently fails every idbPut with "object store not found", which drops scene.image back to the data-URL path and defeats the whole localStorage-offload purpose. Fix: openIDB now probes at the DB's current version, verifies the store is present, and if not bumps the version to create it. Also surfaces the silent storeSceneImage / storeSceneAudio fallback with console.warn so the next regression won't hide. | x103: Studio — IDB-offload scene images + audio. scene.image / scene.audio are now lightweight reference strings ("idb:studio:scene:{id}" / "idb:studio:scene:{id}:audio") pointing to Blob entries in the zaidsaid/uploads IndexedDB store. localStorage no longer holds base64 data URLs for Studio projects, keeping the stored JSON well under 20 KB regardless of asset count. New helpers idbSetStudioImage / idbGetStudioImage / idbDelStudioImage and idbSetStudioAudio / idbGetStudioAudio / idbDelStudioAudio parallel the existing repurpose:clip: convention. StepStoryboard converts any returned data URL / response blob to a Blob, persists it to IDB, and keeps a per-scene Map<sceneId, objectUrl> (sceneBlobUrls) for live preview. StepVoice does the same for audio (audioBlobUrls). StepExport's renderRealVideo reads IDB blobs when image/audio starts with "idb:", falling back to the legacy data URL path for pre-x103 projects so no existing state is broken. StudioTab hydrates both blob URL Maps on mount (clearing missing IDB refs with a toast) and revokes all URLs on unmount. resetProject and scene deletion also clean IDB entries. | x102: Share → YouTube now ships full viral-title + thumbnail tooling. generateYouTubeMetadataViaClaude schema extended to require titleVariants[5] (each using a different proven 2026 Shorts hook pattern — Contrarian Take, Shocking Statistic, Direct Promise, Question Hook, Before/After, Mistake Callout, Bold Claim, Expert Secret, Pattern Interrupt, Time-Bound Challenge) and a structured thumbnail object (headline/subject/background/palette/imagePrompt/reasoning) following MrBeast-era Shorts rules: one emotional face OR one iconic close-up, 2-3 word overlay, deep-dark background with a single neon accent. New renderThumbnailFromBrief() generates the base via Pollinations (explicitly 'no text, no watermarks') and composites clean headline + accent underline via OffscreenCanvas — diffusion models garble text, canvas overlays are razor-sharp. ShareMetadataModal now surfaces the 5 title variants as a ranked copy list, the full thumbnail brief, and a "Generate thumbnail" action that produces a 1080×1920 JPG download-ready image. | x101: clip boundaries now capture COMPLETE thoughts. Three-layer fix: (1) analyzeViaClaude tool schema now requires an `arc` field with setup / reveal / payoff descriptions + payoff_end timestamp — Claude must identify where the payoff sentence ends, not just hand-wave about "complete thoughts"; (2) system prompt hardened with an explicit example of the Move 37 failure pattern (ending on "...had a machine beaten one of the best human players two games in a row, it" mid-clause) paired with the corrected version ending on the "2,000 years of strategy" payoff; (3) new snapClipBoundaries() runs after Claude returns, walking the segment list forward from clip.end to the next true sentence terminator (no dangling conj./pronoun) within 30s, and backing clip.start to the current sentence's start if it lands mid-sentence. Result: clip.end is guaranteed to sit on a period/!/? and the payoff beat is guaranteed present. Also adds a "Fix cuts" toolbar chip that re-snaps already-generated clips against the current transcript — no regeneration needed for existing projects. | x100: Share → YouTube now auto-generates an optimized metadata bundle (title / description / hashtags / SEO tags / thumbnail idea) via Claude Sonnet 4.6 using (a) the clip hook + caption + preset + virality score, (b) the surrounding transcript window, and (c) live trending context pulled from /trends/{google,reddit,hn,x}. A ShareMetadataModal renders the bundle with per-field Copy buttons so the user can paste each field into YouTube Studio's Details panel. Video download now goes through the hidden-tab-safe recordClipViaCaptureStream → reencodeWebmToPresetMP4 pipeline from x99f instead of the broken renderClipVideoFromUpload — shares produce real 1080p H.264 MP4 files. | x99f: batch export rebuilt as two-pass (captureStream → ffmpeg), works in hidden tabs + outputs 1080p H.264 MP4. Root cause of the 0-byte downloads: x99d/e's renderClipVideoFromUpload drives canvas.drawImage via requestAnimationFrame, and rAF throttles to ~1 Hz as soon as the tab loses focus. canvas.captureStream() then emits ≤1 frame/sec, MediaRecorder packs a 1-frame blob, and the user gets a .webm that won't play. Fix (a) recordClipViaCaptureStream plays the uploaded source muted and pipes `<video>.captureStream()` straight into MediaRecorder — video playback + MediaStream tracks are NOT bound by rAF, so this keeps running in hidden/backgrounded tabs; (b) reencodeWebmToPresetMP4 uses ffmpeg.wasm to scale+pad the VP9 recording to the target preset and encode libx264 at CRF 20 for real 1080p H.264 MP4 output — ffmpeg.wasm decodes VP9 fine (only AV1 from the raw YouTube MP4 was the blind spot). Also bumped downloadBlob's revokeObjectURL delay from 500 ms → 60 s so Chrome's download manager isn't cut off mid-write on big blobs. Overlay burn-in dropped from batch export — per-clip "Render video" chip still has it for single previews. | x99e: fix autoplay block in renderClipVideoFromUpload. The canvas/MediaRecorder render created a fresh <video src={blob}>, seeked, then called `src.play()` — but with `muted=false`, Chrome's autoplay policy threw `NotAllowedError: play() failed because the user didn't interact with the document first` once the original user gesture was consumed by the async awaits. Setting `muted=true` lets play() succeed without a gesture; the audio is still captured via `<video>.captureStream()` since muted only gates speaker output, not decoded audio tracks. | x99d: fix 0-byte batch export on AV1 sources. YouTube's progressive MP4s are AV1; cutClipFromSource's `-c copy` preserved that codec, then reencodeClipForPreset (libx264 transcode) silently failed because ffmpeg.wasm 5.1.4 has no AV1 decoder (config lacks libdav1d). ffmpeg.exec returned exit=1 but the old code ignored it, readFile returned 0 bytes, and we shipped empty MP4s. Fix (a) exportClipsAsVideo now prefers renderClipVideoFromUpload (canvas + MediaRecorder, uses browser-native AV1 decoding via <video>) on the uploaded source, falling back to the ffmpeg per-clip re-encode only when that fails; (b) reencodeClipForPreset now throws on non-zero exit or 0-byte output instead of returning an empty blob. Trade-off: outputs are .webm VP9/VP8 at 720p (renderClipVideoFromUpload dims) rather than .mp4 H.264 1080p; acceptable for the MVP, bigger resolution is an easy follow-up. | x99c: switch ffmpeg core from UMD to ESM. @ffmpeg/ffmpeg@0.12.10's worker.js is always instantiated as `{type:"module"}`, and module Workers can't call `importScripts`, so worker.js falls through to `await import(coreURL)`. The UMD build registers `self.createFFmpegCore` as a side effect but has no ESM `default` export, so the worker throws `ERROR_IMPORT_FAILURE`. Using `/esm/ffmpeg-core.js` (which has a proper default export) lets the module import complete. | x99b: self-host @ffmpeg/ffmpeg + @ffmpeg/util. Chrome refuses to construct a Worker from a cross-origin URL, CSP or CORS headers notwithstanding; @ffmpeg/ffmpeg@0.12.10 does `new Worker(new URL("./worker.js", import.meta.url), {type:"module"})` relative to its own module URL, so loading it from unpkg makes the Worker cross-origin and it throws `Failed to construct 'Worker': Script … cannot be accessed from origin 'https://zaidsaid.com'`. The ESM bundle now lives in ./vendor/{ffmpeg,util}/esm/. @ffmpeg/core WASM still loads from unpkg via toBlobURL (blob: URLs are same-origin from the Worker's perspective). | x99: tried adding `https://unpkg.com` to CSP `worker-src` — necessary but not sufficient, Chrome still blocked the cross-origin worker. | x98: Phase D — trending-context scoring. Worker routes /trends/{google,reddit,hn,x} (HN + Reddit + Google free; X via Apify needs APIFY_TOKEN). Client extracts 3-8 topic keywords via Claude tool_use, fetches trend matches, folds into analyzeViaClaudeTwoStage with convergent-attention boost. | x97: Phase C — multi-modal virality signals. WebCodecs scene-cut detection in-browser; /gemini-video-highlights worker route (Gemini 2.5 Flash, graceful no-key); /sensevoice worker route (Replicate SenseVoice for laughter/applause, graceful no-key). Claude scoring extended to boost clips matching ≥2 signal types. | x96: Phase E — preset-aware per-clip re-encoding via ffmpeg.wasm (scale+pad for 9:16/1:1/16:9) + JSZip batch download when multiple clips selected. Replaces the old MediaRecorder .webm pipeline for clips that have a per-clip mp4 blob. | x95: Phase B UI cleanup: collapsed intake to URL/File, folded YT downloader into URL expandable, per-clip actions 9→3, removed fake waveform, toolbar pruned. | x94: clear stale clips at Generate start + narrow reseed effect so demo doesn't overwrite a user's upload on refresh. | x93: Repurpose — real per-clip mp4 cuts + thumbnail frames. cutClipFromSource (ffmpeg.wasm, -ss after -i, -c copy with libx264 fallback <5 min) + grabFrameThumb (off-DOM canvas) + generateClipAssets (sequential, IDB-backed). processSource fires generateClipAssets after setProject for upload flows. RepurposeTab hydrates clipBlobUrls Map from IDB on mount; RepurposeClipPreview shows pre-cut <video controls> when blob ready. removeClip deletes IDB entries + revokes URLs. | x92: Repurpose — big videos extract audio client-side before transcribing. Lazy-loads ffmpeg.wasm (@ffmpeg/ffmpeg@0.12.10 + @ffmpeg/core@0.12.6 from unpkg, ~30 MB one-time); any uploaded video >50 MB is reduced to mono 16 kHz 32 kbps MP3 (~14 MB/hr) before POSTing to /elevenlabs/v1/speech-to-text. Fixes 700+ MB uploads hanging on the Cloudflare Worker 500 MiB body limit. CSP widened for wasm-unsafe-eval, blob: workers, and unpkg connect. | x91: Repurpose — uploaded files now survive page refreshes. New IndexedDB blob store (zaidsaid/uploads, key repurpose:current) persists the File on upload; RepurposeTab useEffect on mount HEAD-checks the existing blob URL and rehydrates from IDB when it's dead, or clears the dangling reference + toasts "please re-upload" when IDB is empty too. processSource now reads the blob from IDB first, falling back to the blob URL. Remove button deletes the IDB entry. | x90: Repurpose — uploads now actually clip. processSource gate no longer bails on empty source when an uploaded video is present; on new file upload we clear stale transcript/chapters/clips/name; uploaded videos without a transcript auto-transcribe via ElevenLabs Scribe (/elevenlabs/v1/speech-to-text with model_id=scribe_v1, word-level timestamps grouped into ~6s segments) and feed the existing two-stage viral analyzer. New fuchsia "ElevenLabs Scribe (auto-transcribed)" source chip. | x89: Repurpose — YouTube downloader tool (paste URL → fetch progressive formats via worker InnerTube → quality dropdown → File System Access folder picker with streamed writable, falls back to <a download> when unsupported). Worker: /youtube-formats, /youtube-media. | x88: batch export respects selection + preset-aware video render — "Export selected as video" renders .webm per selected clip at its preset aspect ratio (9:16/1:1/16:9); fallback selection→approved→all; metadata (.txt) export kept as secondary. Fix stray /span> text below batch-export button. | x87: clip length range widened — 5s floor (viral reactions, one-liners) to 1800s / 30min ceiling (full topic arcs); removed rigid length-mix prompt in favor of idea-first sizing | x86: clip preview no-autoplay — remove YouTube loop=1&playlist (fixes whole-video loop), remove autoPlay on uploaded video, preview now shows clip-only paused state until user clicks play | x85: Phase B.1 — persist chapters on description-fallback, surface worker errors, transcript-source chip, length-variance prompt, analyzeLocal intro-skip, **remove dead RepurposeAnalyzer + RepurposeRealAnalyze god-mode components** | x84: Phase B — YT chapter-boundary detection (parseYouTubeChapters in worker; analyzeLocal uses chapter spans as candidate windows when ≥3 chapters; Claude receives chapter list for boundary alignment) + Web Audio energy analyzer (analyzeUploadedVideoAudio: 8x scrub AudioContext RMS scan on uploaded files; peaks boost analyzeLocal virality by +5*peakDensity) | x83: Smart Clipping v2 — two-stage viral detection + topic-boundary awareness + variable 30-180s clip length + unified Generate flow + target default 10 (range 3-20) | x82: preview fix — CSP frame-src, youtube-nocookie embed, thumbnail fallback | x80: Smart Clipping — viral moment detection. Worker /youtube-transcript returns segments[{t,d,text}]. analyzeViaClaude uses timestamped transcript with 4-dimension scoring (hook_power/emotional_impact/quotability/surprise_drama). analyzeLocal scores ~45-75s windows, picks top N with spatial diversity across full duration. YT iframe autoplay+loop within clip range; uploaded video autoplay muted with loop-on-end.
+/* Zaidsaid — app.js v2.0 — x108: Smart crop — face-aware clip render (MediaPipe + canvas). Self-hosted MediaPipe tasks-vision 0.10.14 (vision_bundle.mjs + WASM + blaze_face_short_range.tflite) under vendor/mediapipe/vision/. loadFaceDetector() lazy-inits a cached FaceDetector. detectFacesInClip() seeks the uploaded video at 2 fps (1 fps for >60 s clips), calls faceDetector.detectForVideo per frame, returns Array<{t, faces:[{x,y,w,h,score} normalized], faceCount}>. computeCropPath() segments by face-count changes and scene cuts, unions face bboxes per segment, expands 35% padding, fits to target aspect ratio (clamps rather than letterboxes), falls back to center crop when no faces. lerpCrop() + cropAtTime() handle 300 ms ease between segments. renderClipSmartCrop() drives a canvas via requestVideoFrameCallback, looks up crop per frame, records via canvas.captureStream + MediaRecorder (VP9). RepurposeTab gains: smartCropEnabled state (localStorage zaidsaid.v2.repurpose.smartCrop, default ON), a detection cache keyed clip.id:preset, a debounced 500 ms useEffect that runs detection on all clips whenever upload/clips/signals change. Smart crop toolbar chip toggles enabled and clears cache. RepurposeClipPreview receives cropPath prop and renders an absolutely-positioned canvas overlay drawing the current crop rect (indigo border) in real time. Both shareClip and exportClipsAsVideo branch on smartCropEnabled + cached data: smart-crop path when available, fall back to recordClipViaCaptureStream + reencodeWebmToPresetMP4 silently when not. Cache bump mvp_god_x107 → x108. | x107: Clipping precision pass — one-call Claude agent cites signals. runClippingPrecisionPass (module scope) takes the output of analyzeViaClaudeTwoStage plus pre-computed signals (scene_cuts, audio_events, visual_highlights, audio_peaks, trending) and makes exactly ONE Claude Sonnet 4.6 call using tool_choice: emit_refined_clips. Returns a parallel array of { id, precisionScore 0-100, verdict: strong|medium|weak, evidence:[{type,t,note}] } keyed by clip.id. processSource merges refinements back after snapClipBoundaries and toasts the verdict breakdown. New toolbar chips: "Precision pass ON|OFF" (default ON, localStorage-persisted) and "Show weak" (default OFF — hides weak clips until toggled). Per-clip card gains a collapsible "Why this clip?" evidence panel below the caption. Cache bump mvp_god_x106 → x107. | x106: Research sub-agent wired. runResearchSubAgent (module scope) runs a multi-step Claude Sonnet 4.6 tool-use loop: extract_keywords → fetch_trending → emit_research. Returns grounded claims + creative brief fields. StepResearch.runResearch calls it and emits per-step progress chips. project.research[] gains a `keyword` field. project._researchTrending[] stores the raw trending data for downstream use. StudioInputAccepter.callAnthropic injects research + trending context into the video_brief user message when project.research.length > 0 (Script stage), with a system prompt addendum instructing Claude to ground beats in the RESEARCH block. Local fallback path unchanged — used when Anthropic proxy is unconfigured or the sub-agent throws. | x105: Architecture tab reshaped to match the real 8 Studio stages (research / script / storyboard / assets / motion / voice / timeline / export) and to declare providers honestly by kind: `included` (user's Anthropic subscription, no per-call meter), `free` (Pollinations Flux, browser SpeechSynthesis, local Canvas Ken Burns, ffmpeg.wasm), or `byok` (ElevenLabs / Stability / Pexels — requires a user-supplied key). Removes the fantasy stages (Outline / Avatar / B-roll / Captions / Edit / Publish) that had no downstream code, and the Free-only/Balanced/Premium toggle that wasn't actually rewiring anything. Default mix: Claude (included) on the two text stages, free on everything else — per-run cost is $0.00 out of the box with the user's Anthropic subscription. PROVIDER_META collapsed to the 12 IDs that real code paths consume; old "openai" / "heygen" / "local-llm" etc. entries deleted. StudioStageProvider sanitizes stale arch.picks so legacy stored state doesn't render orphan providers. | x104: Studio Export — 1080p H.264 MP4, aspect-aware. renderRealVideo now reads project.preset (vertical/square/landscape) and sizes the canvas to 1080×1920 / 1080×1080 / 1920×1080 respectively. After the canvas+MediaRecorder pass produces a webm blob (0-60% progress), reencodeWebmToPresetMP4 runs ffmpeg.wasm to scale+pad and encode libx264 H.264 at CRF 20 (60-100% progress). Output is set as window.__zs_lastBlob and offered as a .mp4 download named <project-slug>-<preset>.mp4. Visibility warning toasted at render start if the tab is hidden (rAF throttles in background tabs). On ffmpeg failure the error is surfaced and the raw webm is kept as a fallback download link. | x103c: Replace fetch(dataUrl).then(r=>r.blob()) with a direct base64 decoder. Our CSP `connect-src` doesn't list `data:`, so `fetch("data:...")` throws `TypeError: Failed to fetch` in Chrome. storeSceneImage / storeSceneAudio caught it and silently returned the original dataUrl — localStorage got polluted with base64 anyway despite x103's IDB offload and x103b's self-heal. New helper dataUrlToBlob parses `data:<mime>[;base64],<payload>` in pure JS (atob + Uint8Array) and returns a Blob. callers fall back to fetch only for non-data URLs. | x103b: Make openIDB self-heal when the zaidsaid DB exists at some version but is missing the `uploads` store. x103 assumed the store always existed because Repurpose creates it on first upload, but a Studio-first user (or anyone with a stale DB from an aborted upgrade) silently fails every idbPut with "object store not found", which drops scene.image back to the data-URL path and defeats the whole localStorage-offload purpose. Fix: openIDB now probes at the DB's current version, verifies the store is present, and if not bumps the version to create it. Also surfaces the silent storeSceneImage / storeSceneAudio fallback with console.warn so the next regression won't hide. | x103: Studio — IDB-offload scene images + audio. scene.image / scene.audio are now lightweight reference strings ("idb:studio:scene:{id}" / "idb:studio:scene:{id}:audio") pointing to Blob entries in the zaidsaid/uploads IndexedDB store. localStorage no longer holds base64 data URLs for Studio projects, keeping the stored JSON well under 20 KB regardless of asset count. New helpers idbSetStudioImage / idbGetStudioImage / idbDelStudioImage and idbSetStudioAudio / idbGetStudioAudio / idbDelStudioAudio parallel the existing repurpose:clip: convention. StepStoryboard converts any returned data URL / response blob to a Blob, persists it to IDB, and keeps a per-scene Map<sceneId, objectUrl> (sceneBlobUrls) for live preview. StepVoice does the same for audio (audioBlobUrls). StepExport's renderRealVideo reads IDB blobs when image/audio starts with "idb:", falling back to the legacy data URL path for pre-x103 projects so no existing state is broken. StudioTab hydrates both blob URL Maps on mount (clearing missing IDB refs with a toast) and revokes all URLs on unmount. resetProject and scene deletion also clean IDB entries. | x102: Share → YouTube now ships full viral-title + thumbnail tooling. generateYouTubeMetadataViaClaude schema extended to require titleVariants[5] (each using a different proven 2026 Shorts hook pattern — Contrarian Take, Shocking Statistic, Direct Promise, Question Hook, Before/After, Mistake Callout, Bold Claim, Expert Secret, Pattern Interrupt, Time-Bound Challenge) and a structured thumbnail object (headline/subject/background/palette/imagePrompt/reasoning) following MrBeast-era Shorts rules: one emotional face OR one iconic close-up, 2-3 word overlay, deep-dark background with a single neon accent. New renderThumbnailFromBrief() generates the base via Pollinations (explicitly 'no text, no watermarks') and composites clean headline + accent underline via OffscreenCanvas — diffusion models garble text, canvas overlays are razor-sharp. ShareMetadataModal now surfaces the 5 title variants as a ranked copy list, the full thumbnail brief, and a "Generate thumbnail" action that produces a 1080×1920 JPG download-ready image. | x101: clip boundaries now capture COMPLETE thoughts. Three-layer fix: (1) analyzeViaClaude tool schema now requires an `arc` field with setup / reveal / payoff descriptions + payoff_end timestamp — Claude must identify where the payoff sentence ends, not just hand-wave about "complete thoughts"; (2) system prompt hardened with an explicit example of the Move 37 failure pattern (ending on "...had a machine beaten one of the best human players two games in a row, it" mid-clause) paired with the corrected version ending on the "2,000 years of strategy" payoff; (3) new snapClipBoundaries() runs after Claude returns, walking the segment list forward from clip.end to the next true sentence terminator (no dangling conj./pronoun) within 30s, and backing clip.start to the current sentence's start if it lands mid-sentence. Result: clip.end is guaranteed to sit on a period/!/? and the payoff beat is guaranteed present. Also adds a "Fix cuts" toolbar chip that re-snaps already-generated clips against the current transcript — no regeneration needed for existing projects. | x100: Share → YouTube now auto-generates an optimized metadata bundle (title / description / hashtags / SEO tags / thumbnail idea) via Claude Sonnet 4.6 using (a) the clip hook + caption + preset + virality score, (b) the surrounding transcript window, and (c) live trending context pulled from /trends/{google,reddit,hn,x}. A ShareMetadataModal renders the bundle with per-field Copy buttons so the user can paste each field into YouTube Studio's Details panel. Video download now goes through the hidden-tab-safe recordClipViaCaptureStream → reencodeWebmToPresetMP4 pipeline from x99f instead of the broken renderClipVideoFromUpload — shares produce real 1080p H.264 MP4 files. | x99f: batch export rebuilt as two-pass (captureStream → ffmpeg), works in hidden tabs + outputs 1080p H.264 MP4. Root cause of the 0-byte downloads: x99d/e's renderClipVideoFromUpload drives canvas.drawImage via requestAnimationFrame, and rAF throttles to ~1 Hz as soon as the tab loses focus. canvas.captureStream() then emits ≤1 frame/sec, MediaRecorder packs a 1-frame blob, and the user gets a .webm that won't play. Fix (a) recordClipViaCaptureStream plays the uploaded source muted and pipes `<video>.captureStream()` straight into MediaRecorder — video playback + MediaStream tracks are NOT bound by rAF, so this keeps running in hidden/backgrounded tabs; (b) reencodeWebmToPresetMP4 uses ffmpeg.wasm to scale+pad the VP9 recording to the target preset and encode libx264 at CRF 20 for real 1080p H.264 MP4 output — ffmpeg.wasm decodes VP9 fine (only AV1 from the raw YouTube MP4 was the blind spot). Also bumped downloadBlob's revokeObjectURL delay from 500 ms → 60 s so Chrome's download manager isn't cut off mid-write on big blobs. Overlay burn-in dropped from batch export — per-clip "Render video" chip still has it for single previews. | x99e: fix autoplay block in renderClipVideoFromUpload. The canvas/MediaRecorder render created a fresh <video src={blob}>, seeked, then called `src.play()` — but with `muted=false`, Chrome's autoplay policy threw `NotAllowedError: play() failed because the user didn't interact with the document first` once the original user gesture was consumed by the async awaits. Setting `muted=true` lets play() succeed without a gesture; the audio is still captured via `<video>.captureStream()` since muted only gates speaker output, not decoded audio tracks. | x99d: fix 0-byte batch export on AV1 sources. YouTube's progressive MP4s are AV1; cutClipFromSource's `-c copy` preserved that codec, then reencodeClipForPreset (libx264 transcode) silently failed because ffmpeg.wasm 5.1.4 has no AV1 decoder (config lacks libdav1d). ffmpeg.exec returned exit=1 but the old code ignored it, readFile returned 0 bytes, and we shipped empty MP4s. Fix (a) exportClipsAsVideo now prefers renderClipVideoFromUpload (canvas + MediaRecorder, uses browser-native AV1 decoding via <video>) on the uploaded source, falling back to the ffmpeg per-clip re-encode only when that fails; (b) reencodeClipForPreset now throws on non-zero exit or 0-byte output instead of returning an empty blob. Trade-off: outputs are .webm VP9/VP8 at 720p (renderClipVideoFromUpload dims) rather than .mp4 H.264 1080p; acceptable for the MVP, bigger resolution is an easy follow-up. | x99c: switch ffmpeg core from UMD to ESM. @ffmpeg/ffmpeg@0.12.10's worker.js is always instantiated as `{type:"module"}`, and module Workers can't call `importScripts`, so worker.js falls through to `await import(coreURL)`. The UMD build registers `self.createFFmpegCore` as a side effect but has no ESM `default` export, so the worker throws `ERROR_IMPORT_FAILURE`. Using `/esm/ffmpeg-core.js` (which has a proper default export) lets the module import complete. | x99b: self-host @ffmpeg/ffmpeg + @ffmpeg/util. Chrome refuses to construct a Worker from a cross-origin URL, CSP or CORS headers notwithstanding; @ffmpeg/ffmpeg@0.12.10 does `new Worker(new URL("./worker.js", import.meta.url), {type:"module"})` relative to its own module URL, so loading it from unpkg makes the Worker cross-origin and it throws `Failed to construct 'Worker': Script … cannot be accessed from origin 'https://zaidsaid.com'`. The ESM bundle now lives in ./vendor/{ffmpeg,util}/esm/. @ffmpeg/core WASM still loads from unpkg via toBlobURL (blob: URLs are same-origin from the Worker's perspective). | x99: tried adding `https://unpkg.com` to CSP `worker-src` — necessary but not sufficient, Chrome still blocked the cross-origin worker. | x98: Phase D — trending-context scoring. Worker routes /trends/{google,reddit,hn,x} (HN + Reddit + Google free; X via Apify needs APIFY_TOKEN). Client extracts 3-8 topic keywords via Claude tool_use, fetches trend matches, folds into analyzeViaClaudeTwoStage with convergent-attention boost. | x97: Phase C — multi-modal virality signals. WebCodecs scene-cut detection in-browser; /gemini-video-highlights worker route (Gemini 2.5 Flash, graceful no-key); /sensevoice worker route (Replicate SenseVoice for laughter/applause, graceful no-key). Claude scoring extended to boost clips matching ≥2 signal types. | x96: Phase E — preset-aware per-clip re-encoding via ffmpeg.wasm (scale+pad for 9:16/1:1/16:9) + JSZip batch download when multiple clips selected. Replaces the old MediaRecorder .webm pipeline for clips that have a per-clip mp4 blob. | x95: Phase B UI cleanup: collapsed intake to URL/File, folded YT downloader into URL expandable, per-clip actions 9→3, removed fake waveform, toolbar pruned. | x94: clear stale clips at Generate start + narrow reseed effect so demo doesn't overwrite a user's upload on refresh. | x93: Repurpose — real per-clip mp4 cuts + thumbnail frames. cutClipFromSource (ffmpeg.wasm, -ss after -i, -c copy with libx264 fallback <5 min) + grabFrameThumb (off-DOM canvas) + generateClipAssets (sequential, IDB-backed). processSource fires generateClipAssets after setProject for upload flows. RepurposeTab hydrates clipBlobUrls Map from IDB on mount; RepurposeClipPreview shows pre-cut <video controls> when blob ready. removeClip deletes IDB entries + revokes URLs. | x92: Repurpose — big videos extract audio client-side before transcribing. Lazy-loads ffmpeg.wasm (@ffmpeg/ffmpeg@0.12.10 + @ffmpeg/core@0.12.6 from unpkg, ~30 MB one-time); any uploaded video >50 MB is reduced to mono 16 kHz 32 kbps MP3 (~14 MB/hr) before POSTing to /elevenlabs/v1/speech-to-text. Fixes 700+ MB uploads hanging on the Cloudflare Worker 500 MiB body limit. CSP widened for wasm-unsafe-eval, blob: workers, and unpkg connect. | x91: Repurpose — uploaded files now survive page refreshes. New IndexedDB blob store (zaidsaid/uploads, key repurpose:current) persists the File on upload; RepurposeTab useEffect on mount HEAD-checks the existing blob URL and rehydrates from IDB when it's dead, or clears the dangling reference + toasts "please re-upload" when IDB is empty too. processSource now reads the blob from IDB first, falling back to the blob URL. Remove button deletes the IDB entry. | x90: Repurpose — uploads now actually clip. processSource gate no longer bails on empty source when an uploaded video is present; on new file upload we clear stale transcript/chapters/clips/name; uploaded videos without a transcript auto-transcribe via ElevenLabs Scribe (/elevenlabs/v1/speech-to-text with model_id=scribe_v1, word-level timestamps grouped into ~6s segments) and feed the existing two-stage viral analyzer. New fuchsia "ElevenLabs Scribe (auto-transcribed)" source chip. | x89: Repurpose — YouTube downloader tool (paste URL → fetch progressive formats via worker InnerTube → quality dropdown → File System Access folder picker with streamed writable, falls back to <a download> when unsupported). Worker: /youtube-formats, /youtube-media. | x88: batch export respects selection + preset-aware video render — "Export selected as video" renders .webm per selected clip at its preset aspect ratio (9:16/1:1/16:9); fallback selection→approved→all; metadata (.txt) export kept as secondary. Fix stray /span> text below batch-export button. | x87: clip length range widened — 5s floor (viral reactions, one-liners) to 1800s / 30min ceiling (full topic arcs); removed rigid length-mix prompt in favor of idea-first sizing | x86: clip preview no-autoplay — remove YouTube loop=1&playlist (fixes whole-video loop), remove autoPlay on uploaded video, preview now shows clip-only paused state until user clicks play | x85: Phase B.1 — persist chapters on description-fallback, surface worker errors, transcript-source chip, length-variance prompt, analyzeLocal intro-skip, **remove dead RepurposeAnalyzer + RepurposeRealAnalyze god-mode components** | x84: Phase B — YT chapter-boundary detection (parseYouTubeChapters in worker; analyzeLocal uses chapter spans as candidate windows when ≥3 chapters; Claude receives chapter list for boundary alignment) + Web Audio energy analyzer (analyzeUploadedVideoAudio: 8x scrub AudioContext RMS scan on uploaded files; peaks boost analyzeLocal virality by +5*peakDensity) | x83: Smart Clipping v2 — two-stage viral detection + topic-boundary awareness + variable 30-180s clip length + unified Generate flow + target default 10 (range 3-20) | x82: preview fix — CSP frame-src, youtube-nocookie embed, thumbnail fallback | x80: Smart Clipping — viral moment detection. Worker /youtube-transcript returns segments[{t,d,text}]. analyzeViaClaude uses timestamped transcript with 4-dimension scoring (hook_power/emotional_impact/quotability/surprise_drama). analyzeLocal scores ~45-75s windows, picks top N with spatial diversity across full duration. YT iframe autoplay+loop within clip range; uploaded video autoplay muted with loop-on-end.
  * Security: localStorage namespaced as zaidsaid.v2.*, error boundary, no innerHTML, no eval, no fetch.
  * Archived v1 seed data preserved under ARCHIVE_* for later reuse.
  */
@@ -2184,6 +2184,238 @@ const reencodeWebmToPresetMP4 = async (srcWebmBlob, presetId, onProgress) => {
     try { await ffmpeg.deleteFile(outputName); } catch(_){}
   }
 };
+
+// ─── x108: Smart crop — face-aware clip render ───────────────────────────────
+
+const SC_PRESET_DIMS = { vertical: [1080, 1920], square: [1080, 1080], landscape: [1920, 1080] };
+
+let _faceDetectorPromise = null;
+const loadFaceDetector = () => {
+  if(_faceDetectorPromise) return _faceDetectorPromise;
+  _faceDetectorPromise = (async () => {
+    const base = new URL("./vendor/mediapipe/vision/", window.location.href).href;
+    const { FilesetResolver, FaceDetector } = await import(base + "vision_bundle.mjs");
+    const vision = await FilesetResolver.forVisionTasks(base);
+    const fd = await FaceDetector.createFromOptions(vision, {
+      baseOptions: {
+        modelAssetPath: base + "blaze_face_short_range.tflite",
+        delegate: "GPU",
+      },
+      runningMode: "VIDEO",
+      minDetectionConfidence: 0.5,
+      minSuppressionThreshold: 0.3,
+    });
+    return fd;
+  })();
+  _faceDetectorPromise.catch(() => { _faceDetectorPromise = null; });
+  return _faceDetectorPromise;
+};
+
+const detectFacesInClip = async (videoUrl, clip, opts) => {
+  if(!videoUrl) return [];
+  const start = Math.max(0, Number(clip.start) || 0);
+  const end = Math.max(start + 0.1, Number(clip.end) || (start + 1));
+  const clipDur = end - start;
+  const MAX_SAMPLES = 120;
+  const interval = clipDur > 60 ? 1.0 : 0.5;
+  const fd = await loadFaceDetector();
+  const vid = document.createElement("video");
+  vid.src = videoUrl;
+  vid.muted = true;
+  vid.playsInline = true;
+  vid.preload = "auto";
+  await new Promise((res, rej) => { vid.onloadedmetadata = res; vid.onerror = rej; });
+  const vw = vid.videoWidth || 1;
+  const vh = vid.videoHeight || 1;
+  const results = [];
+  let sampleCount = 0;
+  for(let t = start; t < end && sampleCount < MAX_SAMPLES; t += interval, sampleCount++){
+    if(document.visibilityState === "hidden") throw new Error("tab hidden during face detection");
+    await new Promise((res) => { vid.onseeked = res; try { vid.currentTime = t; } catch(e){ res(); } });
+    const timestampMs = Math.round((t - start) * 1000);
+    let detections = [];
+    try {
+      const r = fd.detectForVideo(vid, timestampMs);
+      detections = r.detections || [];
+    } catch(_){}
+    const faces = detections.map(d => {
+      const bb = d.boundingBox || {};
+      return {
+        x: (bb.originX || 0) / vw,
+        y: (bb.originY || 0) / vh,
+        w: (bb.width || 0) / vw,
+        h: (bb.height || 0) / vh,
+        score: d.categories && d.categories[0] ? (d.categories[0].score || 0) : 0,
+      };
+    });
+    results.push({ t: t - start, faces, faceCount: faces.length });
+  }
+  try { vid.src = ""; } catch(_){}
+  return results;
+};
+
+const computeCropPath = (facesOverTime, sceneCuts, sourceWH, targetPreset) => {
+  const [tW, tH] = SC_PRESET_DIMS[targetPreset] || SC_PRESET_DIMS.vertical;
+  const [srcW, srcH] = sourceWH;
+  const targetAR = tW / tH;
+  if(!facesOverTime || facesOverTime.length === 0) return [];
+
+  const scCutTimes = new Set((sceneCuts || []).map(c => c.t));
+
+  const segments = [];
+  let segStart = 0;
+  for(let i = 1; i < facesOverTime.length; i++){
+    const prev = facesOverTime[i-1];
+    const curr = facesOverTime[i];
+    const hasCut = [...scCutTimes].some(ct => ct > prev.t && ct <= curr.t);
+    const countChanged = prev.faceCount !== curr.faceCount;
+    if(hasCut || countChanged){
+      segments.push({ from: segStart, to: i - 1 });
+      segStart = i;
+    }
+  }
+  segments.push({ from: segStart, to: facesOverTime.length - 1 });
+
+  const cropForSegment = (seg) => {
+    const samples = facesOverTime.slice(seg.from, seg.to + 1);
+    const hasFaces = samples.some(s => s.faceCount > 0);
+    if(!hasFaces){
+      const cw = Math.min(srcW, Math.round(srcH * targetAR));
+      const ch = Math.min(srcH, Math.round(srcW / targetAR));
+      const cx = Math.round((srcW - cw) / 2);
+      const cy = Math.round((srcH - ch) / 2);
+      return { x: cx, y: cy, w: cw, h: ch };
+    }
+    let minX = 1, minY = 1, maxX = 0, maxY = 0;
+    for(const s of samples){
+      for(const f of s.faces){
+        minX = Math.min(minX, f.x);
+        minY = Math.min(minY, f.y);
+        maxX = Math.max(maxX, f.x + f.w);
+        maxY = Math.max(maxY, f.y + f.h);
+      }
+    }
+    const PAD = 0.35;
+    const fw = maxX - minX, fh = maxY - minY;
+    minX = Math.max(0, minX - fw * PAD);
+    minY = Math.max(0, minY - fh * PAD);
+    maxX = Math.min(1, maxX + fw * PAD);
+    maxY = Math.min(1, maxY + fh * PAD);
+    let bx = minX * srcW, by = minY * srcH;
+    let bw = (maxX - minX) * srcW, bh = (maxY - minY) * srcH;
+    const bAR = bw / bh;
+    if(bAR < targetAR){ bw = bh * targetAR; }
+    else { bh = bw / targetAR; }
+    bx = Math.max(0, Math.min(srcW - bw, bx + ((maxX - minX) * srcW - bw) / 2));
+    by = Math.max(0, Math.min(srcH - bh, by + ((maxY - minY) * srcH - bh) / 2));
+    bw = Math.min(srcW - bx, bw);
+    bh = Math.min(srcH - by, bh);
+    return { x: Math.round(bx), y: Math.round(by), w: Math.round(bw), h: Math.round(bh) };
+  };
+
+  return segments.map((seg, i) => {
+    const tStart = facesOverTime[seg.from].t;
+    const tEnd = facesOverTime[seg.to].t;
+    const crop = cropForSegment(seg);
+    const prevCrop = i > 0 ? cropForSegment(segments[i-1]) : null;
+    return { tStart, tEnd, crop, easeFrom: prevCrop, easeDuration: 0.3 };
+  });
+};
+
+const lerpCrop = (a, b, alpha) => ({
+  x: Math.round(a.x + (b.x - a.x) * alpha),
+  y: Math.round(a.y + (b.y - a.y) * alpha),
+  w: Math.round(a.w + (b.w - a.w) * alpha),
+  h: Math.round(a.h + (b.h - a.h) * alpha),
+});
+
+const cropAtTime = (cropPath, t) => {
+  if(!cropPath || cropPath.length === 0) return null;
+  const seg = cropPath.find(s => t >= s.tStart && t <= s.tEnd) || cropPath[cropPath.length - 1];
+  if(!seg) return null;
+  if(seg.easeFrom && t < seg.tStart + seg.easeDuration){
+    const alpha = Math.min(1, (t - seg.tStart) / seg.easeDuration);
+    return lerpCrop(seg.easeFrom, seg.crop, alpha);
+  }
+  return seg.crop;
+};
+
+const renderClipSmartCrop = async (videoUrl, clip, presetId, cropPath, onProgress) => {
+  const [targetW, targetH] = SC_PRESET_DIMS[presetId] || SC_PRESET_DIMS.vertical;
+  const start = Math.max(0, Number(clip.start) || 0);
+  const end = Math.max(start + 0.1, Number(clip.end) || (start + 1));
+  const duration = end - start;
+
+  const vid = document.createElement("video");
+  vid.src = videoUrl;
+  vid.muted = true;
+  vid.playsInline = true;
+  vid.preload = "auto";
+  await new Promise((res, rej) => { vid.onloadedmetadata = res; vid.onerror = rej; });
+  await new Promise((res, rej) => { vid.onseeked = res; vid.onerror = rej; try { vid.currentTime = start; } catch(e){ rej(e); } });
+
+  const canvas = document.createElement("canvas");
+  canvas.width = targetW;
+  canvas.height = targetH;
+  const ctx = canvas.getContext("2d");
+
+  const srcW = vid.videoWidth || 1920;
+  const srcH = vid.videoHeight || 1080;
+
+  const videoStream = canvas.captureStream(30);
+  let audioTrack = null;
+  try {
+    const capFn = vid.captureStream || vid.mozCaptureStream;
+    if(capFn){
+      const vs = capFn.call(vid);
+      const at = vs.getAudioTracks()[0];
+      if(at) audioTrack = at;
+    }
+  } catch(_){}
+  const stream = audioTrack
+    ? new MediaStream([...videoStream.getVideoTracks(), audioTrack])
+    : videoStream;
+
+  const mimes = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"];
+  let mime = "";
+  for(const m of mimes){ if(MediaRecorder.isTypeSupported(m)){ mime = m; break; } }
+  const rec = new MediaRecorder(stream, mime ? { mimeType: mime, videoBitsPerSecond: 6_000_000 } : undefined);
+  const chunks = [];
+  rec.ondataavailable = (e) => { if(e.data && e.data.size) chunks.push(e.data); };
+  const done = new Promise((res) => { rec.onstop = res; });
+  rec.start(200);
+
+  const drawFrame = () => {
+    const t = vid.currentTime - start;
+    const crop = cropAtTime(cropPath, t) || { x: 0, y: 0, w: srcW, h: srcH };
+    ctx.drawImage(vid, crop.x, crop.y, crop.w, crop.h, 0, 0, targetW, targetH);
+    if(onProgress) onProgress(Math.min(0.95, t / duration));
+  };
+
+  await vid.play();
+
+  await new Promise((res) => {
+    const rvfc = vid.requestVideoFrameCallback
+      ? (cb) => vid.requestVideoFrameCallback(cb)
+      : (cb) => requestAnimationFrame(cb);
+    const tick = () => {
+      if(vid.currentTime >= end || vid.ended){ res(); return; }
+      drawFrame();
+      rvfc(tick);
+    };
+    rvfc(tick);
+  });
+
+  try { rec.stop(); } catch(_){}
+  try { vid.pause(); } catch(_){}
+  await done;
+  try { vid.src = ""; } catch(_){}
+
+  if(onProgress) onProgress(1);
+  return new Blob(chunks, { type: mime || "video/webm" });
+};
+
+// ─── end x108 helpers ────────────────────────────────────────────────────────
 
 // x96: Trigger a browser download from a Blob.
 const downloadBlob = (blob, filename) => {
@@ -5115,8 +5347,9 @@ function RepurposeTranscriptStrip({ project }){
   );
 }
 
-function RepurposeClipPreview({ clip, clipBlobUrl, clipThumbUrl, uploadedVideoUrl, sourceUrl, width, height }){
+function RepurposeClipPreview({ clip, clipBlobUrl, clipThumbUrl, uploadedVideoUrl, sourceUrl, width, height, cropPath }){
   const videoRef = useRef(null);
+  const overlayCanvasRef = useRef(null);
   const [playing, setPlaying] = useState(false);
   const [pos, setPos] = useState(clip.start || 0);
   const [muted, setMuted] = useState(true);
@@ -5174,6 +5407,35 @@ function RepurposeClipPreview({ clip, clipBlobUrl, clipThumbUrl, uploadedVideoUr
 
   const pct = Math.max(0, Math.min(100, ((pos - (clip.start || 0)) / dur) * 100));
 
+  useEffect(() => {
+    const canvas = overlayCanvasRef.current;
+    const vid = videoRef.current;
+    if(!canvas || !vid || !cropPath || !cropPath.length) return;
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    let rafId;
+    const draw = () => {
+      ctx.clearRect(0, 0, width, height);
+      const t = (vid.currentTime || 0) - (clip.start || 0);
+      const crop = cropAtTime(cropPath, t);
+      if(crop){
+        const vw = vid.videoWidth || 1;
+        const vh = vid.videoHeight || 1;
+        const scaleX = width / vw;
+        const scaleY = height / vh;
+        const rx = crop.x * scaleX, ry = crop.y * scaleY;
+        const rw = crop.w * scaleX, rh = crop.h * scaleY;
+        ctx.strokeStyle = "rgba(99,102,241,0.9)";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(rx, ry, rw, rh);
+      }
+      rafId = requestAnimationFrame(draw);
+    };
+    draw();
+    return () => { cancelAnimationFrame(rafId); ctx.clearRect(0, 0, width, height); };
+  }, [cropPath, pos, width, height, clip.start]);
+
   // x93: pre-cut clip blob — play the already-trimmed mp4 directly.
   if(clipBlobUrl){
     return (
@@ -5220,6 +5482,13 @@ function RepurposeClipPreview({ clip, clipBlobUrl, clipThumbUrl, uploadedVideoUr
         >
           {muted ? "🔇" : "🔊"}
         </button>
+        {cropPath && cropPath.length > 0 && (
+          <canvas
+            ref={overlayCanvasRef}
+            className="absolute inset-0 pointer-events-none"
+            style={{ width, height }}
+          />
+        )}
         <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/10">
           <div className="h-full bg-gradient-to-r from-indigo-400 to-cyan-400" style={{ width: pct + "%" }} />
         </div>
@@ -5257,7 +5526,7 @@ function RepurposeClipPreview({ clip, clipBlobUrl, clipThumbUrl, uploadedVideoUr
   );
 }
 
-function RepurposeClipCard({ clip, onField, onRegen, regenBusy, onRemove, onExplain, explainBusy, onHookAlts, hookAltsBusy, onThumbConcept, thumbConceptBusy, onHookScore, hookScoreBusy, onObjAnswer, objAnswerBusy, onCommentSeeds, commentSeedsBusy, onCopyPost, copyPostBusy, onRenderVideo, renderVideoBusy, renderVideoProgress, uploadEnabled, uploadedVideoUrl, sourceUrl, clipBlobUrl, clipThumbUrl, onShare, shareBusyPlatform, signals, trendingMatches }){
+function RepurposeClipCard({ clip, onField, onRegen, regenBusy, onRemove, onExplain, explainBusy, onHookAlts, hookAltsBusy, onThumbConcept, thumbConceptBusy, onHookScore, hookScoreBusy, onObjAnswer, objAnswerBusy, onCommentSeeds, commentSeedsBusy, onCopyPost, copyPostBusy, onRenderVideo, renderVideoBusy, renderVideoProgress, uploadEnabled, uploadedVideoUrl, sourceUrl, clipBlobUrl, clipThumbUrl, onShare, shareBusyPlatform, signals, trendingMatches, cropPath }){
   const [shareOpen, setShareOpen] = useState(false);
   const band = viralityBand(clip.virality);
   const preset = REPURPOSE_PRESETS.find(p => p.id === clip.preset) || REPURPOSE_PRESETS[0];
@@ -5315,6 +5584,7 @@ function RepurposeClipCard({ clip, onField, onRegen, regenBusy, onRemove, onExpl
           sourceUrl={sourceUrl}
           width={previewW}
           height={previewH}
+          cropPath={cropPath}
         />
       </div>
       {signals && (() => {
@@ -7143,12 +7413,21 @@ function RepurposeTab(){
         ? (metadata.description + "\n\n" + metadata.hashtags.map(h => "#" + h.replace(/^#/, "")).join(" "))
         : buildClipExportText(clip, project);
       try { await navigator.clipboard.writeText(clipboardText); } catch(e){}
-      // Render a real 1080p MP4 via the hidden-tab-safe pipeline (x99f). No more 0-byte files.
+      // Render a real 1080p MP4 — smart crop path when enabled, fallback to two-pass.
       let downloaded = false;
       if(project.uploadedVideoUrl){
         try {
-          const recBlob = await recordClipViaCaptureStream(project.uploadedVideoUrl, clip, null);
-          const outBlob = await reencodeWebmToPresetMP4(recBlob, clip.preset || "vertical", null);
+          const preset = clip.preset || "vertical";
+          const cacheKey = clip.id + ":" + preset;
+          const cached = smartCropCacheRef.current[cacheKey];
+          let outBlob = null;
+          if(smartCropEnabled && cached && cached.facesOverTime.length && cached.path.length){
+            outBlob = await renderClipSmartCrop(project.uploadedVideoUrl, clip, preset, cached.path, null);
+            outBlob = await reencodeWebmToPresetMP4(outBlob, preset, null);
+          } else {
+            const recBlob = await recordClipViaCaptureStream(project.uploadedVideoUrl, clip, null);
+            outBlob = await reencodeWebmToPresetMP4(recBlob, preset, null);
+          }
           const url = URL.createObjectURL(outBlob);
           const a = document.createElement("a");
           a.href = url;
@@ -7260,6 +7539,41 @@ function RepurposeTab(){
   const [objAnswerBusyId, setObjAnswerBusyId] = useState(null);
   const [precisionEnabled, setPrecisionEnabled] = useLocalState("repurpose.precision", true);
   const [showWeak, setShowWeak] = useLocalState("repurpose.showWeak", false);
+  const [smartCropEnabled, setSmartCropEnabled] = useLocalState("repurpose.smartCrop", true);
+  const smartCropCacheRef = useRef({});
+  const smartCropDetectRef = useRef(null);
+  const [cropPaths, setCropPaths] = useState({});
+
+  useEffect(() => {
+    if(!smartCropEnabled || !project.uploadedVideoUrl || !project.clips.length) return;
+    if(smartCropDetectRef.current) clearTimeout(smartCropDetectRef.current);
+    smartCropDetectRef.current = setTimeout(async () => {
+      const url = project.uploadedVideoUrl;
+      const batchPresetLocal = safeGet("repurpose.batchPreset", "vertical");
+      const sceneCuts = (project.signals && project.signals.scenes) || [];
+      for(const clip of project.clips){
+        const cacheKey = clip.id + ":" + (clip.preset || batchPresetLocal);
+        if(smartCropCacheRef.current[cacheKey]) continue;
+        try {
+          const facesOverTime = await detectFacesInClip(url, clip, {});
+          if(!facesOverTime.length) continue;
+          const vid = document.createElement("video");
+          vid.src = url;
+          vid.preload = "metadata";
+          await new Promise((res) => { vid.onloadedmetadata = res; vid.onerror = res; });
+          const srcWH = [vid.videoWidth || 1920, vid.videoHeight || 1080];
+          try { vid.src = ""; } catch(_){}
+          const clipCuts = sceneCuts.filter(s => s.t >= clip.start && s.t <= clip.end).map(s => ({ t: s.t - clip.start }));
+          const preset = clip.preset || batchPresetLocal;
+          const path = computeCropPath(facesOverTime, clipCuts, srcWH, preset);
+          smartCropCacheRef.current[cacheKey] = { facesOverTime, path };
+          setCropPaths(prev => ({ ...prev, [cacheKey]: path }));
+        } catch(_) {}
+      }
+    }, 500);
+    return () => { if(smartCropDetectRef.current) clearTimeout(smartCropDetectRef.current); };
+  }, [smartCropEnabled, project.uploadedVideoUrl, project.clips, project.signals]);
+
   const generateObjAnswer = async (clipId) => {
     if(objAnswerBusyId) return;
     const clip = project.clips.find(c => c.id === clipId);
@@ -7424,17 +7738,20 @@ const removeClip = (clipId) => {
           toast("Skipped clip " + (clip.title || clip.id) + " (no uploaded source)", "warn");
           continue;
         }
-        // Two-pass pipeline: record via <video>.captureStream() (hidden-tab-safe, since
-        // video playback + MediaStreamTracks don't depend on rAF), then ffmpeg.wasm
-        // scale+pad the VP9 recording to 1080p H.264 MP4. Replaces the canvas+rAF
-        // renderClipVideoFromUpload path which produced 1-frame outputs whenever the
-        // tab lost focus. Overlay burn-in is dropped for batch export — per-clip
-        // "Render video" chip still has it for single previews.
         try {
-          setProcessStatus("Recording " + (i + 1) + "/" + selectedClips.length + "…");
-          const recBlob = await recordClipViaCaptureStream(project.uploadedVideoUrl, clip, (p) => onProg(p));
-          setProcessStatus("Encoding " + (i + 1) + "/" + selectedClips.length + " (1080p)…");
-          outBlob = await reencodeWebmToPresetMP4(recBlob, preset, (p) => onProg(p));
+          const cacheKey = clip.id + ":" + (clip.preset || preset);
+          const cached = smartCropCacheRef.current[cacheKey];
+          if(smartCropEnabled && cached && cached.facesOverTime.length && cached.path.length){
+            setProcessStatus("Smart-crop " + (i + 1) + "/" + selectedClips.length + "…");
+            const rawBlob = await renderClipSmartCrop(project.uploadedVideoUrl, clip, clip.preset || preset, cached.path, (p) => onProg(p * 0.5));
+            setProcessStatus("Encoding " + (i + 1) + "/" + selectedClips.length + " (1080p)…");
+            outBlob = await reencodeWebmToPresetMP4(rawBlob, clip.preset || preset, (p) => onProg(0.5 + p * 0.5));
+          } else {
+            setProcessStatus("Recording " + (i + 1) + "/" + selectedClips.length + "…");
+            const recBlob = await recordClipViaCaptureStream(project.uploadedVideoUrl, clip, (p) => onProg(p));
+            setProcessStatus("Encoding " + (i + 1) + "/" + selectedClips.length + " (1080p)…");
+            outBlob = await reencodeWebmToPresetMP4(recBlob, preset, (p) => onProg(p));
+          }
         } catch(e){
           console.warn("[zs] captureStream/reencode failed for clip", clip.id, e);
           outBlob = null;
@@ -7532,6 +7849,7 @@ const removeClip = (clipId) => {
                 toast("Re-snapped " + changed + " clip" + (changed===1?'':'s') + " to complete thoughts", "success");
               }} disabled={!project.clips || project.clips.length===0}>Fix cuts</button>
               <button className="chip" onClick={() => setPrecisionEnabled(v => !v)}>Precision pass {precisionEnabled ? "ON" : "OFF"}</button>
+              <button className="chip" onClick={() => { setSmartCropEnabled(v => !v); smartCropCacheRef.current = {}; setCropPaths({}); }}>Smart crop {smartCropEnabled ? "ON" : "OFF"}</button>
               <button className="chip" onClick={() => setShowWeak(v => !v)}>Show weak {showWeak ? "ON" : "OFF"}</button>
               <button className="chip" onClick={generateAllCaptions} disabled={captionsBusy || !project.clips || project.clips.length===0}>{captionsBusy ? "Generating…" : "Generate captions"}</button>
               {captionsSource && (
@@ -7598,6 +7916,7 @@ const removeClip = (clipId) => {
                     shareBusyPlatform={shareBusyId && shareBusyId.startsWith(c.id + ":") ? shareBusyId.split(":")[1] : null}
                     signals={project.signals || null}
                     trendingMatches={(project.signals && project.signals.trendingMatches) || []}
+                    cropPath={smartCropEnabled ? (cropPaths[c.id + ":" + (c.preset || batchPreset)] || null) : null}
                   />
                 </div>
               );
