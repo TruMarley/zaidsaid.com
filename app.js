@@ -1,4 +1,4 @@
-/* Zaidsaid — app.js v2.0 — x99e: Repurpose — fix autoplay block in renderClipVideoFromUpload. The canvas/MediaRecorder render created a fresh <video src={blob}>, seeked, then called `src.play()` — but with `muted=false`, Chrome's autoplay policy threw `NotAllowedError: play() failed because the user didn't interact with the document first` once the original user gesture was consumed by the async awaits. Setting `muted=true` lets play() succeed without a gesture; the audio is still captured via `<video>.captureStream()` since muted only gates speaker output, not decoded audio tracks. | x99d: fix 0-byte batch export on AV1 sources. YouTube's progressive MP4s are AV1; cutClipFromSource's `-c copy` preserved that codec, then reencodeClipForPreset (libx264 transcode) silently failed because ffmpeg.wasm 5.1.4 has no AV1 decoder (config lacks libdav1d). ffmpeg.exec returned exit=1 but the old code ignored it, readFile returned 0 bytes, and we shipped empty MP4s. Fix (a) exportClipsAsVideo now prefers renderClipVideoFromUpload (canvas + MediaRecorder, uses browser-native AV1 decoding via <video>) on the uploaded source, falling back to the ffmpeg per-clip re-encode only when that fails; (b) reencodeClipForPreset now throws on non-zero exit or 0-byte output instead of returning an empty blob. Trade-off: outputs are .webm VP9/VP8 at 720p (renderClipVideoFromUpload dims) rather than .mp4 H.264 1080p; acceptable for the MVP, bigger resolution is an easy follow-up. | x99c: switch ffmpeg core from UMD to ESM. @ffmpeg/ffmpeg@0.12.10's worker.js is always instantiated as `{type:"module"}`, and module Workers can't call `importScripts`, so worker.js falls through to `await import(coreURL)`. The UMD build registers `self.createFFmpegCore` as a side effect but has no ESM `default` export, so the worker throws `ERROR_IMPORT_FAILURE`. Using `/esm/ffmpeg-core.js` (which has a proper default export) lets the module import complete. | x99b: self-host @ffmpeg/ffmpeg + @ffmpeg/util. Chrome refuses to construct a Worker from a cross-origin URL, CSP or CORS headers notwithstanding; @ffmpeg/ffmpeg@0.12.10 does `new Worker(new URL("./worker.js", import.meta.url), {type:"module"})` relative to its own module URL, so loading it from unpkg makes the Worker cross-origin and it throws `Failed to construct 'Worker': Script … cannot be accessed from origin 'https://zaidsaid.com'`. The ESM bundle now lives in ./vendor/{ffmpeg,util}/esm/. @ffmpeg/core WASM still loads from unpkg via toBlobURL (blob: URLs are same-origin from the Worker's perspective). | x99: tried adding `https://unpkg.com` to CSP `worker-src` — necessary but not sufficient, Chrome still blocked the cross-origin worker. | x98: Phase D — trending-context scoring. Worker routes /trends/{google,reddit,hn,x} (HN + Reddit + Google free; X via Apify needs APIFY_TOKEN). Client extracts 3-8 topic keywords via Claude tool_use, fetches trend matches, folds into analyzeViaClaudeTwoStage with convergent-attention boost. | x97: Phase C — multi-modal virality signals. WebCodecs scene-cut detection in-browser; /gemini-video-highlights worker route (Gemini 2.5 Flash, graceful no-key); /sensevoice worker route (Replicate SenseVoice for laughter/applause, graceful no-key). Claude scoring extended to boost clips matching ≥2 signal types. | x96: Phase E — preset-aware per-clip re-encoding via ffmpeg.wasm (scale+pad for 9:16/1:1/16:9) + JSZip batch download when multiple clips selected. Replaces the old MediaRecorder .webm pipeline for clips that have a per-clip mp4 blob. | x95: Phase B UI cleanup: collapsed intake to URL/File, folded YT downloader into URL expandable, per-clip actions 9→3, removed fake waveform, toolbar pruned. | x94: clear stale clips at Generate start + narrow reseed effect so demo doesn't overwrite a user's upload on refresh. | x93: Repurpose — real per-clip mp4 cuts + thumbnail frames. cutClipFromSource (ffmpeg.wasm, -ss after -i, -c copy with libx264 fallback <5 min) + grabFrameThumb (off-DOM canvas) + generateClipAssets (sequential, IDB-backed). processSource fires generateClipAssets after setProject for upload flows. RepurposeTab hydrates clipBlobUrls Map from IDB on mount; RepurposeClipPreview shows pre-cut <video controls> when blob ready. removeClip deletes IDB entries + revokes URLs. | x92: Repurpose — big videos extract audio client-side before transcribing. Lazy-loads ffmpeg.wasm (@ffmpeg/ffmpeg@0.12.10 + @ffmpeg/core@0.12.6 from unpkg, ~30 MB one-time); any uploaded video >50 MB is reduced to mono 16 kHz 32 kbps MP3 (~14 MB/hr) before POSTing to /elevenlabs/v1/speech-to-text. Fixes 700+ MB uploads hanging on the Cloudflare Worker 500 MiB body limit. CSP widened for wasm-unsafe-eval, blob: workers, and unpkg connect. | x91: Repurpose — uploaded files now survive page refreshes. New IndexedDB blob store (zaidsaid/uploads, key repurpose:current) persists the File on upload; RepurposeTab useEffect on mount HEAD-checks the existing blob URL and rehydrates from IDB when it's dead, or clears the dangling reference + toasts "please re-upload" when IDB is empty too. processSource now reads the blob from IDB first, falling back to the blob URL. Remove button deletes the IDB entry. | x90: Repurpose — uploads now actually clip. processSource gate no longer bails on empty source when an uploaded video is present; on new file upload we clear stale transcript/chapters/clips/name; uploaded videos without a transcript auto-transcribe via ElevenLabs Scribe (/elevenlabs/v1/speech-to-text with model_id=scribe_v1, word-level timestamps grouped into ~6s segments) and feed the existing two-stage viral analyzer. New fuchsia "ElevenLabs Scribe (auto-transcribed)" source chip. | x89: Repurpose — YouTube downloader tool (paste URL → fetch progressive formats via worker InnerTube → quality dropdown → File System Access folder picker with streamed writable, falls back to <a download> when unsupported). Worker: /youtube-formats, /youtube-media. | x88: batch export respects selection + preset-aware video render — "Export selected as video" renders .webm per selected clip at its preset aspect ratio (9:16/1:1/16:9); fallback selection→approved→all; metadata (.txt) export kept as secondary. Fix stray /span> text below batch-export button. | x87: clip length range widened — 5s floor (viral reactions, one-liners) to 1800s / 30min ceiling (full topic arcs); removed rigid length-mix prompt in favor of idea-first sizing | x86: clip preview no-autoplay — remove YouTube loop=1&playlist (fixes whole-video loop), remove autoPlay on uploaded video, preview now shows clip-only paused state until user clicks play | x85: Phase B.1 — persist chapters on description-fallback, surface worker errors, transcript-source chip, length-variance prompt, analyzeLocal intro-skip, **remove dead RepurposeAnalyzer + RepurposeRealAnalyze god-mode components** | x84: Phase B — YT chapter-boundary detection (parseYouTubeChapters in worker; analyzeLocal uses chapter spans as candidate windows when ≥3 chapters; Claude receives chapter list for boundary alignment) + Web Audio energy analyzer (analyzeUploadedVideoAudio: 8x scrub AudioContext RMS scan on uploaded files; peaks boost analyzeLocal virality by +5*peakDensity) | x83: Smart Clipping v2 — two-stage viral detection + topic-boundary awareness + variable 30-180s clip length + unified Generate flow + target default 10 (range 3-20) | x82: preview fix — CSP frame-src, youtube-nocookie embed, thumbnail fallback | x80: Smart Clipping — viral moment detection. Worker /youtube-transcript returns segments[{t,d,text}]. analyzeViaClaude uses timestamped transcript with 4-dimension scoring (hook_power/emotional_impact/quotability/surprise_drama). analyzeLocal scores ~45-75s windows, picks top N with spatial diversity across full duration. YT iframe autoplay+loop within clip range; uploaded video autoplay muted with loop-on-end.
+/* Zaidsaid — app.js v2.0 — x99f: Repurpose — batch export rebuilt as two-pass (captureStream → ffmpeg), works in hidden tabs + outputs 1080p H.264 MP4. Root cause of the 0-byte downloads: x99d/e's renderClipVideoFromUpload drives canvas.drawImage via requestAnimationFrame, and rAF throttles to ~1 Hz as soon as the tab loses focus. canvas.captureStream() then emits ≤1 frame/sec, MediaRecorder packs a 1-frame blob, and the user gets a .webm that won't play. Fix (a) recordClipViaCaptureStream plays the uploaded source muted and pipes `<video>.captureStream()` straight into MediaRecorder — video playback + MediaStream tracks are NOT bound by rAF, so this keeps running in hidden/backgrounded tabs; (b) reencodeWebmToPresetMP4 uses ffmpeg.wasm to scale+pad the VP9 recording to the target preset and encode libx264 at CRF 20 for real 1080p H.264 MP4 output — ffmpeg.wasm decodes VP9 fine (only AV1 from the raw YouTube MP4 was the blind spot). Also bumped downloadBlob's revokeObjectURL delay from 500 ms → 60 s so Chrome's download manager isn't cut off mid-write on big blobs. Overlay burn-in dropped from batch export — per-clip "Render video" chip still has it for single previews. | x99e: fix autoplay block in renderClipVideoFromUpload. The canvas/MediaRecorder render created a fresh <video src={blob}>, seeked, then called `src.play()` — but with `muted=false`, Chrome's autoplay policy threw `NotAllowedError: play() failed because the user didn't interact with the document first` once the original user gesture was consumed by the async awaits. Setting `muted=true` lets play() succeed without a gesture; the audio is still captured via `<video>.captureStream()` since muted only gates speaker output, not decoded audio tracks. | x99d: fix 0-byte batch export on AV1 sources. YouTube's progressive MP4s are AV1; cutClipFromSource's `-c copy` preserved that codec, then reencodeClipForPreset (libx264 transcode) silently failed because ffmpeg.wasm 5.1.4 has no AV1 decoder (config lacks libdav1d). ffmpeg.exec returned exit=1 but the old code ignored it, readFile returned 0 bytes, and we shipped empty MP4s. Fix (a) exportClipsAsVideo now prefers renderClipVideoFromUpload (canvas + MediaRecorder, uses browser-native AV1 decoding via <video>) on the uploaded source, falling back to the ffmpeg per-clip re-encode only when that fails; (b) reencodeClipForPreset now throws on non-zero exit or 0-byte output instead of returning an empty blob. Trade-off: outputs are .webm VP9/VP8 at 720p (renderClipVideoFromUpload dims) rather than .mp4 H.264 1080p; acceptable for the MVP, bigger resolution is an easy follow-up. | x99c: switch ffmpeg core from UMD to ESM. @ffmpeg/ffmpeg@0.12.10's worker.js is always instantiated as `{type:"module"}`, and module Workers can't call `importScripts`, so worker.js falls through to `await import(coreURL)`. The UMD build registers `self.createFFmpegCore` as a side effect but has no ESM `default` export, so the worker throws `ERROR_IMPORT_FAILURE`. Using `/esm/ffmpeg-core.js` (which has a proper default export) lets the module import complete. | x99b: self-host @ffmpeg/ffmpeg + @ffmpeg/util. Chrome refuses to construct a Worker from a cross-origin URL, CSP or CORS headers notwithstanding; @ffmpeg/ffmpeg@0.12.10 does `new Worker(new URL("./worker.js", import.meta.url), {type:"module"})` relative to its own module URL, so loading it from unpkg makes the Worker cross-origin and it throws `Failed to construct 'Worker': Script … cannot be accessed from origin 'https://zaidsaid.com'`. The ESM bundle now lives in ./vendor/{ffmpeg,util}/esm/. @ffmpeg/core WASM still loads from unpkg via toBlobURL (blob: URLs are same-origin from the Worker's perspective). | x99: tried adding `https://unpkg.com` to CSP `worker-src` — necessary but not sufficient, Chrome still blocked the cross-origin worker. | x98: Phase D — trending-context scoring. Worker routes /trends/{google,reddit,hn,x} (HN + Reddit + Google free; X via Apify needs APIFY_TOKEN). Client extracts 3-8 topic keywords via Claude tool_use, fetches trend matches, folds into analyzeViaClaudeTwoStage with convergent-attention boost. | x97: Phase C — multi-modal virality signals. WebCodecs scene-cut detection in-browser; /gemini-video-highlights worker route (Gemini 2.5 Flash, graceful no-key); /sensevoice worker route (Replicate SenseVoice for laughter/applause, graceful no-key). Claude scoring extended to boost clips matching ≥2 signal types. | x96: Phase E — preset-aware per-clip re-encoding via ffmpeg.wasm (scale+pad for 9:16/1:1/16:9) + JSZip batch download when multiple clips selected. Replaces the old MediaRecorder .webm pipeline for clips that have a per-clip mp4 blob. | x95: Phase B UI cleanup: collapsed intake to URL/File, folded YT downloader into URL expandable, per-clip actions 9→3, removed fake waveform, toolbar pruned. | x94: clear stale clips at Generate start + narrow reseed effect so demo doesn't overwrite a user's upload on refresh. | x93: Repurpose — real per-clip mp4 cuts + thumbnail frames. cutClipFromSource (ffmpeg.wasm, -ss after -i, -c copy with libx264 fallback <5 min) + grabFrameThumb (off-DOM canvas) + generateClipAssets (sequential, IDB-backed). processSource fires generateClipAssets after setProject for upload flows. RepurposeTab hydrates clipBlobUrls Map from IDB on mount; RepurposeClipPreview shows pre-cut <video controls> when blob ready. removeClip deletes IDB entries + revokes URLs. | x92: Repurpose — big videos extract audio client-side before transcribing. Lazy-loads ffmpeg.wasm (@ffmpeg/ffmpeg@0.12.10 + @ffmpeg/core@0.12.6 from unpkg, ~30 MB one-time); any uploaded video >50 MB is reduced to mono 16 kHz 32 kbps MP3 (~14 MB/hr) before POSTing to /elevenlabs/v1/speech-to-text. Fixes 700+ MB uploads hanging on the Cloudflare Worker 500 MiB body limit. CSP widened for wasm-unsafe-eval, blob: workers, and unpkg connect. | x91: Repurpose — uploaded files now survive page refreshes. New IndexedDB blob store (zaidsaid/uploads, key repurpose:current) persists the File on upload; RepurposeTab useEffect on mount HEAD-checks the existing blob URL and rehydrates from IDB when it's dead, or clears the dangling reference + toasts "please re-upload" when IDB is empty too. processSource now reads the blob from IDB first, falling back to the blob URL. Remove button deletes the IDB entry. | x90: Repurpose — uploads now actually clip. processSource gate no longer bails on empty source when an uploaded video is present; on new file upload we clear stale transcript/chapters/clips/name; uploaded videos without a transcript auto-transcribe via ElevenLabs Scribe (/elevenlabs/v1/speech-to-text with model_id=scribe_v1, word-level timestamps grouped into ~6s segments) and feed the existing two-stage viral analyzer. New fuchsia "ElevenLabs Scribe (auto-transcribed)" source chip. | x89: Repurpose — YouTube downloader tool (paste URL → fetch progressive formats via worker InnerTube → quality dropdown → File System Access folder picker with streamed writable, falls back to <a download> when unsupported). Worker: /youtube-formats, /youtube-media. | x88: batch export respects selection + preset-aware video render — "Export selected as video" renders .webm per selected clip at its preset aspect ratio (9:16/1:1/16:9); fallback selection→approved→all; metadata (.txt) export kept as secondary. Fix stray /span> text below batch-export button. | x87: clip length range widened — 5s floor (viral reactions, one-liners) to 1800s / 30min ceiling (full topic arcs); removed rigid length-mix prompt in favor of idea-first sizing | x86: clip preview no-autoplay — remove YouTube loop=1&playlist (fixes whole-video loop), remove autoPlay on uploaded video, preview now shows clip-only paused state until user clicks play | x85: Phase B.1 — persist chapters on description-fallback, surface worker errors, transcript-source chip, length-variance prompt, analyzeLocal intro-skip, **remove dead RepurposeAnalyzer + RepurposeRealAnalyze god-mode components** | x84: Phase B — YT chapter-boundary detection (parseYouTubeChapters in worker; analyzeLocal uses chapter spans as candidate windows when ≥3 chapters; Claude receives chapter list for boundary alignment) + Web Audio energy analyzer (analyzeUploadedVideoAudio: 8x scrub AudioContext RMS scan on uploaded files; peaks boost analyzeLocal virality by +5*peakDensity) | x83: Smart Clipping v2 — two-stage viral detection + topic-boundary awareness + variable 30-180s clip length + unified Generate flow + target default 10 (range 3-20) | x82: preview fix — CSP frame-src, youtube-nocookie embed, thumbnail fallback | x80: Smart Clipping — viral moment detection. Worker /youtube-transcript returns segments[{t,d,text}]. analyzeViaClaude uses timestamped transcript with 4-dimension scoring (hook_power/emotional_impact/quotability/surprise_drama). analyzeLocal scores ~45-75s windows, picks top N with spatial diversity across full duration. YT iframe autoplay+loop within clip range; uploaded video autoplay muted with loop-on-end.
  * Security: localStorage namespaced as zaidsaid.v2.*, error boundary, no innerHTML, no eval, no fetch.
  * Archived v1 seed data preserved under ARCHIVE_* for later reuse.
  */
@@ -1867,6 +1867,91 @@ const reencodeClipForPreset = async (srcMp4Blob, presetId, onProgress) => {
   }
 };
 
+// x99f: Two-pass batch export — record <video>.captureStream() → ffmpeg.wasm reencode.
+// Pass 1 (captureStream) works in hidden tabs because video element playback, MediaStream
+// tracks, and MediaRecorder are NOT bound by rAF throttling. The canvas+rAF pipeline in
+// renderClipVideoFromUpload produced 1-frame outputs whenever the tab lost focus. Pass 2
+// handles preset scale+pad + H.264 encode for real 1080p MP4 output. ffmpeg.wasm can
+// decode the VP9 that MediaRecorder emits (the AV1 blind spot only matters for the raw
+// YouTube MP4, not our re-encode).
+const recordClipViaCaptureStream = async (videoUrl, clip, onProgress) => {
+  if(!videoUrl) throw new Error("no video");
+  const start = Math.max(0, Number(clip.start) || 0);
+  const end = Math.max(start + 0.1, Number(clip.end) || (start + 1));
+  const duration = end - start;
+  const src = document.createElement("video");
+  src.src = videoUrl;
+  src.muted = true;
+  src.playsInline = true;
+  src.preload = "auto";
+  await new Promise((res, rej) => { src.onloadedmetadata = () => res(); src.onerror = () => rej(new Error("video load failed")); });
+  await new Promise((res, rej) => { src.onseeked = () => res(); src.onerror = () => rej(new Error("seek failed")); try { src.currentTime = start; } catch(e){ rej(e); } });
+  const capFn = src.captureStream || src.mozCaptureStream;
+  if(!capFn) throw new Error("video.captureStream not supported");
+  const stream = capFn.call(src);
+  const mimes = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"];
+  let mime = "";
+  for(const m of mimes){ if(window.MediaRecorder && MediaRecorder.isTypeSupported(m)){ mime = m; break; } }
+  const rec = new MediaRecorder(stream, mime ? { mimeType: mime, videoBitsPerSecond: 6_000_000 } : undefined);
+  const chunks = [];
+  rec.ondataavailable = (e) => { if(e.data && e.data.size) chunks.push(e.data); };
+  const done = new Promise((res) => { rec.onstop = () => res(); });
+  rec.start(500);
+  await src.play();
+  let progTimer = null;
+  if(typeof onProgress === "function"){
+    progTimer = setInterval(() => {
+      const t = Math.max(0, src.currentTime - start);
+      onProgress(Math.min(0.45, (t / duration) * 0.45));
+    }, 1000);
+  }
+  await new Promise((res) => {
+    const check = () => {
+      if(src.currentTime >= end || src.ended){ res(); return; }
+      setTimeout(check, 500);
+    };
+    check();
+  });
+  if(progTimer) clearInterval(progTimer);
+  try { rec.stop(); } catch(e){}
+  try { src.pause(); } catch(e){}
+  await done;
+  try { src.src = ""; } catch(e){}
+  const blob = new Blob(chunks, { type: mime || "video/webm" });
+  if(!blob.size) throw new Error("captureStream produced no data");
+  return blob;
+};
+
+const reencodeWebmToPresetMP4 = async (srcWebmBlob, presetId, onProgress) => {
+  const PRESET_DIMS = { vertical: [1080, 1920], square: [1080, 1080], landscape: [1920, 1080] };
+  const [W, H] = PRESET_DIMS[presetId] || PRESET_DIMS.vertical;
+  const { ffmpeg, util } = await loadFfmpeg(null);
+  const inputName = "rec_in.webm";
+  const outputName = "rec_out.mp4";
+  const progressHandler = ({ progress }) => { if(onProgress && typeof progress === "number") onProgress(0.5 + Math.min(0.49, progress * 0.49)); };
+  ffmpeg.on && ffmpeg.on("progress", progressHandler);
+  try {
+    await ffmpeg.writeFile(inputName, await util.fetchFile(srcWebmBlob));
+    const exit = await ffmpeg.exec([
+      "-i", inputName,
+      "-vf", "scale=" + W + ":" + H + ":force_original_aspect_ratio=decrease,pad=" + W + ":" + H + ":(ow-iw)/2:(oh-ih)/2:black,setsar=1",
+      "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+      "-c:a", "aac", "-b:a", "160k",
+      "-movflags", "+faststart",
+      outputName
+    ]);
+    if(exit !== 0) throw new Error("ffmpeg reencode failed (exit " + exit + ")");
+    const data = await ffmpeg.readFile(outputName);
+    const blob = new Blob([data.buffer || data], { type: "video/mp4" });
+    if(!blob.size) throw new Error("ffmpeg produced 0-byte output");
+    return blob;
+  } finally {
+    try { ffmpeg.off && ffmpeg.off("progress", progressHandler); } catch(_){}
+    try { await ffmpeg.deleteFile(inputName); } catch(_){}
+    try { await ffmpeg.deleteFile(outputName); } catch(_){}
+  }
+};
+
 // x96: Trigger a browser download from a Blob.
 const downloadBlob = (blob, filename) => {
   const url = URL.createObjectURL(blob);
@@ -1875,7 +1960,9 @@ const downloadBlob = (blob, filename) => {
   a.download = filename;
   document.body.appendChild(a);
   a.click();
-  setTimeout(() => { try { document.body.removeChild(a); URL.revokeObjectURL(url); } catch(_){} }, 500);
+  // 60 s — Chrome streams the blob to disk via the download manager; revoking too
+  // early (≤500 ms) truncates large downloads mid-write.
+  setTimeout(() => { try { document.body.removeChild(a); URL.revokeObjectURL(url); } catch(_){} }, 60000);
 };
 
 // x96: Wait for zip-loader.js to expose window.zsLoadJSZip (ESM module, deferred).
@@ -6405,29 +6492,28 @@ const removeClip = (clipId) => {
       const outputs = [];
       for(let i = 0; i < selectedClips.length; i++){
         const clip = selectedClips[i];
-        setProcessStatus("Encoding " + (i + 1) + "/" + selectedClips.length + "…");
-        const onProg = (p) => setBatchRenderProgress(Math.round((i + p) / selectedClips.length * 100));
         const safeTitle = (clip.title || "clip").replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "clip";
+        const onProg = (p) => setBatchRenderProgress(Math.round((i + p) / selectedClips.length * 100));
         let outBlob = null;
-        let ext = "webm";
-        // Primary: canvas + MediaRecorder on the uploaded source. Browser-native
-        // decoding handles any codec (AV1, H.264, VP9…). ffmpeg.wasm 5.1.4 has
-        // no AV1 decoder, so YouTube-sourced MP4s die there — use this path first.
-        if(project.uploadedVideoUrl){
-          try {
-            outBlob = await renderClipVideoFromUpload(project.uploadedVideoUrl, { ...clip, preset }, onProg, { overlay: { hook: clip.hook } });
-          } catch(e){ console.warn("[zs] renderClipVideoFromUpload failed for clip", clip.id, e); outBlob = null; }
+        let ext = "mp4";
+        if(!project.uploadedVideoUrl){
+          toast("Skipped clip " + (clip.title || clip.id) + " (no uploaded source)", "warn");
+          continue;
         }
-        // Fallback: ffmpeg-based re-encode of the per-clip IDB blob (only works
-        // when the cut's codec is one ffmpeg.wasm can decode — H.264, VP8/9, etc.).
-        if(!outBlob || !outBlob.size){
-          const srcBlob = await idbGetClip(clip.id);
-          if(srcBlob){
-            try {
-              outBlob = await reencodeClipForPreset(srcBlob, preset, onProg);
-              ext = "mp4";
-            } catch(e){ console.warn("[zs] reencodeClipForPreset failed for clip", clip.id, e); outBlob = null; }
-          }
+        // Two-pass pipeline: record via <video>.captureStream() (hidden-tab-safe, since
+        // video playback + MediaStreamTracks don't depend on rAF), then ffmpeg.wasm
+        // scale+pad the VP9 recording to 1080p H.264 MP4. Replaces the canvas+rAF
+        // renderClipVideoFromUpload path which produced 1-frame outputs whenever the
+        // tab lost focus. Overlay burn-in is dropped for batch export — per-clip
+        // "Render video" chip still has it for single previews.
+        try {
+          setProcessStatus("Recording " + (i + 1) + "/" + selectedClips.length + "…");
+          const recBlob = await recordClipViaCaptureStream(project.uploadedVideoUrl, clip, (p) => onProg(p));
+          setProcessStatus("Encoding " + (i + 1) + "/" + selectedClips.length + " (1080p)…");
+          outBlob = await reencodeWebmToPresetMP4(recBlob, preset, (p) => onProg(p));
+        } catch(e){
+          console.warn("[zs] captureStream/reencode failed for clip", clip.id, e);
+          outBlob = null;
         }
         if(!outBlob || !outBlob.size){
           toast("Skipped clip " + (clip.title || clip.id) + " (render failed or empty output)", "warn");
