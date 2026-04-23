@@ -3743,9 +3743,8 @@ function StepExport({ project, setProject }){
     if(!scenes.length){ setRenderErr('No scenes to render.'); return; }
     if(typeof MediaRecorder === 'undefined' || !HTMLCanvasElement.prototype.captureStream){ setRenderErr('Your browser does not support MediaRecorder + canvas.captureStream.'); return; }
     if(document.visibilityState !== 'visible'){
-      try { const _toastCtx = document.querySelector('[data-zs-toast]'); void _toastCtx; } catch(_){}
       console.warn('[zs] starting render with tab hidden — rAF may throttle; output could be choppy');
-      alert('Keep this tab focused — tab-switching during render may produce a blank or choppy video.');
+      setRenderErr('Tip: keep this tab focused during render for best quality. Continuing…');
     }
     setRenderBusy(true); setRenderErr(''); setRenderUrl(''); setRenderProgress(0);
     let audioCtx = null; let onVis = null; const _idbImgUrls = []; let _webmFallbackUrl = null;
