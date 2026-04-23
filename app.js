@@ -1,4 +1,4 @@
-/* Zaidsaid — app.js v2.0 — x101: Repurpose — clip boundaries now capture COMPLETE thoughts. Three-layer fix: (1) analyzeViaClaude tool schema now requires an `arc` field with setup / reveal / payoff descriptions + payoff_end timestamp — Claude must identify where the payoff sentence ends, not just hand-wave about "complete thoughts"; (2) system prompt hardened with an explicit example of the Move 37 failure pattern (ending on "...had a machine beaten one of the best human players two games in a row, it" mid-clause) paired with the corrected version ending on the "2,000 years of strategy" payoff; (3) new snapClipBoundaries() runs after Claude returns, walking the segment list forward from clip.end to the next true sentence terminator (no dangling conj./pronoun) within 30s, and backing clip.start to the current sentence's start if it lands mid-sentence. Result: clip.end is guaranteed to sit on a period/!/? and the payoff beat is guaranteed present. Also adds a "Fix cuts" toolbar chip that re-snaps already-generated clips against the current transcript — no regeneration needed for existing projects. | x100: Share → YouTube now auto-generates an optimized metadata bundle (title / description / hashtags / SEO tags / thumbnail idea) via Claude Sonnet 4.6 using (a) the clip hook + caption + preset + virality score, (b) the surrounding transcript window, and (c) live trending context pulled from /trends/{google,reddit,hn,x}. A ShareMetadataModal renders the bundle with per-field Copy buttons so the user can paste each field into YouTube Studio's Details panel. Video download now goes through the hidden-tab-safe recordClipViaCaptureStream → reencodeWebmToPresetMP4 pipeline from x99f instead of the broken renderClipVideoFromUpload — shares produce real 1080p H.264 MP4 files. | x99f: batch export rebuilt as two-pass (captureStream → ffmpeg), works in hidden tabs + outputs 1080p H.264 MP4. Root cause of the 0-byte downloads: x99d/e's renderClipVideoFromUpload drives canvas.drawImage via requestAnimationFrame, and rAF throttles to ~1 Hz as soon as the tab loses focus. canvas.captureStream() then emits ≤1 frame/sec, MediaRecorder packs a 1-frame blob, and the user gets a .webm that won't play. Fix (a) recordClipViaCaptureStream plays the uploaded source muted and pipes `<video>.captureStream()` straight into MediaRecorder — video playback + MediaStream tracks are NOT bound by rAF, so this keeps running in hidden/backgrounded tabs; (b) reencodeWebmToPresetMP4 uses ffmpeg.wasm to scale+pad the VP9 recording to the target preset and encode libx264 at CRF 20 for real 1080p H.264 MP4 output — ffmpeg.wasm decodes VP9 fine (only AV1 from the raw YouTube MP4 was the blind spot). Also bumped downloadBlob's revokeObjectURL delay from 500 ms → 60 s so Chrome's download manager isn't cut off mid-write on big blobs. Overlay burn-in dropped from batch export — per-clip "Render video" chip still has it for single previews. | x99e: fix autoplay block in renderClipVideoFromUpload. The canvas/MediaRecorder render created a fresh <video src={blob}>, seeked, then called `src.play()` — but with `muted=false`, Chrome's autoplay policy threw `NotAllowedError: play() failed because the user didn't interact with the document first` once the original user gesture was consumed by the async awaits. Setting `muted=true` lets play() succeed without a gesture; the audio is still captured via `<video>.captureStream()` since muted only gates speaker output, not decoded audio tracks. | x99d: fix 0-byte batch export on AV1 sources. YouTube's progressive MP4s are AV1; cutClipFromSource's `-c copy` preserved that codec, then reencodeClipForPreset (libx264 transcode) silently failed because ffmpeg.wasm 5.1.4 has no AV1 decoder (config lacks libdav1d). ffmpeg.exec returned exit=1 but the old code ignored it, readFile returned 0 bytes, and we shipped empty MP4s. Fix (a) exportClipsAsVideo now prefers renderClipVideoFromUpload (canvas + MediaRecorder, uses browser-native AV1 decoding via <video>) on the uploaded source, falling back to the ffmpeg per-clip re-encode only when that fails; (b) reencodeClipForPreset now throws on non-zero exit or 0-byte output instead of returning an empty blob. Trade-off: outputs are .webm VP9/VP8 at 720p (renderClipVideoFromUpload dims) rather than .mp4 H.264 1080p; acceptable for the MVP, bigger resolution is an easy follow-up. | x99c: switch ffmpeg core from UMD to ESM. @ffmpeg/ffmpeg@0.12.10's worker.js is always instantiated as `{type:"module"}`, and module Workers can't call `importScripts`, so worker.js falls through to `await import(coreURL)`. The UMD build registers `self.createFFmpegCore` as a side effect but has no ESM `default` export, so the worker throws `ERROR_IMPORT_FAILURE`. Using `/esm/ffmpeg-core.js` (which has a proper default export) lets the module import complete. | x99b: self-host @ffmpeg/ffmpeg + @ffmpeg/util. Chrome refuses to construct a Worker from a cross-origin URL, CSP or CORS headers notwithstanding; @ffmpeg/ffmpeg@0.12.10 does `new Worker(new URL("./worker.js", import.meta.url), {type:"module"})` relative to its own module URL, so loading it from unpkg makes the Worker cross-origin and it throws `Failed to construct 'Worker': Script … cannot be accessed from origin 'https://zaidsaid.com'`. The ESM bundle now lives in ./vendor/{ffmpeg,util}/esm/. @ffmpeg/core WASM still loads from unpkg via toBlobURL (blob: URLs are same-origin from the Worker's perspective). | x99: tried adding `https://unpkg.com` to CSP `worker-src` — necessary but not sufficient, Chrome still blocked the cross-origin worker. | x98: Phase D — trending-context scoring. Worker routes /trends/{google,reddit,hn,x} (HN + Reddit + Google free; X via Apify needs APIFY_TOKEN). Client extracts 3-8 topic keywords via Claude tool_use, fetches trend matches, folds into analyzeViaClaudeTwoStage with convergent-attention boost. | x97: Phase C — multi-modal virality signals. WebCodecs scene-cut detection in-browser; /gemini-video-highlights worker route (Gemini 2.5 Flash, graceful no-key); /sensevoice worker route (Replicate SenseVoice for laughter/applause, graceful no-key). Claude scoring extended to boost clips matching ≥2 signal types. | x96: Phase E — preset-aware per-clip re-encoding via ffmpeg.wasm (scale+pad for 9:16/1:1/16:9) + JSZip batch download when multiple clips selected. Replaces the old MediaRecorder .webm pipeline for clips that have a per-clip mp4 blob. | x95: Phase B UI cleanup: collapsed intake to URL/File, folded YT downloader into URL expandable, per-clip actions 9→3, removed fake waveform, toolbar pruned. | x94: clear stale clips at Generate start + narrow reseed effect so demo doesn't overwrite a user's upload on refresh. | x93: Repurpose — real per-clip mp4 cuts + thumbnail frames. cutClipFromSource (ffmpeg.wasm, -ss after -i, -c copy with libx264 fallback <5 min) + grabFrameThumb (off-DOM canvas) + generateClipAssets (sequential, IDB-backed). processSource fires generateClipAssets after setProject for upload flows. RepurposeTab hydrates clipBlobUrls Map from IDB on mount; RepurposeClipPreview shows pre-cut <video controls> when blob ready. removeClip deletes IDB entries + revokes URLs. | x92: Repurpose — big videos extract audio client-side before transcribing. Lazy-loads ffmpeg.wasm (@ffmpeg/ffmpeg@0.12.10 + @ffmpeg/core@0.12.6 from unpkg, ~30 MB one-time); any uploaded video >50 MB is reduced to mono 16 kHz 32 kbps MP3 (~14 MB/hr) before POSTing to /elevenlabs/v1/speech-to-text. Fixes 700+ MB uploads hanging on the Cloudflare Worker 500 MiB body limit. CSP widened for wasm-unsafe-eval, blob: workers, and unpkg connect. | x91: Repurpose — uploaded files now survive page refreshes. New IndexedDB blob store (zaidsaid/uploads, key repurpose:current) persists the File on upload; RepurposeTab useEffect on mount HEAD-checks the existing blob URL and rehydrates from IDB when it's dead, or clears the dangling reference + toasts "please re-upload" when IDB is empty too. processSource now reads the blob from IDB first, falling back to the blob URL. Remove button deletes the IDB entry. | x90: Repurpose — uploads now actually clip. processSource gate no longer bails on empty source when an uploaded video is present; on new file upload we clear stale transcript/chapters/clips/name; uploaded videos without a transcript auto-transcribe via ElevenLabs Scribe (/elevenlabs/v1/speech-to-text with model_id=scribe_v1, word-level timestamps grouped into ~6s segments) and feed the existing two-stage viral analyzer. New fuchsia "ElevenLabs Scribe (auto-transcribed)" source chip. | x89: Repurpose — YouTube downloader tool (paste URL → fetch progressive formats via worker InnerTube → quality dropdown → File System Access folder picker with streamed writable, falls back to <a download> when unsupported). Worker: /youtube-formats, /youtube-media. | x88: batch export respects selection + preset-aware video render — "Export selected as video" renders .webm per selected clip at its preset aspect ratio (9:16/1:1/16:9); fallback selection→approved→all; metadata (.txt) export kept as secondary. Fix stray /span> text below batch-export button. | x87: clip length range widened — 5s floor (viral reactions, one-liners) to 1800s / 30min ceiling (full topic arcs); removed rigid length-mix prompt in favor of idea-first sizing | x86: clip preview no-autoplay — remove YouTube loop=1&playlist (fixes whole-video loop), remove autoPlay on uploaded video, preview now shows clip-only paused state until user clicks play | x85: Phase B.1 — persist chapters on description-fallback, surface worker errors, transcript-source chip, length-variance prompt, analyzeLocal intro-skip, **remove dead RepurposeAnalyzer + RepurposeRealAnalyze god-mode components** | x84: Phase B — YT chapter-boundary detection (parseYouTubeChapters in worker; analyzeLocal uses chapter spans as candidate windows when ≥3 chapters; Claude receives chapter list for boundary alignment) + Web Audio energy analyzer (analyzeUploadedVideoAudio: 8x scrub AudioContext RMS scan on uploaded files; peaks boost analyzeLocal virality by +5*peakDensity) | x83: Smart Clipping v2 — two-stage viral detection + topic-boundary awareness + variable 30-180s clip length + unified Generate flow + target default 10 (range 3-20) | x82: preview fix — CSP frame-src, youtube-nocookie embed, thumbnail fallback | x80: Smart Clipping — viral moment detection. Worker /youtube-transcript returns segments[{t,d,text}]. analyzeViaClaude uses timestamped transcript with 4-dimension scoring (hook_power/emotional_impact/quotability/surprise_drama). analyzeLocal scores ~45-75s windows, picks top N with spatial diversity across full duration. YT iframe autoplay+loop within clip range; uploaded video autoplay muted with loop-on-end.
+/* Zaidsaid — app.js v2.0 — x102: Share → YouTube now ships full viral-title + thumbnail tooling. generateYouTubeMetadataViaClaude schema extended to require titleVariants[5] (each using a different proven 2026 Shorts hook pattern — Contrarian Take, Shocking Statistic, Direct Promise, Question Hook, Before/After, Mistake Callout, Bold Claim, Expert Secret, Pattern Interrupt, Time-Bound Challenge) and a structured thumbnail object (headline/subject/background/palette/imagePrompt/reasoning) following MrBeast-era Shorts rules: one emotional face OR one iconic close-up, 2-3 word overlay, deep-dark background with a single neon accent. New renderThumbnailFromBrief() generates the base via Pollinations (explicitly 'no text, no watermarks') and composites clean headline + accent underline via OffscreenCanvas — diffusion models garble text, canvas overlays are razor-sharp. ShareMetadataModal now surfaces the 5 title variants as a ranked copy list, the full thumbnail brief, and a "Generate thumbnail" action that produces a 1080×1920 JPG download-ready image. | x101: clip boundaries now capture COMPLETE thoughts. Three-layer fix: (1) analyzeViaClaude tool schema now requires an `arc` field with setup / reveal / payoff descriptions + payoff_end timestamp — Claude must identify where the payoff sentence ends, not just hand-wave about "complete thoughts"; (2) system prompt hardened with an explicit example of the Move 37 failure pattern (ending on "...had a machine beaten one of the best human players two games in a row, it" mid-clause) paired with the corrected version ending on the "2,000 years of strategy" payoff; (3) new snapClipBoundaries() runs after Claude returns, walking the segment list forward from clip.end to the next true sentence terminator (no dangling conj./pronoun) within 30s, and backing clip.start to the current sentence's start if it lands mid-sentence. Result: clip.end is guaranteed to sit on a period/!/? and the payoff beat is guaranteed present. Also adds a "Fix cuts" toolbar chip that re-snaps already-generated clips against the current transcript — no regeneration needed for existing projects. | x100: Share → YouTube now auto-generates an optimized metadata bundle (title / description / hashtags / SEO tags / thumbnail idea) via Claude Sonnet 4.6 using (a) the clip hook + caption + preset + virality score, (b) the surrounding transcript window, and (c) live trending context pulled from /trends/{google,reddit,hn,x}. A ShareMetadataModal renders the bundle with per-field Copy buttons so the user can paste each field into YouTube Studio's Details panel. Video download now goes through the hidden-tab-safe recordClipViaCaptureStream → reencodeWebmToPresetMP4 pipeline from x99f instead of the broken renderClipVideoFromUpload — shares produce real 1080p H.264 MP4 files. | x99f: batch export rebuilt as two-pass (captureStream → ffmpeg), works in hidden tabs + outputs 1080p H.264 MP4. Root cause of the 0-byte downloads: x99d/e's renderClipVideoFromUpload drives canvas.drawImage via requestAnimationFrame, and rAF throttles to ~1 Hz as soon as the tab loses focus. canvas.captureStream() then emits ≤1 frame/sec, MediaRecorder packs a 1-frame blob, and the user gets a .webm that won't play. Fix (a) recordClipViaCaptureStream plays the uploaded source muted and pipes `<video>.captureStream()` straight into MediaRecorder — video playback + MediaStream tracks are NOT bound by rAF, so this keeps running in hidden/backgrounded tabs; (b) reencodeWebmToPresetMP4 uses ffmpeg.wasm to scale+pad the VP9 recording to the target preset and encode libx264 at CRF 20 for real 1080p H.264 MP4 output — ffmpeg.wasm decodes VP9 fine (only AV1 from the raw YouTube MP4 was the blind spot). Also bumped downloadBlob's revokeObjectURL delay from 500 ms → 60 s so Chrome's download manager isn't cut off mid-write on big blobs. Overlay burn-in dropped from batch export — per-clip "Render video" chip still has it for single previews. | x99e: fix autoplay block in renderClipVideoFromUpload. The canvas/MediaRecorder render created a fresh <video src={blob}>, seeked, then called `src.play()` — but with `muted=false`, Chrome's autoplay policy threw `NotAllowedError: play() failed because the user didn't interact with the document first` once the original user gesture was consumed by the async awaits. Setting `muted=true` lets play() succeed without a gesture; the audio is still captured via `<video>.captureStream()` since muted only gates speaker output, not decoded audio tracks. | x99d: fix 0-byte batch export on AV1 sources. YouTube's progressive MP4s are AV1; cutClipFromSource's `-c copy` preserved that codec, then reencodeClipForPreset (libx264 transcode) silently failed because ffmpeg.wasm 5.1.4 has no AV1 decoder (config lacks libdav1d). ffmpeg.exec returned exit=1 but the old code ignored it, readFile returned 0 bytes, and we shipped empty MP4s. Fix (a) exportClipsAsVideo now prefers renderClipVideoFromUpload (canvas + MediaRecorder, uses browser-native AV1 decoding via <video>) on the uploaded source, falling back to the ffmpeg per-clip re-encode only when that fails; (b) reencodeClipForPreset now throws on non-zero exit or 0-byte output instead of returning an empty blob. Trade-off: outputs are .webm VP9/VP8 at 720p (renderClipVideoFromUpload dims) rather than .mp4 H.264 1080p; acceptable for the MVP, bigger resolution is an easy follow-up. | x99c: switch ffmpeg core from UMD to ESM. @ffmpeg/ffmpeg@0.12.10's worker.js is always instantiated as `{type:"module"}`, and module Workers can't call `importScripts`, so worker.js falls through to `await import(coreURL)`. The UMD build registers `self.createFFmpegCore` as a side effect but has no ESM `default` export, so the worker throws `ERROR_IMPORT_FAILURE`. Using `/esm/ffmpeg-core.js` (which has a proper default export) lets the module import complete. | x99b: self-host @ffmpeg/ffmpeg + @ffmpeg/util. Chrome refuses to construct a Worker from a cross-origin URL, CSP or CORS headers notwithstanding; @ffmpeg/ffmpeg@0.12.10 does `new Worker(new URL("./worker.js", import.meta.url), {type:"module"})` relative to its own module URL, so loading it from unpkg makes the Worker cross-origin and it throws `Failed to construct 'Worker': Script … cannot be accessed from origin 'https://zaidsaid.com'`. The ESM bundle now lives in ./vendor/{ffmpeg,util}/esm/. @ffmpeg/core WASM still loads from unpkg via toBlobURL (blob: URLs are same-origin from the Worker's perspective). | x99: tried adding `https://unpkg.com` to CSP `worker-src` — necessary but not sufficient, Chrome still blocked the cross-origin worker. | x98: Phase D — trending-context scoring. Worker routes /trends/{google,reddit,hn,x} (HN + Reddit + Google free; X via Apify needs APIFY_TOKEN). Client extracts 3-8 topic keywords via Claude tool_use, fetches trend matches, folds into analyzeViaClaudeTwoStage with convergent-attention boost. | x97: Phase C — multi-modal virality signals. WebCodecs scene-cut detection in-browser; /gemini-video-highlights worker route (Gemini 2.5 Flash, graceful no-key); /sensevoice worker route (Replicate SenseVoice for laughter/applause, graceful no-key). Claude scoring extended to boost clips matching ≥2 signal types. | x96: Phase E — preset-aware per-clip re-encoding via ffmpeg.wasm (scale+pad for 9:16/1:1/16:9) + JSZip batch download when multiple clips selected. Replaces the old MediaRecorder .webm pipeline for clips that have a per-clip mp4 blob. | x95: Phase B UI cleanup: collapsed intake to URL/File, folded YT downloader into URL expandable, per-clip actions 9→3, removed fake waveform, toolbar pruned. | x94: clear stale clips at Generate start + narrow reseed effect so demo doesn't overwrite a user's upload on refresh. | x93: Repurpose — real per-clip mp4 cuts + thumbnail frames. cutClipFromSource (ffmpeg.wasm, -ss after -i, -c copy with libx264 fallback <5 min) + grabFrameThumb (off-DOM canvas) + generateClipAssets (sequential, IDB-backed). processSource fires generateClipAssets after setProject for upload flows. RepurposeTab hydrates clipBlobUrls Map from IDB on mount; RepurposeClipPreview shows pre-cut <video controls> when blob ready. removeClip deletes IDB entries + revokes URLs. | x92: Repurpose — big videos extract audio client-side before transcribing. Lazy-loads ffmpeg.wasm (@ffmpeg/ffmpeg@0.12.10 + @ffmpeg/core@0.12.6 from unpkg, ~30 MB one-time); any uploaded video >50 MB is reduced to mono 16 kHz 32 kbps MP3 (~14 MB/hr) before POSTing to /elevenlabs/v1/speech-to-text. Fixes 700+ MB uploads hanging on the Cloudflare Worker 500 MiB body limit. CSP widened for wasm-unsafe-eval, blob: workers, and unpkg connect. | x91: Repurpose — uploaded files now survive page refreshes. New IndexedDB blob store (zaidsaid/uploads, key repurpose:current) persists the File on upload; RepurposeTab useEffect on mount HEAD-checks the existing blob URL and rehydrates from IDB when it's dead, or clears the dangling reference + toasts "please re-upload" when IDB is empty too. processSource now reads the blob from IDB first, falling back to the blob URL. Remove button deletes the IDB entry. | x90: Repurpose — uploads now actually clip. processSource gate no longer bails on empty source when an uploaded video is present; on new file upload we clear stale transcript/chapters/clips/name; uploaded videos without a transcript auto-transcribe via ElevenLabs Scribe (/elevenlabs/v1/speech-to-text with model_id=scribe_v1, word-level timestamps grouped into ~6s segments) and feed the existing two-stage viral analyzer. New fuchsia "ElevenLabs Scribe (auto-transcribed)" source chip. | x89: Repurpose — YouTube downloader tool (paste URL → fetch progressive formats via worker InnerTube → quality dropdown → File System Access folder picker with streamed writable, falls back to <a download> when unsupported). Worker: /youtube-formats, /youtube-media. | x88: batch export respects selection + preset-aware video render — "Export selected as video" renders .webm per selected clip at its preset aspect ratio (9:16/1:1/16:9); fallback selection→approved→all; metadata (.txt) export kept as secondary. Fix stray /span> text below batch-export button. | x87: clip length range widened — 5s floor (viral reactions, one-liners) to 1800s / 30min ceiling (full topic arcs); removed rigid length-mix prompt in favor of idea-first sizing | x86: clip preview no-autoplay — remove YouTube loop=1&playlist (fixes whole-video loop), remove autoPlay on uploaded video, preview now shows clip-only paused state until user clicks play | x85: Phase B.1 — persist chapters on description-fallback, surface worker errors, transcript-source chip, length-variance prompt, analyzeLocal intro-skip, **remove dead RepurposeAnalyzer + RepurposeRealAnalyze god-mode components** | x84: Phase B — YT chapter-boundary detection (parseYouTubeChapters in worker; analyzeLocal uses chapter spans as candidate windows when ≥3 chapters; Claude receives chapter list for boundary alignment) + Web Audio energy analyzer (analyzeUploadedVideoAudio: 8x scrub AudioContext RMS scan on uploaded files; peaks boost analyzeLocal virality by +5*peakDensity) | x83: Smart Clipping v2 — two-stage viral detection + topic-boundary awareness + variable 30-180s clip length + unified Generate flow + target default 10 (range 3-20) | x82: preview fix — CSP frame-src, youtube-nocookie embed, thumbnail fallback | x80: Smart Clipping — viral moment detection. Worker /youtube-transcript returns segments[{t,d,text}]. analyzeViaClaude uses timestamped transcript with 4-dimension scoring (hook_power/emotional_impact/quotability/surprise_drama). analyzeLocal scores ~45-75s windows, picks top N with spatial diversity across full duration. YT iframe autoplay+loop within clip range; uploaded video autoplay muted with loop-on-end.
  * Security: localStorage namespaced as zaidsaid.v2.*, error boundary, no innerHTML, no eval, no fetch.
  * Archived v1 seed data preserved under ARCHIVE_* for later reuse.
  */
@@ -2376,16 +2376,52 @@ const generateYouTubeMetadataViaClaude = async (proxyUrl, clip, project, format)
     input_schema: {
       type: "object",
       properties: {
-        title: { type: "string", description: fmt === "shorts" ? "Under 70 chars, curiosity gap in the first 3-4 words, no clickbait lies, no generic intros. Emoji OK at the end if it adds." : "Under 100 chars, benefit/outcome in the first half, emoji only if it strengthens the claim." },
+        titleVariants: {
+          type: "array",
+          description: "Exactly 5 title options in priority order, each using a DIFFERENT hook pattern (pick from: Contrarian Take, Shocking Statistic, Direct Promise, Question Hook, Before/After, Mistake Callout, Bold Claim, Expert Secret, Pattern Interrupt, Time-Bound Challenge). Under 70 chars each for Shorts, under 100 for long. At most ONE emoji per title (placed at the end), and never in more than 2 of the 5 options. Never use ALL CAPS. Never generic intros like 'In this video'.",
+          items: { type: "string" },
+          minItems: 5,
+          maxItems: 5
+        },
+        title: { type: "string", description: "Your single top pick from titleVariants — the one you'd ship first." },
         description: { type: "string", description: "First line = one-sentence hook that earns the click. Then 2-3 short paragraphs: what the clip shows, why it still matters right now, and a credit line for the original source. DO NOT include hashtags here — they go in the hashtags array." },
         hashtags: { type: "array", items: { type: "string" }, description: "12-15 hashtags in priority order (specific → broad). No leading #. Include at least one very-broad tag (AI, tech) and at least one very-specific tag tied to the clip subject. Include 'Shorts' if format is shorts." },
         tags: { type: "array", items: { type: "string" }, description: "8-12 longer SEO tags for YouTube's backend tag field (comma-separated when pasted). These are search phrases viewers type, distinct from hashtags." },
-        thumbnailIdea: { type: "string", description: "One-sentence description of an ideal custom thumbnail. Reference a visual from the hook moment if possible." }
+        thumbnail: {
+          type: "object",
+          description: "Full thumbnail composition brief, designed for a 2026 high-CTR Shorts thumbnail (one emotional face + 2-3 word overlay + high contrast + brand color accent).",
+          properties: {
+            headline: { type: "string", description: "2-3 WORDS MAX — the overlay headline users will see. Bold, specific, tied to the clip's core number/claim/shock. Examples: '1 IN 10,000', 'MOVE 37', 'GAME OVER', '2,500 YEARS'." },
+            subject: { type: "string", description: "Describe the single foreground subject: who/what, expression, pose, lighting. Prefer a human face with strong single emotion (shocked, wide-eyed, determined). If no face fits, describe an iconic object at extreme close-up." },
+            background: { type: "string", description: "Describe the background scene/setting: what's shown, how darkened, what accents glow. Leave a visual space for the headline overlay." },
+            palette: { type: "string", description: "3 hex colors max, comma separated. Include a saturated neon accent (#ef4444, #22d3ee, #facc15, etc.) + a deep dark (#000 or #050814) + the headline text color (usually #fff)." },
+            imagePrompt: { type: "string", description: "A ~350-500 character image-generation prompt for Pollinations/Midjourney. MUST say 'no text, no watermarks, no logos' because clean text is composited on top via canvas after. Include lighting, lens feel, mood, aspect-ratio hint (portrait for Shorts). Do NOT include the headline text in this prompt." },
+            reasoning: { type: "string", description: "One sentence explaining why this composition grabs attention in a feed (what it triggers — curiosity, shock, question)." }
+          },
+          required: ["headline", "subject", "background", "palette", "imagePrompt", "reasoning"]
+        }
       },
-      required: ["title", "description", "hashtags", "tags", "thumbnailIdea"]
+      required: ["titleVariants", "title", "description", "hashtags", "tags", "thumbnail"]
     }
   };
-  const system = "You write YouTube metadata that wins discovery and CTR without lying. You optimize for the specific clip provided — you never produce generic template copy. Base every claim on the clip hook/caption/transcript; if trending context overlaps the topic, weave it in naturally. Return via emit_youtube_metadata only.";
+  const system = "You write YouTube metadata that wins discovery and CTR without lying. You optimize for the specific clip provided — you never produce generic template copy. Base every claim on the clip hook/caption/transcript; if trending context overlaps the topic, weave it in naturally.\n\n" +
+    "HOOK PATTERNS you draw from (each titleVariants[] entry must use a DIFFERENT pattern):\n" +
+    "- Contrarian Take: 'Everything you know about X is wrong'\n" +
+    "- Shocking Statistic: '97% of X make this mistake' / 'This X had a 1-in-10,000 chance'\n" +
+    "- Direct Promise: '3 ways to X in Y'\n" +
+    "- Question Hook: 'Want to know how I X?' / 'Why did X really happen?'\n" +
+    "- Before/After Tease: 'From X to Y — here's what changed'\n" +
+    "- Mistake Callout: 'Stop doing THIS'\n" +
+    "- Bold Claim: 'I can X in Y' / 'X ended 2,500 years of Y'\n" +
+    "- Expert Secret: 'What X doesn't tell you'\n" +
+    "- Pattern Interrupt: unusual construction that breaks feed rhythm\n" +
+    "- Time-Bound Challenge: 'Can I X in 60 seconds?'\n\n" +
+    "THUMBNAIL RULES (2026 Shorts best practice):\n" +
+    "- One human face with a single strong emotion OR one iconic object at extreme close-up. Never both a face and a busy scene — the feed is too small.\n" +
+    "- 2-3 word overlay, bold sans-serif, composed by the app later. You only provide the WORDS (thumbnail.headline), not the text rendering.\n" +
+    "- High contrast: deep dark background + one neon accent color (MrBeast red #FF0000, electric blue #228fda, or lemon yellow #FFFF00 are proven).\n" +
+    "- imagePrompt MUST say 'no text, no watermarks, no logos' — we add clean text via canvas overlay afterward, because diffusion models render text garbled.\n\n" +
+    "Return via emit_youtube_metadata only.";
   const userMsg = [
     "Target format: YouTube " + (fmt === "shorts" ? "Shorts (vertical, <60s)" : "long-form (horizontal)"),
     "Clip duration: " + durSec + "s",
@@ -2416,14 +2452,73 @@ const generateYouTubeMetadataViaClaude = async (proxyUrl, clip, project, format)
   const block = (data.content || []).find(c => c.type === "tool_use" && c.name === "emit_youtube_metadata");
   if(!block || !block.input) throw new Error("no emit_youtube_metadata tool_use");
   const m = block.input;
+  const variants = Array.isArray(m.titleVariants) ? m.titleVariants.map(v => String(v).slice(0, 100)).filter(Boolean) : [];
+  const thumb = m.thumbnail && typeof m.thumbnail === "object" ? {
+    headline: String(m.thumbnail.headline || "").slice(0, 40),
+    subject: String(m.thumbnail.subject || "").slice(0, 500),
+    background: String(m.thumbnail.background || "").slice(0, 500),
+    palette: String(m.thumbnail.palette || "").slice(0, 120),
+    imagePrompt: String(m.thumbnail.imagePrompt || "").slice(0, 800),
+    reasoning: String(m.thumbnail.reasoning || "").slice(0, 300)
+  } : null;
   return {
-    title: String(m.title || "").slice(0, fmt === "shorts" ? 100 : 100),
+    title: String(m.title || variants[0] || "").slice(0, 100),
+    titleVariants: variants.slice(0, 5),
     description: String(m.description || "").slice(0, 4800),
     hashtags: Array.isArray(m.hashtags) ? m.hashtags.map(h => String(h).replace(/^#/, "").trim()).filter(Boolean).slice(0, 15) : [],
     tags: Array.isArray(m.tags) ? m.tags.map(t => String(t).trim()).filter(Boolean).slice(0, 12) : [],
-    thumbnailIdea: String(m.thumbnailIdea || "").slice(0, 240),
+    thumbnail: thumb,
+    // Legacy field kept so older UI paths don't break.
+    thumbnailIdea: thumb ? (thumb.subject + " — " + thumb.background).slice(0, 240) : "",
     trendingUsed: trending.length
   };
+};
+
+// x102: Render a Shorts thumbnail at 1080x1920. Pollinations generates the base scene
+// (face + background) — it's notoriously bad at text, so we overlay the clean headline
+// via OffscreenCanvas after. Returns a JPEG blob.
+const renderThumbnailFromBrief = async (brief) => {
+  if(!brief || !brief.imagePrompt) throw new Error("no imagePrompt in brief");
+  const cleanPrompt = brief.imagePrompt + " — no text, no watermarks, no logos, portrait 9:16";
+  const url = "https://image.pollinations.ai/prompt/" + encodeURIComponent(cleanPrompt) + "?width=1080&height=1920&nologo=true&enhance=true&seed=" + (Math.floor(Math.random() * 9999));
+  const res = await fetch(url);
+  if(!res.ok) throw new Error("pollinations " + res.status);
+  const blob = await res.blob();
+  const bmp = await createImageBitmap(blob);
+  const canvas = (typeof OffscreenCanvas !== "undefined") ? new OffscreenCanvas(1080, 1920) : (() => { const c = document.createElement("canvas"); c.width = 1080; c.height = 1920; return c; })();
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(bmp, 0, 0, 1080, 1920);
+  // Darken a horizontal band in the center-ish for text contrast.
+  const grad = ctx.createLinearGradient(0, 860, 0, 1340);
+  grad.addColorStop(0, "rgba(0,0,0,0)");
+  grad.addColorStop(0.5, "rgba(0,0,0,0.55)");
+  grad.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 860, 1080, 480);
+  // Parse palette — first hex is the accent; fallback red.
+  const hexes = String(brief.palette || "").match(/#[0-9a-fA-F]{3,6}/g) || [];
+  const accent = hexes.find(h => !/^#(fff|ffffff|000|000000)$/i.test(h)) || "#ef4444";
+  const headline = String(brief.headline || "").toUpperCase().slice(0, 24) || "HOOK";
+  // Headline: bold impact font, black outline, white fill, underline accent.
+  const fontSize = headline.length <= 8 ? 210 : headline.length <= 14 ? 170 : 130;
+  ctx.font = "bold " + fontSize + "px Impact, Haettenschweiler, 'Arial Black', sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.lineJoin = "round";
+  ctx.strokeStyle = "#000";
+  ctx.lineWidth = Math.round(fontSize / 10);
+  ctx.strokeText(headline, 540, 1080);
+  ctx.fillStyle = "#ffffff";
+  ctx.fillText(headline, 540, 1080);
+  // Accent bar under headline.
+  const barW = Math.min(700, fontSize * 3);
+  ctx.fillStyle = accent;
+  ctx.fillRect((1080 - barW) / 2, 1080 + fontSize * 0.55, barW, Math.max(8, fontSize / 20));
+  // Return blob.
+  if(canvas.convertToBlob){
+    return await canvas.convertToBlob({ type: "image/jpeg", quality: 0.92 });
+  }
+  return await new Promise((res) => canvas.toBlob((b) => res(b), "image/jpeg", 0.92));
 };
 
 // MVP-B: Polish a Studio script scene via Claude
@@ -6930,6 +7025,8 @@ const removeClip = (clipId) => {
 }
 
 function ShareMetadataModal({ meta, onClose, toast }){
+  const [thumbBusy, setThumbBusy] = useState(false);
+  const [thumbUrl, setThumbUrl] = useState(null);
   const copyField = async (label, text) => {
     try { await navigator.clipboard.writeText(text); toast("Copied " + label, "success"); }
     catch(e){ toast("Copy failed — select & copy manually", "warn"); }
@@ -6938,9 +7035,34 @@ function ShareMetadataModal({ meta, onClose, toast }){
   const tagsLine = (meta.tags || []).join(", ");
   const descForClipboard = meta.description + (hashLine ? "\n\n" + hashLine : "");
   const platformLabel = meta.platform === "shorts" ? "YouTube Shorts" : meta.platform === "youtube" ? "YouTube" : meta.platform;
+  const variants = Array.isArray(meta.titleVariants) && meta.titleVariants.length ? meta.titleVariants : [meta.title];
+  const thumb = meta.thumbnail || null;
+  const renderThumb = async () => {
+    if(!thumb){ toast("No thumbnail brief in this bundle — regenerate metadata", "warn"); return; }
+    setThumbBusy(true);
+    try {
+      const blob = await renderThumbnailFromBrief(thumb);
+      const url = URL.createObjectURL(blob);
+      setThumbUrl(url);
+      toast("Thumbnail rendered — click to download", "success");
+    } catch(e){
+      toast("Thumbnail render failed: " + (e.message || "unknown"), "error");
+    } finally {
+      setThumbBusy(false);
+    }
+  };
+  const downloadThumb = () => {
+    if(!thumbUrl) return;
+    const a = document.createElement("a");
+    a.href = thumbUrl;
+    a.download = "thumbnail-" + (thumb && thumb.headline ? thumb.headline.toLowerCase().replace(/[^a-z0-9]+/g,"-") : "clip") + ".jpg";
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => a.remove(), 60000);
+  };
   return (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-start justify-center p-4 overflow-y-auto" onClick={onClose}>
-      <div className="bg-[color:var(--panel)] border border-[color:var(--line)] rounded-2xl p-6 max-w-2xl w-full mt-10 zs-fade-in" onClick={(e)=>e.stopPropagation()}>
+      <div className="bg-[color:var(--panel)] border border-[color:var(--line)] rounded-2xl p-6 max-w-3xl w-full mt-10 zs-fade-in" onClick={(e)=>e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
           <div>
             <h3 className="text-xl font-bold">{platformLabel} metadata</h3>
@@ -6948,13 +7070,21 @@ function ShareMetadataModal({ meta, onClose, toast }){
           </div>
           <button className="chip" onClick={onClose} aria-label="Close">×</button>
         </div>
-        <div className="space-y-3">
+        <div className="space-y-4">
           <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="text-[12px] font-semibold text-[color:var(--muted)]">Title ({meta.title.length}/100)</label>
-              <button className="chip" onClick={() => copyField("title", meta.title)}>Copy title</button>
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-[12px] font-semibold text-[color:var(--muted)]">Title variants — {variants.length} patterns, copy one</label>
             </div>
-            <div className="p-3 rounded-lg bg-[color:var(--panel2)] border border-[color:var(--line)] text-sm">{meta.title}</div>
+            <div className="space-y-2">
+              {variants.map((t, i) => (
+                <div key={i} className="flex items-center gap-2 p-3 rounded-lg bg-[color:var(--panel2)] border border-[color:var(--line)]">
+                  <span className={"chip shrink-0 " + (i===0 ? "!border-emerald-400/30 bg-emerald-500/10 text-emerald-200" : "")}>{i===0 ? "★" : i+1}</span>
+                  <div className="flex-1 text-sm">{t}</div>
+                  <span className="text-[11px] text-[color:var(--muted)] shrink-0">{t.length}</span>
+                  <button className="chip shrink-0" onClick={() => copyField("title", t)}>Copy</button>
+                </div>
+              ))}
+            </div>
           </div>
           <div>
             <div className="flex items-center justify-between mb-1">
@@ -6970,10 +7100,29 @@ function ShareMetadataModal({ meta, onClose, toast }){
             </div>
             <div className="p-3 rounded-lg bg-[color:var(--panel2)] border border-[color:var(--line)] text-[12px] text-[color:var(--muted)]">{tagsLine || "—"}</div>
           </div>
-          {meta.thumbnailIdea && (
+          {thumb && (
             <div>
-              <label className="text-[12px] font-semibold text-[color:var(--muted)] block mb-1">Thumbnail idea</label>
-              <div className="p-3 rounded-lg bg-[color:var(--panel2)] border border-[color:var(--line)] text-[12px] italic text-[color:var(--muted)]">{meta.thumbnailIdea}</div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-[12px] font-semibold text-[color:var(--muted)]">Thumbnail brief + render</label>
+                <div className="flex gap-2">
+                  <button className="chip" disabled={thumbBusy} onClick={renderThumb}>{thumbBusy ? "Rendering…" : "Generate thumbnail"}</button>
+                  {thumbUrl && <button className="chip" onClick={downloadThumb}>Download</button>}
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="p-3 rounded-lg bg-[color:var(--panel2)] border border-[color:var(--line)] text-[12px] space-y-2">
+                  <div><span className="text-[color:var(--muted)]">Headline:</span> <strong className="text-white">{thumb.headline}</strong></div>
+                  <div><span className="text-[color:var(--muted)]">Subject:</span> {thumb.subject}</div>
+                  <div><span className="text-[color:var(--muted)]">Background:</span> {thumb.background}</div>
+                  <div><span className="text-[color:var(--muted)]">Palette:</span> {thumb.palette}</div>
+                  <div className="italic text-[color:var(--muted)]">{thumb.reasoning}</div>
+                </div>
+                <div className="flex items-center justify-center rounded-lg bg-[color:var(--panel2)] border border-[color:var(--line)] min-h-[280px] overflow-hidden">
+                  {thumbUrl
+                    ? <img src={thumbUrl} alt="Generated thumbnail" className="max-h-[420px] w-auto rounded" />
+                    : <span className="text-[11px] text-[color:var(--muted)] italic p-4 text-center">Click "Generate thumbnail" — Pollinations renders the base, we composite clean text on top.</span>}
+                </div>
+              </div>
             </div>
           )}
           {meta.trendingUsed > 0 && (
