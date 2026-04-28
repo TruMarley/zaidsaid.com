@@ -2661,6 +2661,29 @@ const generateClipAssets = async (srcBlob, clips, onStatus, setClipBlobUrls) => 
 // Returns { text, segments:[{t,d,text}] } by grouping word-level timestamps
 // into ~6-second phrases (breaks earlier on sentence-ending punctuation).
 const transcribeUploadedFile = async (elevenBase, blob, filename) => {
+  // x111b: route to the audio-ai sidecar (faster-whisper / WhisperX) when the
+  // hyperframes-style provider toggle is on. Output shape is identical
+  // ({ text, segments, words }) so no caller changes are needed. Falls
+  // through to ElevenLabs Scribe when the sidecar is disabled or unreachable.
+  const audioAiBase = getAudioAiPath();
+  if (audioAiBase) {
+    try {
+      const aiForm = new FormData();
+      aiForm.append('file', blob, filename || 'upload.mp4');
+      aiForm.append('engine', 'faster-whisper');
+      aiForm.append('model', 'base');
+      const aiRes = await fetch(audioAiBase.replace(/\/$/, '') + '/transcribe', { method: 'POST', body: aiForm });
+      if (aiRes.ok) {
+        const data = await aiRes.json();
+        const segments = Array.isArray(data.segments) ? data.segments : [];
+        const words = Array.isArray(data.words) ? data.words : [];
+        return { text: String(data.text || ''), segments, words };
+      }
+      console.warn('[zs] audio-ai transcribe HTTP', aiRes.status, '— falling back to ElevenLabs');
+    } catch(e) {
+      console.warn('[zs] audio-ai transcribe threw, falling back to ElevenLabs:', e);
+    }
+  }
   const form = new FormData();
   form.append('file', blob, filename || 'upload.mp4');
   form.append('model_id', 'scribe_v1');
