@@ -9074,8 +9074,238 @@ function AvatarEditor({ open, avatar, onClose, onSave }){
 //   3. fetch_url (new) → /fetch?url=... worker proxy or direct fetch
 //   4. youtube-transcript → /youtube-transcript for YT refs
 //   5. emit_research → sourced claims
-//   6. generate_full_script → beats + references
+//   6. generate_full_script → beats + references (short-form only, <300s)
+//   6b. generate_chapter_outline + expand_chapter_into_beats (long-form, >=300s)
 // Phase 3: editable script with per-beat regen, Send to Studio, Export
+//   Long-form: chapter-grouped beats with per-beat evidence panels
+
+// x118: Long-form pipeline helpers
+const LONGFORM_DURATION_OPTIONS = [
+  { value: '900',  label: '15 minutes' },
+  { value: '1500', label: '25 minutes' },
+  { value: '2700', label: '45 minutes' },
+  { value: '3600', label: '60 minutes' },
+];
+
+// Chapter count heuristic by duration
+const chapterCountForDuration = (durSec) => {
+  if (durSec >= 3600) return 8;
+  if (durSec >= 2700) return 7;
+  if (durSec >= 1500) return 6;
+  return 5; // 900s = 15min
+};
+
+// Step 1 of long-form: generate chapter outline
+const generateChapterOutline = async (proxyUrl, topic, tone, format, durSec, researchBundle, trendingData, refTranscripts) => {
+  const url = (proxyUrl || '').replace(/\/$/, '') + '/v1/messages';
+  const numChapters = chapterCountForDuration(durSec);
+  const researchSummary = (researchBundle.claims || []).map(c => '- ' + c.claim + ' [source: ' + c.source + ']').join('\n') || 'No grounded claims available.';
+  const trendingContext = (trendingData || []).flatMap(t => (t.matches || []).slice(0, 3).map(m => m.source + ': ' + (m.title || '').slice(0, 100))).slice(0, 12).join('\n') || 'No trending context.';
+  const refContext = (refTranscripts || []).filter(r => r.body).map(r => '--- ' + (r.title || r.url) + ' ---\n' + r.body.slice(0, 800)).join('\n\n').slice(0, 6000) || '';
+
+  const system = [
+    'You are a long-form YouTube scriptwriter producing chapter outlines for ' + Math.round(durSec / 60) + '-minute videos.',
+    'Rules:',
+    '1. Produce exactly ' + numChapters + ' chapters that collectively cover the angle with no filler.',
+    '2. Each chapter must accomplish something distinct — no overlapping purposes.',
+    '3. key_claims[] must be drawn from the RESEARCH block. Do NOT invent claims not in the research.',
+    '4. If research is thin for a chapter\'s claims, say so in the purpose field.',
+    '5. NEVER invent URLs, sources, or quotes not in the research block.',
+    '6. Tone: ' + tone + '. Format: ' + format + '.',
+    '7. target_duration_s for all chapters must sum to approximately ' + durSec + 's.',
+  ].join('\n');
+
+  const userMsg = [
+    'TOPIC: ' + topic,
+    'TARGET DURATION: ' + durSec + 's (' + Math.round(durSec / 60) + ' min)',
+    'CHAPTERS NEEDED: ' + numChapters,
+    '',
+    'RESEARCH CLAIMS:',
+    researchSummary,
+    '',
+    'TRENDING CONTEXT:',
+    trendingContext,
+    refContext ? ('\nREFERENCE MATERIAL:\n' + refContext) : '',
+  ].join('\n');
+
+  const tool = {
+    name: 'generate_chapter_outline',
+    description: 'Generate a chapter-structured outline for a long-form video. Called once.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        hook: { type: 'string', description: '8-15 words. Attention-grabbing opening line.' },
+        logline: { type: 'string', description: 'One sentence summary of the full video, max 140 chars.' },
+        audience: { type: 'string' },
+        angle: { type: 'string', description: 'Specific angle or take. Note if research was thin.' },
+        cta: { type: 'string', description: 'Closing call-to-action.' },
+        chapters: {
+          type: 'array',
+          description: 'Ordered chapters. Exactly ' + numChapters + ' items.',
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'string', description: 'e.g. ch1, ch2...' },
+              title: { type: 'string', description: '3-8 word chapter title.' },
+              purpose: { type: 'string', description: 'What this chapter accomplishes. If research thin, note it here.' },
+              target_duration_s: { type: 'number', description: 'Target duration for this chapter in seconds.' },
+              key_claims: { type: 'array', items: { type: 'string' }, description: '2-4 claims from the research this chapter should prove.' }
+            },
+            required: ['id', 'title', 'purpose', 'target_duration_s', 'key_claims']
+          }
+        }
+      },
+      required: ['hook', 'logline', 'audience', 'angle', 'cta', 'chapters']
+    }
+  };
+
+  const body = {
+    model: 'claude-sonnet-4-6',
+    max_tokens: 3000,
+    system,
+    tools: [tool],
+    tool_choice: { type: 'tool', name: 'generate_chapter_outline' },
+    messages: [{ role: 'user', content: userMsg }]
+  };
+  const res = await fetchWithRetry(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'anthropic-version': '2023-06-01' },
+    body: JSON.stringify(body)
+  });
+  const ct = res.headers.get('content-type') || '';
+  const raw = ct.includes('application/json') ? await res.json() : await res.text();
+  if (!res.ok) throw new Error('Chapter outline HTTP ' + res.status + ': ' + (typeof raw === 'string' ? raw.slice(0, 200) : JSON.stringify(raw).slice(0, 200)));
+  const blocks = Array.isArray(raw && raw.content) ? raw.content : [];
+  const tb = blocks.find(b => b && b.type === 'tool_use' && b.name === 'generate_chapter_outline');
+  if (!tb || !tb.input) throw new Error('generate_chapter_outline tool not returned');
+  return tb.input;
+};
+
+// Step 2 of long-form: expand one chapter into beats
+const expandChapterIntoBeats = async (proxyUrl, topic, tone, format, chapter, researchBundle, trendingData, refTranscripts) => {
+  const url = (proxyUrl || '').replace(/\/$/, '') + '/v1/messages';
+  const researchSummary = (researchBundle.claims || []).map(c => '- ' + c.claim + ' [source: ' + c.source + ']').join('\n') || 'No grounded claims available.';
+  const trendingContext = (trendingData || []).flatMap(t => (t.matches || []).slice(0, 2).map(m => m.source + ': ' + (m.title || '').slice(0, 80))).slice(0, 8).join('\n') || '';
+  const refContext = (refTranscripts || []).filter(r => r.body).map(r => '--- ' + (r.title || r.url) + ' ---\n' + r.body.slice(0, 600)).join('\n\n').slice(0, 4000) || '';
+  const beatCount = Math.max(2, Math.round(chapter.target_duration_s / 45));
+
+  const system = [
+    'You are a long-form YouTube scriptwriter expanding a single chapter into spoken beats.',
+    'Rules:',
+    '1. Produce ' + beatCount + ' beats for this chapter. Each beat is 30-90s of spoken script.',
+    '2. Every substance beat MUST have at least one evidence[] entry from the RESEARCH block.',
+    '3. evidence[].source_url and evidence[].source_excerpt must come ONLY from the research block. NEVER invent URLs, quotes, or sources.',
+    '4. If research is thin for a claim, write that as source_title: "thin research — verify before recording" and leave source_url empty.',
+    '5. voLine must be natural spoken tone — how someone talks, not writes.',
+    '6. Each beat must have a clear payoff — no beat ends mid-idea.',
+    '7. Tone: ' + tone + '. Format: ' + format + '.',
+  ].join('\n');
+
+  const userMsg = [
+    'TOPIC: ' + topic,
+    'CHAPTER: ' + chapter.title,
+    'CHAPTER PURPOSE: ' + chapter.purpose,
+    'CHAPTER TARGET DURATION: ' + chapter.target_duration_s + 's',
+    'KEY CLAIMS TO PROVE: ' + (chapter.key_claims || []).join('; '),
+    '',
+    'RESEARCH CLAIMS:',
+    researchSummary,
+    trendingContext ? ('\nTRENDING CONTEXT:\n' + trendingContext) : '',
+    refContext ? ('\nREFERENCE MATERIAL:\n' + refContext) : '',
+  ].join('\n');
+
+  const tool = {
+    name: 'expand_chapter_into_beats',
+    description: 'Expand a chapter outline into concrete spoken beats with evidence.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        chapter_id: { type: 'string' },
+        beats: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'string' },
+              title: { type: 'string', description: '2-6 word label.' },
+              voLine: { type: 'string', description: 'Spoken script. Natural spoken tone.' },
+              duration_s: { type: 'number', description: 'Approx duration in seconds (30-90).' },
+              shot: { type: 'string', description: 'Concrete visual description for the shot.' },
+              motion: { type: 'string', description: 'Camera motion: slow push-in, zoom out, etc.' },
+              broll: { type: 'array', items: { type: 'string' }, description: 'B-roll search prompts.' },
+              captions: { type: 'string', description: 'On-screen caption text, max 80 chars.' },
+              evidence: {
+                type: 'array',
+                description: 'Sourced evidence from research block only. Empty array for transitional beats.',
+                items: {
+                  type: 'object',
+                  properties: {
+                    claim: { type: 'string' },
+                    source_url: { type: 'string', description: 'URL from research block only. Empty string if not available.' },
+                    source_title: { type: 'string' },
+                    source_excerpt: { type: 'string', description: 'Short verbatim or paraphrased excerpt from research, max 200 chars.' }
+                  },
+                  required: ['claim', 'source_url', 'source_title', 'source_excerpt']
+                }
+              }
+            },
+            required: ['id', 'title', 'voLine', 'duration_s', 'shot', 'evidence']
+          }
+        }
+      },
+      required: ['chapter_id', 'beats']
+    }
+  };
+
+  const body = {
+    model: 'claude-sonnet-4-6',
+    max_tokens: 4000,
+    system,
+    tools: [tool],
+    tool_choice: { type: 'tool', name: 'expand_chapter_into_beats' },
+    messages: [{ role: 'user', content: userMsg }]
+  };
+  const res = await fetchWithRetry(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'anthropic-version': '2023-06-01' },
+    body: JSON.stringify(body)
+  });
+  const ct = res.headers.get('content-type') || '';
+  const raw = ct.includes('application/json') ? await res.json() : await res.text();
+  if (!res.ok) throw new Error('expand_chapter HTTP ' + res.status + ': ' + (typeof raw === 'string' ? raw.slice(0, 200) : JSON.stringify(raw).slice(0, 200)));
+  const blocks = Array.isArray(raw && raw.content) ? raw.content : [];
+  const tb = blocks.find(b => b && b.type === 'tool_use' && b.name === 'expand_chapter_into_beats');
+  if (!tb || !tb.input) throw new Error('expand_chapter_into_beats tool not returned for chapter ' + chapter.id);
+  return tb.input;
+};
+
+// Run N chapter expansions with concurrency cap of 3
+const expandAllChapters = async (proxyUrl, topic, tone, format, chapters, researchBundle, trendingData, refTranscripts, onChapterProgress) => {
+  const results = new Array(chapters.length).fill(null);
+  const errors = new Array(chapters.length).fill(null);
+  const CONCURRENCY = 3;
+  let idx = 0;
+
+  const worker = async () => {
+    while (idx < chapters.length) {
+      const i = idx++;
+      const ch = chapters[i];
+      if (onChapterProgress) onChapterProgress(i, chapters.length, 'running');
+      try {
+        const expanded = await expandChapterIntoBeats(proxyUrl, topic, tone, format, ch, researchBundle, trendingData, refTranscripts);
+        results[i] = expanded;
+        if (onChapterProgress) onChapterProgress(i, chapters.length, 'done');
+      } catch(e) {
+        errors[i] = String(e && e.message || e);
+        if (onChapterProgress) onChapterProgress(i, chapters.length, 'error');
+        console.warn('[zs] chapter ' + ch.id + ' expansion failed:', e);
+      }
+    }
+  };
+
+  await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+  return { results, errors };
+};
 
 // Fetch a URL body for research (try direct then proxy fallback)
 const fetchUrlForResearch = async (url, proxyBase) => {
@@ -9246,12 +9476,88 @@ function ScriptsTab({ setTab }) {
   const [researchThin, setResearchThin] = React.useState(false);
 
   // Phase 3 result
-  const [script, setScript] = React.useState(null); // generate_full_script output
+  const [script, setScript] = React.useState(null); // generate_full_script output (short-form) or long-form chapters structure
+
+  // Long-form: per-chapter collapse state in review
+  const [chapterCollapsed, setChapterCollapsed] = React.useState({});
+  // Long-form: per-beat evidence panel collapse
+  const [evidenceOpen, setEvidenceOpen] = React.useState({});
+  // Long-form: chapter regen in-progress set
+  const [regenChapterBusy, setRegenChapterBusy] = React.useState({});
+
+  const isLongForm = Number(duration) >= 300;
 
   const appendStage = (label, status) => setStages(prev => [...prev, { label, status, id: Math.random().toString(36).slice(2) }]);
   const updateLastStage = (status) => setStages(prev => prev.length ? [...prev.slice(0,-1), { ...prev[prev.length-1], status }] : prev);
 
   const parseRefUrls = (raw) => String(raw || '').split(/[\n,]+/).map(s => s.trim()).filter(s => /^https?:\/\//i.test(s));
+
+  // Shared research stage (short-form and long-form both use this)
+  const runResearchStages = async (durSec) => {
+    appendStage('Extracting keywords…', 'running');
+    const keywords = await extractTopicKeywords(anthropicPath, topic, null);
+    updateLastStage('done');
+    appendStage('Keywords: ' + (keywords.slice(0,5).join(', ') || 'none'), 'info');
+
+    appendStage('Fetching trending context…', 'running');
+    let trendingData = [];
+    if (keywords.length && proxyBase) {
+      const maxKw = isLongForm ? 8 : 6;
+      trendingData = await fetchTrendingContext(proxyBase, keywords.slice(0, maxKw));
+    }
+    updateLastStage('done');
+    const trendCount = trendingData.reduce((n,r) => n + (r.matches||[]).length, 0);
+    appendStage('Trends: ' + trendCount + ' matches across Google/Reddit/HN/X', trendCount > 0 ? 'info' : 'warn');
+
+    const urlList = parseRefUrls(refUrls);
+    const trendUrls = trendingData.flatMap(r => (r.matches||[]).filter(m => /^https?:\/\//i.test(m.url)).slice(0,1).map(m => m.url)).slice(0, isLongForm ? 5 : 3);
+    const maxUrls = isLongForm ? 9 : 6;
+    const allUrls = [...new Set([...urlList, ...trendUrls])].slice(0, maxUrls);
+
+    const ytUrls = allUrls.filter(u => isYouTubeUrl(u));
+    const plainUrls = allUrls.filter(u => !isYouTubeUrl(u));
+
+    let refTranscripts = [];
+    const maxYt = isLongForm ? 3 : 2;
+    if (ytUrls.length) {
+      appendStage('Pulling YouTube transcripts (' + ytUrls.length + ')…', 'running');
+      const ytResults = await Promise.allSettled(ytUrls.slice(0, maxYt).map(u => fetchYouTubeTranscript(u)));
+      ytResults.forEach((r, i) => {
+        if (r.status === 'fulfilled' && r.value && r.value.transcript) {
+          refTranscripts.push({ url: ytUrls[i], title: r.value.title || ytUrls[i], body: r.value.transcript.slice(0, 3000) });
+        }
+      });
+      updateLastStage('done');
+      appendStage('YT transcripts: ' + refTranscripts.length + '/' + Math.min(ytUrls.length, maxYt) + ' fetched', 'info');
+    }
+
+    if (plainUrls.length) {
+      appendStage('Scraping reference URLs (' + plainUrls.length + ')…', 'running');
+      const urlResults = await Promise.allSettled(plainUrls.map(u => fetchUrlForResearch(u, proxyBase)));
+      let fetched = 0;
+      urlResults.forEach((r, i) => {
+        if (r.status === 'fulfilled' && r.value && r.value.body) {
+          refTranscripts.push({ url: plainUrls[i], title: r.value.title || plainUrls[i], body: r.value.body });
+          fetched++;
+        }
+      });
+      updateLastStage('done');
+      appendStage('URLs scraped: ' + fetched + '/' + plainUrls.length, fetched > 0 ? 'info' : 'warn');
+    }
+
+    appendStage('Synthesizing research…', 'running');
+    const srcText = topic + (refTranscripts.length ? '\n\nReference material:\n' + refTranscripts.map(r => r.body.slice(0,600)).join('\n---\n') : '');
+    const researchBundle = await runResearchSubAgent(anthropicPath, { source: srcText, durationHint: durSec }, (msg) => {
+      appendStage(msg, 'info');
+    });
+    updateLastStage('done');
+    const claimCount = (researchBundle.claims || []).length;
+    const thin = claimCount < 2;
+    if (thin) appendStage('Research limited (' + claimCount + ' claims) — script may be less grounded', 'warn');
+    else appendStage('Research: ' + claimCount + ' sourced claims', 'info');
+
+    return { keywords, trendingData, refTranscripts, researchBundle, thin };
+  };
 
   const runPipeline = async () => {
     if (!topic.trim()) { toast.push('Enter a topic first', 'warn'); return; }
@@ -9261,98 +9567,96 @@ function ScriptsTab({ setTab }) {
     setPipelineErr('');
     setResearchThin(false);
     setScript(null);
+    setChapterCollapsed({});
+    setEvidenceOpen({});
+
+    const durSec = Number(duration) || 60;
 
     try {
-      // Stage 1: keywords
-      appendStage('Extracting keywords…', 'running');
-      const keywords = await extractTopicKeywords(anthropicPath, topic, null);
-      updateLastStage('done');
-      appendStage('Keywords: ' + (keywords.slice(0,5).join(', ') || 'none'), 'info');
-
-      // Stage 2: trends
-      appendStage('Fetching trending context…', 'running');
-      let trendingData = [];
-      if (keywords.length && proxyBase) {
-        trendingData = await fetchTrendingContext(proxyBase, keywords.slice(0, 6));
-      }
-      updateLastStage('done');
-      const trendCount = trendingData.reduce((n,r) => n + (r.matches||[]).length, 0);
-      appendStage('Trends: ' + trendCount + ' matches across Google/Reddit/HN/X', trendCount > 0 ? 'info' : 'warn');
-
-      // Stage 3: URL scrape
-      const urlList = parseRefUrls(refUrls);
-      // Also add top 2 most-relevant trend URLs
-      const trendUrls = trendingData.flatMap(r => (r.matches||[]).filter(m => /^https?:\/\//i.test(m.url)).slice(0,1).map(m => m.url)).slice(0, 3);
-      const allUrls = [...new Set([...urlList, ...trendUrls])].slice(0, 6);
-
-      const ytUrls = allUrls.filter(u => isYouTubeUrl(u));
-      const plainUrls = allUrls.filter(u => !isYouTubeUrl(u));
-
-      // Stage 4: YT transcripts
-      let refTranscripts = [];
-      if (ytUrls.length) {
-        appendStage('Pulling YouTube transcripts (' + ytUrls.length + ')…', 'running');
-        const ytResults = await Promise.allSettled(ytUrls.map(u => fetchYouTubeTranscript(u)));
-        ytResults.forEach((r, i) => {
-          if (r.status === 'fulfilled' && r.value && r.value.transcript) {
-            refTranscripts.push({ url: ytUrls[i], title: r.value.title || ytUrls[i], body: r.value.transcript.slice(0, 3000) });
-          }
-        });
-        updateLastStage('done');
-        appendStage('YT transcripts: ' + refTranscripts.length + '/' + ytUrls.length + ' fetched', 'info');
-      }
-
-      if (plainUrls.length) {
-        appendStage('Scraping reference URLs (' + plainUrls.length + ')…', 'running');
-        const urlResults = await Promise.allSettled(plainUrls.map(u => fetchUrlForResearch(u, proxyBase)));
-        let fetched = 0;
-        urlResults.forEach((r, i) => {
-          if (r.status === 'fulfilled' && r.value && r.value.body) {
-            refTranscripts.push({ url: plainUrls[i], title: r.value.title || plainUrls[i], body: r.value.body });
-            fetched++;
-          }
-        });
-        updateLastStage('done');
-        appendStage('URLs scraped: ' + fetched + '/' + plainUrls.length, fetched > 0 ? 'info' : 'warn');
-      }
-
-      // Stage 5: emit_research via runResearchSubAgent
-      appendStage('Synthesizing research…', 'running');
-      const srcText = topic + (refTranscripts.length ? '\n\nReference material:\n' + refTranscripts.map(r => r.body.slice(0,600)).join('\n---\n') : '');
-      const researchBundle = await runResearchSubAgent(anthropicPath, { source: srcText, durationHint: Number(duration) || 60 }, (msg) => {
-        appendStage(msg, 'info');
-      });
-      updateLastStage('done');
-      const claimCount = (researchBundle.claims || []).length;
-      const thin = claimCount < 2;
+      const { trendingData, refTranscripts, researchBundle, thin } = await runResearchStages(durSec);
       setResearchThin(thin);
-      if (thin) appendStage('Research limited (' + claimCount + ' claims) — script may be less grounded', 'warn');
-      else appendStage('Research: ' + claimCount + ' sourced claims', 'info');
 
-      // Stage 6: generate_full_script
-      appendStage('Writing full script…', 'running');
-      const fullScript = await runFullScriptAgent(
-        anthropicPath, topic, tone, format, duration,
-        { ...researchBundle, _trendingRaw: trendingData },
-        refTranscripts,
-        (msg) => appendStage(msg, 'info')
-      );
-      updateLastStage('done');
-      appendStage('Script ready — ' + (fullScript.beats||[]).length + ' beats', 'info');
+      if (durSec >= 300) {
+        // Long-form path
+        appendStage('Generating chapter outline…', 'running');
+        const outline = await generateChapterOutline(anthropicPath, topic, tone, format, durSec, researchBundle, trendingData, refTranscripts);
+        updateLastStage('done');
+        const numCh = (outline.chapters || []).length;
+        appendStage('Chapter outline: ' + numCh + ' chapters', 'info');
 
-      setScript({ ...fullScript, _research: researchBundle, _trendingData: trendingData });
-      setPhase('review');
+        // Track chapter progress chips
+        const chapterStageIds = {};
+        outline.chapters.forEach((ch, i) => {
+          const id = Math.random().toString(36).slice(2);
+          chapterStageIds[i] = id;
+          setStages(prev => [...prev, { label: 'Expanding chapter ' + (i+1) + ' of ' + numCh + ': ' + ch.title, status: 'info', id }]);
+        });
+
+        const onChapterProgress = (i, total, status) => {
+          setStages(prev => prev.map(s => s.id === chapterStageIds[i] ? { ...s, label: (status === 'done' ? 'Chapter ' + (i+1) + ' done: ' : status === 'error' ? 'Chapter ' + (i+1) + ' failed: ' : 'Expanding chapter ' + (i+1) + ' of ' + total + ': ') + outline.chapters[i].title, status } : s));
+        };
+
+        const { results, errors } = await expandAllChapters(anthropicPath, topic, tone, format, outline.chapters, researchBundle, trendingData, refTranscripts, onChapterProgress);
+
+        const failedCount = errors.filter(Boolean).length;
+        if (failedCount > 0) appendStage(failedCount + ' chapter(s) failed — click "Retry" on the chapter to regenerate', 'warn');
+
+        const chapters = outline.chapters.map((ch, i) => ({
+          ...ch,
+          beats: results[i] ? (results[i].beats || []) : [],
+          _failed: !!errors[i],
+          _error: errors[i] || null
+        }));
+
+        const allBeats = chapters.flatMap(ch => ch.beats);
+        appendStage('Long-form script ready — ' + allBeats.length + ' beats across ' + numCh + ' chapters', 'info');
+
+        setScript({
+          hook: outline.hook,
+          logline: outline.logline,
+          audience: outline.audience,
+          angle: outline.angle,
+          cta: outline.cta,
+          chapters,
+          _longForm: true,
+          _research: researchBundle,
+          _trendingData: trendingData,
+          _refTranscripts: refTranscripts
+        });
+        // Expand first chapter, collapse rest by default
+        const collapsed = {};
+        chapters.forEach((_, i) => { if (i > 0) collapsed[i] = true; });
+        setChapterCollapsed(collapsed);
+        setPhase('review');
+
+      } else {
+        // Short-form path (unchanged)
+        appendStage('Writing full script…', 'running');
+        const fullScript = await runFullScriptAgent(
+          anthropicPath, topic, tone, format, duration,
+          { ...researchBundle, _trendingRaw: trendingData },
+          refTranscripts,
+          (msg) => appendStage(msg, 'info')
+        );
+        updateLastStage('done');
+        appendStage('Script ready — ' + (fullScript.beats||[]).length + ' beats', 'info');
+        setScript({ ...fullScript, _longForm: false, _research: researchBundle, _trendingData: trendingData });
+        setPhase('review');
+      }
     } catch(err) {
       setPipelineErr(String(err && err.message || err));
       updateLastStage('error');
-      setPhase('running'); // stay on running to show error + log
+      setPhase('running');
     }
   };
 
-  // Per-beat regen
-  const regenBeat = async (beatIdx) => {
+  // Per-beat regen (works for both short and long form)
+  const regenBeat = async (beatIdx, chapterIdx) => {
     if (!script || !anthropicPath) return;
-    const beat = script.beats[beatIdx];
+    const beat = script._longForm
+      ? (script.chapters[chapterIdx] && script.chapters[chapterIdx].beats[beatIdx])
+      : script.beats[beatIdx];
+    if (!beat) return;
     try {
       const url = anthropicPath.replace(/\/$/, '') + '/v1/messages';
       const body = {
@@ -9377,15 +9681,24 @@ function ScriptsTab({ setTab }) {
           role: 'user',
           content: 'Rewrite this beat in a ' + tone + ' tone for a ' + format + ' video.\n' +
             'Beat title: ' + beat.title + '\nCurrent voLine: ' + beat.voLine + '\nTopic: ' + topic +
-            '\nResearch: ' + (script._research && script._research.claims || []).slice(0,3).map(c => c.claim).join('; ')
+            '\nResearch: ' + ((script._research && script._research.claims) || []).slice(0,3).map(c => c.claim).join('; ')
         }]
       };
       const res = await fetchWithRetry(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'anthropic-version': '2023-06-01' }, body: JSON.stringify(body) });
       const data = await res.json();
       const tb = (data.content || []).find(b => b.type === 'tool_use' && b.name === 'rewrite_beat');
       if (tb && tb.input) {
-        const newBeats = script.beats.map((b, i) => i === beatIdx ? { ...b, voLine: tb.input.voLine || b.voLine, shot: tb.input.shot || b.shot, broll: tb.input.broll || b.broll, captions: tb.input.captions || b.captions } : b);
-        setScript(prev => ({ ...prev, beats: newBeats }));
+        if (script._longForm) {
+          setScript(prev => ({
+            ...prev,
+            chapters: prev.chapters.map((ch, ci) => ci !== chapterIdx ? ch : {
+              ...ch,
+              beats: ch.beats.map((b, bi) => bi !== beatIdx ? b : { ...b, voLine: tb.input.voLine || b.voLine, shot: tb.input.shot || b.shot, broll: tb.input.broll || b.broll, captions: tb.input.captions || b.captions })
+            })
+          }));
+        } else {
+          setScript(prev => ({ ...prev, beats: prev.beats.map((b, i) => i === beatIdx ? { ...b, voLine: tb.input.voLine || b.voLine, shot: tb.input.shot || b.shot, broll: tb.input.broll || b.broll, captions: tb.input.captions || b.captions } : b) }));
+        }
         toast.push('Beat regenerated', 'success');
       }
     } catch(e) {
@@ -9393,53 +9706,127 @@ function ScriptsTab({ setTab }) {
     }
   };
 
+  // Long-form: regen single chapter
+  const regenChapter = async (chapterIdx) => {
+    if (!script || !script._longForm || !anthropicPath) return;
+    const ch = script.chapters[chapterIdx];
+    if (!ch) return;
+    setRegenChapterBusy(prev => ({ ...prev, [chapterIdx]: true }));
+    try {
+      const expanded = await expandChapterIntoBeats(
+        anthropicPath, topic, tone, format, ch,
+        script._research, script._trendingData, script._refTranscripts || []
+      );
+      setScript(prev => ({
+        ...prev,
+        chapters: prev.chapters.map((c, i) => i !== chapterIdx ? c : { ...c, beats: expanded.beats || [], _failed: false, _error: null })
+      }));
+      toast.push('Chapter ' + (chapterIdx + 1) + ' regenerated', 'success');
+    } catch(e) {
+      toast.push('Chapter regen failed: ' + (e && e.message || e), 'error');
+      setScript(prev => ({
+        ...prev,
+        chapters: prev.chapters.map((c, i) => i !== chapterIdx ? c : { ...c, _failed: true, _error: String(e && e.message || e) })
+      }));
+    } finally {
+      setRegenChapterBusy(prev => ({ ...prev, [chapterIdx]: false }));
+    }
+  };
+
   // Send to Studio
   const sendToStudio = () => {
-    if (!script || !script.beats) return;
+    if (!script) return;
     const durSec = Number(duration) || 60;
-    const per = Math.max(3, Math.round(durSec / Math.max(1, script.beats.length)));
-    const scenes = script.beats.map((b, i) => ({
-      id: 's' + (i + 1),
-      title: (b.title || ('Beat ' + (i + 1))).slice(0, 80),
-      script: (b.voLine || '').slice(0, 800),
-      voLine: (b.voLine || '').slice(0, 800),
-      duration: b.duration_s || per,
-      aroll: 'avatar',
-      broll: Array.isArray(b.broll) ? b.broll : [],
-      shot: b.shot || '',
-      motion: b.motion || 'slow push-in',
-      asset: 'b-roll',
-      captions: (b.captions || (b.voLine || '').slice(0, 80))
-    }));
-    const projectPatch = {
-      name: topic.slice(0, 80),
-      logline: script.logline || '',
-      hook: script.hook || '',
-      cta: script.cta || '',
-      audience: script.audience || '',
-      angle: script.angle || '',
-      source: topic,
-      durationHint: durSec,
-      scenes
-    };
-    try {
-      const existing = JSON.parse(localStorage.getItem('zaidsaid.v2.studio.project') || '{}');
-      localStorage.setItem('zaidsaid.v2.studio.project', JSON.stringify({ ...existing, ...projectPatch }));
-      toast.push('Sent to Studio — ' + scenes.length + ' scenes', 'success');
-      if (setTab) setTab('studio');
-    } catch(e) {
-      toast.push('Send to Studio failed: ' + (e && e.message || e), 'error');
+
+    if (script._longForm) {
+      if (!script.chapters) return;
+      const per = 45;
+      let sceneIdx = 0;
+      const scenes = script.chapters.flatMap((ch, ci) =>
+        (ch.beats || []).map((b) => {
+          sceneIdx++;
+          return {
+            id: 's' + sceneIdx,
+            title: ('Ch ' + (ci + 1) + ' · ' + (b.title || ('Beat ' + sceneIdx))).slice(0, 80),
+            script: (b.voLine || '').slice(0, 800),
+            voLine: (b.voLine || '').slice(0, 800),
+            duration: b.duration_s || per,
+            aroll: 'avatar',
+            broll: Array.isArray(b.broll) ? b.broll : [],
+            shot: b.shot || '',
+            motion: b.motion || 'slow push-in',
+            asset: 'b-roll',
+            captions: (b.captions || (b.voLine || '').slice(0, 80))
+          };
+        })
+      );
+      const projectPatch = {
+        name: topic.slice(0, 80),
+        logline: script.logline || '',
+        hook: script.hook || '',
+        cta: script.cta || '',
+        audience: script.audience || '',
+        angle: script.angle || '',
+        source: topic,
+        durationHint: durSec,
+        scenes
+      };
+      try {
+        const existing = JSON.parse(localStorage.getItem('zaidsaid.v2.studio.project') || '{}');
+        localStorage.setItem('zaidsaid.v2.studio.project', JSON.stringify({ ...existing, ...projectPatch }));
+        toast.push('Sent ' + scenes.length + ' scenes across ' + script.chapters.length + ' chapters to Studio', 'success');
+        if (setTab) setTab('studio');
+      } catch(e) {
+        toast.push('Send to Studio failed: ' + (e && e.message || e), 'error');
+      }
+    } else {
+      if (!script.beats) return;
+      const per = Math.max(3, Math.round(durSec / Math.max(1, script.beats.length)));
+      const scenes = script.beats.map((b, i) => ({
+        id: 's' + (i + 1),
+        title: (b.title || ('Beat ' + (i + 1))).slice(0, 80),
+        script: (b.voLine || '').slice(0, 800),
+        voLine: (b.voLine || '').slice(0, 800),
+        duration: b.duration_s || per,
+        aroll: 'avatar',
+        broll: Array.isArray(b.broll) ? b.broll : [],
+        shot: b.shot || '',
+        motion: b.motion || 'slow push-in',
+        asset: 'b-roll',
+        captions: (b.captions || (b.voLine || '').slice(0, 80))
+      }));
+      const projectPatch = {
+        name: topic.slice(0, 80),
+        logline: script.logline || '',
+        hook: script.hook || '',
+        cta: script.cta || '',
+        audience: script.audience || '',
+        angle: script.angle || '',
+        source: topic,
+        durationHint: durSec,
+        scenes
+      };
+      try {
+        const existing = JSON.parse(localStorage.getItem('zaidsaid.v2.studio.project') || '{}');
+        localStorage.setItem('zaidsaid.v2.studio.project', JSON.stringify({ ...existing, ...projectPatch }));
+        toast.push('Sent to Studio — ' + scenes.length + ' scenes', 'success');
+        if (setTab) setTab('studio');
+      } catch(e) {
+        toast.push('Send to Studio failed: ' + (e && e.message || e), 'error');
+      }
     }
   };
 
   // Send to HyperFrames (prime first beat)
   const sendToHyperFrames = () => {
-    if (!script || !script.beats || !script.beats[0]) return;
-    const b = script.beats[0];
+    const firstBeat = script && (script._longForm
+      ? (script.chapters && script.chapters[0] && script.chapters[0].beats && script.chapters[0].beats[0])
+      : (script && script.beats && script.beats[0]));
+    if (!firstBeat) return;
     try {
       localStorage.setItem('zaidsaid.v2.hf.seed', JSON.stringify({
-        voLine: b.voLine || '',
-        broll: Array.isArray(b.broll) ? b.broll : [],
+        voLine: firstBeat.voLine || '',
+        broll: Array.isArray(firstBeat.broll) ? firstBeat.broll : [],
         title: topic.slice(0, 80)
       }));
       toast.push('Primed HyperFrames with first beat', 'success');
@@ -9459,24 +9846,50 @@ function ScriptsTab({ setTab }) {
       '**Audience:** ' + (script.audience || ''),
       '**Angle:** ' + (script.angle || ''),
       '**CTA:** ' + (script.cta || ''),
-      '',
-      '## Script Beats',
       ''
     ];
-    (script.beats || []).forEach((b, i) => {
-      lines.push('### ' + (i+1) + '. ' + (b.title || ''));
-      lines.push('**VO:** ' + (b.voLine || ''));
-      lines.push('**Shot:** ' + (b.shot || ''));
-      if (b.broll && b.broll.length) lines.push('**B-roll:** ' + b.broll.join(', '));
-      if (b.captions) lines.push('**Captions:** ' + b.captions);
-      lines.push('');
-    });
-    if ((script.references || []).length) {
-      lines.push('## References', '');
-      (script.references || []).forEach(r => {
-        lines.push('- ' + r.claim + ' — [' + (r.source_title || r.source_url) + '](' + r.source_url + ')');
+
+    if (script._longForm && script.chapters) {
+      script.chapters.forEach((ch, ci) => {
+        lines.push('## Chapter ' + (ci + 1) + ': ' + (ch.title || ''));
+        if (ch.purpose) lines.push('*' + ch.purpose + '*');
+        if (ch.key_claims && ch.key_claims.length) lines.push('**Key claims:** ' + ch.key_claims.join('; '));
+        lines.push('');
+        (ch.beats || []).forEach((b, bi) => {
+          lines.push('### ' + (bi + 1) + '. ' + (b.title || ''));
+          lines.push('**VO:** ' + (b.voLine || ''));
+          lines.push('**Shot:** ' + (b.shot || ''));
+          if (b.broll && b.broll.length) lines.push('**B-roll:** ' + b.broll.join(', '));
+          if (b.captions) lines.push('**Captions:** ' + b.captions);
+          if (Array.isArray(b.evidence) && b.evidence.length) {
+            lines.push('**Evidence:**');
+            b.evidence.forEach(ev => {
+              const link = ev.source_url ? ('[' + (ev.source_title || ev.source_url) + '](' + ev.source_url + ')') : (ev.source_title || 'no source');
+              lines.push('- ' + ev.claim + ' — ' + link);
+              if (ev.source_excerpt) lines.push('  > ' + ev.source_excerpt.slice(0, 200));
+            });
+          }
+          lines.push('');
+        });
       });
+    } else {
+      lines.push('## Script Beats', '');
+      (script.beats || []).forEach((b, i) => {
+        lines.push('### ' + (i+1) + '. ' + (b.title || ''));
+        lines.push('**VO:** ' + (b.voLine || ''));
+        lines.push('**Shot:** ' + (b.shot || ''));
+        if (b.broll && b.broll.length) lines.push('**B-roll:** ' + b.broll.join(', '));
+        if (b.captions) lines.push('**Captions:** ' + b.captions);
+        lines.push('');
+      });
+      if ((script.references || []).length) {
+        lines.push('## References', '');
+        (script.references || []).forEach(r => {
+          lines.push('- ' + r.claim + ' — [' + (r.source_title || r.source_url) + '](' + r.source_url + ')');
+        });
+      }
     }
+
     const blob = new Blob([lines.join('\n')], { type: 'text/markdown' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -9491,10 +9904,20 @@ function ScriptsTab({ setTab }) {
   const copyMd = () => {
     if (!script) return;
     const lines = [(script.logline || topic), '', '**Hook:** ' + (script.hook || ''), ''];
-    (script.beats || []).forEach((b, i) => {
-      lines.push((i+1) + '. ' + (b.title || '') + '\n' + (b.voLine || ''));
-      lines.push('');
-    });
+    if (script._longForm && script.chapters) {
+      script.chapters.forEach((ch, ci) => {
+        lines.push('## Chapter ' + (ci + 1) + ': ' + ch.title);
+        (ch.beats || []).forEach((b, bi) => {
+          lines.push((bi + 1) + '. ' + (b.title || '') + '\n' + (b.voLine || ''));
+          lines.push('');
+        });
+      });
+    } else {
+      (script.beats || []).forEach((b, i) => {
+        lines.push((i+1) + '. ' + (b.title || '') + '\n' + (b.voLine || ''));
+        lines.push('');
+      });
+    }
     try { navigator.clipboard.writeText(lines.join('\n')); toast.push('Copied', 'success'); }
     catch(_) { toast.push('Copy failed', 'error'); }
   };
@@ -9506,6 +9929,98 @@ function ScriptsTab({ setTab }) {
     if (status === 'error') return 'text-rose-300 border-rose-400/30 bg-rose-500/10';
     if (status === 'warn') return 'text-amber-300 border-amber-400/30 bg-amber-500/10';
     return 'text-[color:var(--muted)] border-[color:var(--line)]';
+  };
+
+  // Render a single beat card (shared between short and long form)
+  const renderBeatCard = (beat, beatIdx, chapterIdx) => {
+    const evKey = (chapterIdx != null ? chapterIdx + '_' : '') + beatIdx;
+    const evOpen = evidenceOpen[evKey];
+    const hasEvidence = Array.isArray(beat.evidence) && beat.evidence.length > 0;
+    return (
+      <div key={beat.id || beatIdx} className="rounded-xl border border-[color:var(--line)] p-4 space-y-3">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <span className="w-6 h-6 rounded-lg bg-white/10 flex items-center justify-center text-[11px] font-bold">{beatIdx + 1}</span>
+            {script._longForm ? (
+              <span className="text-sm font-semibold">{beat.title || ''}</span>
+            ) : (
+              <input
+                value={beat.title || ''}
+                onChange={e => setScript(s => ({ ...s, beats: s.beats.map((b, j) => j === beatIdx ? { ...b, title: e.target.value } : b) }))}
+                className="bg-transparent text-sm font-semibold border-none outline-none"
+              />
+            )}
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="chip text-[10px]">{beat.duration_s || '?'}s</span>
+            <button className="chip text-[10px]" onClick={() => regenBeat(beatIdx, chapterIdx)}>{I.refresh({size:10})} Regen</button>
+          </div>
+        </div>
+        <label className="block">
+          <span className="text-[10px] uppercase tracking-wider text-[color:var(--muted)]">VO Line</span>
+          <textarea
+            value={beat.voLine || ''}
+            onChange={e => {
+              if (script._longForm) {
+                setScript(prev => ({ ...prev, chapters: prev.chapters.map((ch, ci) => ci !== chapterIdx ? ch : { ...ch, beats: ch.beats.map((b, bi) => bi !== beatIdx ? b : { ...b, voLine: e.target.value }) }) }));
+              } else {
+                setScript(prev => ({ ...prev, beats: prev.beats.map((b, j) => j === beatIdx ? { ...b, voLine: e.target.value } : b) }));
+              }
+            }}
+            rows={3}
+            className="mt-1 w-full bg-transparent border border-[color:var(--line)] rounded-xl p-2.5 text-sm resize-none"
+          />
+        </label>
+        <div className="grid sm:grid-cols-2 gap-2 text-[12px]">
+          <div>
+            <div className="text-[10px] uppercase tracking-wider text-[color:var(--muted)] mb-1">Shot</div>
+            <div className="text-[color:var(--muted)]">{beat.shot || '—'}</div>
+          </div>
+          <div>
+            <div className="text-[10px] uppercase tracking-wider text-[color:var(--muted)] mb-1">B-roll prompts</div>
+            <div className="text-[color:var(--muted)]">{Array.isArray(beat.broll) ? beat.broll.join(' · ') : (beat.broll || '—')}</div>
+          </div>
+        </div>
+        {beat.captions && (
+          <div className="text-[11px] text-[color:var(--muted)]">
+            <span className="uppercase tracking-wider mr-1">Captions:</span>{beat.captions}
+          </div>
+        )}
+        {hasEvidence && (
+          <div className="border-t border-[color:var(--line)] pt-2">
+            <button
+              className="text-[11px] text-indigo-300 hover:text-white flex items-center gap-1"
+              onClick={() => setEvidenceOpen(prev => ({ ...prev, [evKey]: !prev[evKey] }))}
+            >
+              {evOpen ? '▾' : '▸'} Evidence ({beat.evidence.length} {beat.evidence.length === 1 ? 'source' : 'sources'})
+            </button>
+            {evOpen && (
+              <div className="mt-2 space-y-2">
+                {beat.evidence.map((ev, ei) => (
+                  <div key={ei} className="rounded-lg bg-white/[0.03] border border-white/5 p-2.5 text-[11px]">
+                    <div className="font-medium text-white/80">{ev.claim}</div>
+                    <div className="mt-1 text-[color:var(--muted)]">
+                      {ev.source_url ? (
+                        <a href={ev.source_url} target="_blank" rel="noopener noreferrer" className="underline hover:text-white">
+                          {ev.source_title || ev.source_url}
+                        </a>
+                      ) : (
+                        <span>{ev.source_title || 'no source'}</span>
+                      )}
+                    </div>
+                    {ev.source_excerpt && (
+                      <div className="mt-1 text-[color:var(--muted)] italic border-l border-white/10 pl-2">
+                        {ev.source_excerpt.slice(0, 200)}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
   };
 
   return (
@@ -9558,11 +10073,19 @@ function ScriptsTab({ setTab }) {
             <label className="flex flex-col gap-1">
               <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Target duration</span>
               <select value={duration} onChange={e => setDuration(e.target.value)} className="bg-transparent border border-[color:var(--line)] rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-white/20">
-                <option value="15" style={{background:'#0b0b10'}}>15 seconds</option>
-                <option value="30" style={{background:'#0b0b10'}}>30 seconds</option>
-                <option value="60" style={{background:'#0b0b10'}}>60 seconds</option>
-                <option value="90" style={{background:'#0b0b10'}}>90 seconds</option>
-                <option value="180" style={{background:'#0b0b10'}}>3 minutes</option>
+                <optgroup label="Short-form" style={{background:'#0b0b10'}}>
+                  <option value="15" style={{background:'#0b0b10'}}>15 seconds</option>
+                  <option value="30" style={{background:'#0b0b10'}}>30 seconds</option>
+                  <option value="60" style={{background:'#0b0b10'}}>60 seconds</option>
+                  <option value="90" style={{background:'#0b0b10'}}>90 seconds</option>
+                  <option value="180" style={{background:'#0b0b10'}}>3 minutes</option>
+                </optgroup>
+                <optgroup label="Long-form" style={{background:'#0b0b10'}}>
+                  <option value="900" style={{background:'#0b0b10'}}>15 minutes</option>
+                  <option value="1500" style={{background:'#0b0b10'}}>25 minutes</option>
+                  <option value="2700" style={{background:'#0b0b10'}}>45 minutes</option>
+                  <option value="3600" style={{background:'#0b0b10'}}>60 minutes</option>
+                </optgroup>
               </select>
             </label>
             <label className="flex flex-col gap-1">
@@ -9583,6 +10106,11 @@ function ScriptsTab({ setTab }) {
               </select>
             </label>
           </div>
+          {isLongForm && (
+            <div className="rounded-xl border border-violet-400/30 bg-violet-500/10 p-3 text-[12px] text-violet-200">
+              Long-form mode: deeper research, chapter outline, ~30-90s beats. Expect 60-120s pipeline run.
+            </div>
+          )}
           {!anthropicPath && (
             <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 p-3 text-[12px] text-amber-200">
               No Anthropic proxy configured. Go to Settings to add one — this tool needs Claude Sonnet.
@@ -9592,7 +10120,7 @@ function ScriptsTab({ setTab }) {
             <button className="btn btn-primary" onClick={runPipeline} disabled={!topic.trim() || !anthropicPath}>
               {I.search({size:14})} Research &amp; write
             </button>
-            <span className="text-[11px] text-[color:var(--muted)]">~30–60s · 6 pipeline stages · Claude Sonnet</span>
+            <span className="text-[11px] text-[color:var(--muted)]">{isLongForm ? '~60–120s · chapter pipeline · Claude Sonnet' : '~30–60s · 6 pipeline stages · Claude Sonnet'}</span>
           </div>
         </div>
       )}
@@ -9604,7 +10132,7 @@ function ScriptsTab({ setTab }) {
             <span className="w-8 h-8 rounded-lg bg-indigo-500/20 flex items-center justify-center animate-pulse">{I.search({size:14})}</span>
             <div>
               <div className="text-sm font-semibold">Researching &amp; writing…</div>
-              <div className="text-[11px] text-[color:var(--muted)]">{topic.slice(0,80)}</div>
+              <div className="text-[11px] text-[color:var(--muted)]">{topic.slice(0,80)}{isLongForm ? ' (long-form)' : ''}</div>
             </div>
           </div>
           <div className="flex flex-col gap-1.5">
@@ -9629,7 +10157,7 @@ function ScriptsTab({ setTab }) {
         <div className="space-y-4">
           {researchThin && (
             <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 p-3 text-[12px] text-amber-200">
-              Research limited — script may be less grounded. Consider adding reference URLs and re-running.
+              Research thin for this topic — script may rely more on Claude's prior than on cited sources. Consider adding reference URLs and re-running.
             </div>
           )}
 
@@ -9660,63 +10188,102 @@ function ScriptsTab({ setTab }) {
             </div>
           </div>
 
-          {/* Beat cards */}
-          <div className="card p-5 space-y-4">
-            <div className="flex items-center justify-between gap-2">
-              <div>
-                <div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Script beats</div>
-                <div className="text-lg font-semibold">{(script.beats||[]).length} beats</div>
-              </div>
-              <button className="btn btn-ghost text-xs" onClick={runPipeline}>{I.refresh({size:12})} Regenerate all</button>
-            </div>
+          {/* Long-form: chapter-grouped beats */}
+          {script._longForm && script.chapters && (
             <div className="space-y-3">
-              {(script.beats || []).map((beat, i) => (
-                <div key={beat.id || i} className="rounded-xl border border-[color:var(--line)] p-4 space-y-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <span className="w-6 h-6 rounded-lg bg-white/10 flex items-center justify-center text-[11px] font-bold">{i+1}</span>
-                      <input
-                        value={beat.title || ''}
-                        onChange={e => setScript(s => ({ ...s, beats: s.beats.map((b, j) => j===i ? { ...b, title: e.target.value } : b) }))}
-                        className="bg-transparent text-sm font-semibold border-none outline-none"
-                      />
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="chip text-[10px]">{beat.duration_s || '?'}s</span>
-                      <button className="chip text-[10px]" onClick={() => regenBeat(i)}>{I.refresh({size:10})} Regen</button>
-                    </div>
-                  </div>
-                  <label className="block">
-                    <span className="text-[10px] uppercase tracking-wider text-[color:var(--muted)]">VO Line</span>
-                    <textarea
-                      value={beat.voLine || ''}
-                      onChange={e => setScript(s => ({ ...s, beats: s.beats.map((b, j) => j===i ? { ...b, voLine: e.target.value } : b) }))}
-                      rows={3}
-                      className="mt-1 w-full bg-transparent border border-[color:var(--line)] rounded-xl p-2.5 text-sm resize-none"
-                    />
-                  </label>
-                  <div className="grid sm:grid-cols-2 gap-2 text-[12px]">
-                    <div>
-                      <div className="text-[10px] uppercase tracking-wider text-[color:var(--muted)] mb-1">Shot</div>
-                      <div className="text-[color:var(--muted)]">{beat.shot || '—'}</div>
-                    </div>
-                    <div>
-                      <div className="text-[10px] uppercase tracking-wider text-[color:var(--muted)] mb-1">B-roll prompts</div>
-                      <div className="text-[color:var(--muted)]">{Array.isArray(beat.broll) ? beat.broll.join(' · ') : (beat.broll || '—')}</div>
-                    </div>
-                  </div>
-                  {beat.captions && (
-                    <div className="text-[11px] text-[color:var(--muted)]">
-                      <span className="uppercase tracking-wider mr-1">Captions:</span>{beat.captions}
-                    </div>
-                  )}
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Chapter storyboard</div>
+                  <div className="text-lg font-semibold">{script.chapters.length} chapters · {script.chapters.reduce((n, ch) => n + (ch.beats || []).length, 0)} beats</div>
                 </div>
-              ))}
+                <button className="btn btn-ghost text-xs" onClick={runPipeline}>{I.refresh({size:12})} Regenerate all</button>
+              </div>
+              {script.chapters.map((ch, ci) => {
+                const collapsed = chapterCollapsed[ci];
+                const beatCount = (ch.beats || []).length;
+                const totalDurS = (ch.beats || []).reduce((n, b) => n + (b.duration_s || 0), 0);
+                return (
+                  <div key={ch.id || ci} className="rounded-xl border border-[color:var(--line)] overflow-hidden">
+                    {/* Chapter header */}
+                    <div
+                      className="flex items-center justify-between gap-2 p-4 cursor-pointer hover:bg-white/[0.02]"
+                      onClick={() => setChapterCollapsed(prev => ({ ...prev, [ci]: !prev[ci] }))}
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <span className="w-7 h-7 rounded-lg bg-violet-500/20 flex items-center justify-center text-[11px] font-bold text-violet-300 shrink-0">
+                          {ci + 1}
+                        </span>
+                        <div className="min-w-0">
+                          <div className="font-semibold text-sm truncate">{ch.title}</div>
+                          <div className="text-[11px] text-[color:var(--muted)] truncate">{ch.purpose}</div>
+                          {ch.key_claims && ch.key_claims.length > 0 && (
+                            <div className="text-[10px] text-violet-300/70 mt-0.5 truncate">
+                              Claims: {ch.key_claims.slice(0, 2).join(' · ')}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="chip text-[10px]">{beatCount} beats</span>
+                        <span className="chip text-[10px]">{Math.round(totalDurS / 60)}min</span>
+                        {ch._failed && (
+                          <button
+                            className="chip text-[10px] text-rose-300 border-rose-400/30"
+                            onClick={e => { e.stopPropagation(); regenChapter(ci); }}
+                            disabled={regenChapterBusy[ci]}
+                          >
+                            {regenChapterBusy[ci] ? 'Retrying…' : 'Failed — Retry'}
+                          </button>
+                        )}
+                        <button
+                          className="chip text-[10px]"
+                          onClick={e => { e.stopPropagation(); regenChapter(ci); }}
+                          disabled={regenChapterBusy[ci]}
+                          title="Regenerate chapter"
+                        >
+                          {regenChapterBusy[ci] ? '…' : I.refresh({size:10})}
+                        </button>
+                        <span className="text-[color:var(--muted)] text-sm">{collapsed ? '▸' : '▾'}</span>
+                      </div>
+                    </div>
+                    {/* Chapter beats */}
+                    {!collapsed && (
+                      <div className="border-t border-[color:var(--line)] p-4 space-y-3">
+                        {ch._failed && (
+                          <div className="rounded-xl border border-rose-400/30 bg-rose-500/10 p-3 text-[12px] text-rose-300">
+                            Chapter expansion failed{ch._error ? ': ' + ch._error : ''}. Click "Failed — Retry" to regenerate.
+                          </div>
+                        )}
+                        {(ch.beats || []).length === 0 && !ch._failed && (
+                          <div className="text-[12px] text-[color:var(--muted)]">No beats generated for this chapter.</div>
+                        )}
+                        {(ch.beats || []).map((beat, bi) => renderBeatCard(beat, bi, ci))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
-          </div>
+          )}
 
-          {/* Citations */}
-          {(script.references || []).length > 0 && (
+          {/* Short-form: flat beat cards */}
+          {!script._longForm && (
+            <div className="card p-5 space-y-4">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Script beats</div>
+                  <div className="text-lg font-semibold">{(script.beats||[]).length} beats</div>
+                </div>
+                <button className="btn btn-ghost text-xs" onClick={runPipeline}>{I.refresh({size:12})} Regenerate all</button>
+              </div>
+              <div className="space-y-3">
+                {(script.beats || []).map((beat, i) => renderBeatCard(beat, i, null))}
+              </div>
+            </div>
+          )}
+
+          {/* Short-form citations */}
+          {!script._longForm && (script.references || []).length > 0 && (
             <div className="card p-5 space-y-3">
               <div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Citations</div>
               <div className="text-lg font-semibold">Sources the script is grounded in</div>
