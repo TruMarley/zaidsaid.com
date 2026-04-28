@@ -109,25 +109,26 @@ async def clone(
 
 
 def _piper_synthesize(text: str, *, voice_alias: str, speed: float) -> bytes:
+    # piper-tts 1.4+ API: PiperVoice.load() handles download via download_dir.
+    # Voice files cache to PIPER_CACHE (defaults to ~/.cache/piper).
     from piper import PiperVoice  # type: ignore[import-untyped]
-    from piper.download import ensure_voice_exists, find_voice  # type: ignore[import-untyped]
+    from piper.config import SynthesisConfig  # type: ignore[import-untyped]
+    from piper import download_voices  # type: ignore[import-untyped]
 
     voice_id = PIPER_VOICES[voice_alias]
     cache_dir = Path(os.environ.get("PIPER_CACHE", str(Path.home() / ".cache" / "piper")))
     cache_dir.mkdir(parents=True, exist_ok=True)
+    onnx_path = cache_dir / f"{voice_id}.onnx"
+    if not onnx_path.exists():
+        download_voices.download_voice(voice_id, cache_dir)
     key = f"piper:{voice_id}"
     if key not in _MODELS:
-        ensure_voice_exists(voice_id, [str(cache_dir)], str(cache_dir), {"voices": {}})
-        onnx_path, _config_path = find_voice(voice_id, [str(cache_dir)])
         _MODELS[key] = PiperVoice.load(str(onnx_path))
     voice = _MODELS[key]
+    cfg = SynthesisConfig(length_scale=1.0 / max(0.1, speed))
     buf = io.BytesIO()
     with wave.open(buf, "wb") as w:
-        w.setnchannels(1)
-        w.setsampwidth(2)
-        w.setframerate(voice.config.sample_rate)
-        for audio_bytes in voice.synthesize_stream_raw(text, length_scale=1.0 / max(0.1, speed)):
-            w.writeframes(audio_bytes)
+        voice.synthesize_wav(text, w, syn_config=cfg)
     return buf.getvalue()
 
 

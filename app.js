@@ -3464,6 +3464,28 @@ const ttsViaElevenLabs = async (proxyUrl, text, voiceId) => {
   return await new Promise((resolve,reject)=>{ const r=new FileReader(); r.onload=()=>resolve(r.result); r.onerror=reject; r.readAsDataURL(blob); });
 };
 
+// x113b: piper TTS via the OSS tts sidecar. Returns the same data URL shape
+// as ttsViaElevenLabs so callers don't need to branch downstream. Per
+// 60-second voiceover: ~$1.20 → $0.
+const ttsViaPiper = async (ttsBase, text, voice) => {
+  const v = voice || 'en-amy';
+  const form = new FormData();
+  form.append('text', String(text || '').slice(0, 5000));
+  form.append('voice', v);
+  const res = await fetch(ttsBase.replace(/\/$/, '') + '/synthesize', { method: 'POST', body: form });
+  if (!res.ok) {
+    const t = await res.text().catch(() => '');
+    throw new Error('piper HTTP ' + res.status + ' ' + t.slice(0, 200));
+  }
+  const blob = await res.blob();
+  return await new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result);
+    r.onerror = reject;
+    r.readAsDataURL(blob);
+  });
+};
+
 // MVP-D: Local TTS fallback via SpeechSynthesis (returns null — caller plays live)
 const ttsLocal = (text) => {
   return new Promise((resolve, reject) => {
@@ -4354,10 +4376,24 @@ function StepVoice({ project, setProject }){
         patch = { audio: null, audioSource: 'skipped' };
       } else {
         try {
-          if(path){
-            const dataUrl = await ttsViaElevenLabs(path, text);
+          // x113b: prefer piper via tts-oss sidecar when enabled — zero per-call cost.
+          // Falls through to ElevenLabs on any failure (or when ttsOss is disabled).
+          const ttsOssBase = getTtsPath();
+          let dataUrl = null;
+          let source = '';
+          if (ttsOssBase) {
+            try {
+              dataUrl = await ttsViaPiper(ttsOssBase, text);
+              source = 'piper';
+            } catch(e) { console.warn('[zs] piper TTS failed, falling back:', e); }
+          }
+          if (!dataUrl && path) {
+            dataUrl = await ttsViaElevenLabs(path, text);
+            source = 'elevenlabs';
+          }
+          if (dataUrl) {
             const audioRef = await storeSceneAudio(sceneId, dataUrl);
-            patch = { audio: audioRef, audioSource: 'elevenlabs' };
+            patch = { audio: audioRef, audioSource: source };
             okEl++;
           } else {
             patch = { audio: null, audioSource: 'local-speech' };
@@ -4386,13 +4422,22 @@ function StepVoice({ project, setProject }){
     if(!text.trim()){ setVoiceErr('Scene has no text to voice.'); return; }
     let providers = {}; try { providers = safeGet('providers', {}) || {}; } catch(e){}
     const path = providers && providers.elevenlabs && providers.elevenlabs.proxyUrl;
-    if(!path){ setVoiceErr('ElevenLabs proxy not configured.'); return; }
+    const ttsOssBase = getTtsPath();
+    if(!path && !ttsOssBase){ setVoiceErr('No TTS provider configured (ElevenLabs or OSS tts).'); return; }
     setVoiceBusy(true); setVoiceErr(''); setVoiceInfo('');
     try {
-      const dataUrl = await ttsViaElevenLabs(path, text);
+      // x113b: prefer piper when tts-oss is on, fall back to ElevenLabs.
+      let dataUrl = null;
+      let source = '';
+      if (ttsOssBase) {
+        try { dataUrl = await ttsViaPiper(ttsOssBase, text); source = 'piper'; }
+        catch(e) { console.warn('[zs] piper TTS failed, falling back:', e); }
+      }
+      if (!dataUrl && path) { dataUrl = await ttsViaElevenLabs(path, text); source = 'elevenlabs'; }
+      if (!dataUrl) throw new Error('No TTS engine succeeded');
       const audioRef = await storeSceneAudio(sceneId, dataUrl);
-      setProject({ ...project, scenes: project.scenes.map(s => s.id === sceneId ? { ...s, audio: audioRef, audioSource: 'elevenlabs' } : s) });
-      setVoiceInfo('Regenerated voice for: ' + (scene.title || 'scene'));
+      setProject({ ...project, scenes: project.scenes.map(s => s.id === sceneId ? { ...s, audio: audioRef, audioSource: source } : s) });
+      setVoiceInfo('Regenerated voice for: ' + (scene.title || 'scene') + ' (' + source + ')');
     } catch(e){
       setVoiceErr('Regenerate failed: ' + String(e && e.message || e).slice(0,140));
     } finally { setVoiceBusy(false); }
