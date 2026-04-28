@@ -150,8 +150,10 @@ def _sam2_single(img_bytes: bytes, *, px: float, py: float, return_format: str) 
     label = np.array([1], dtype=np.int32)
 
     if "sam2" not in _MODELS:
+        import torch  # type: ignore[import-untyped]
         from sam2.sam2_image_predictor import SAM2ImagePredictor  # type: ignore[import-untyped]
-        _MODELS["sam2"] = SAM2ImagePredictor.from_pretrained("facebook/sam2.1-hiera-base-plus")
+        device = "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")
+        _MODELS["sam2"] = SAM2ImagePredictor.from_pretrained("facebook/sam2.1-hiera-base-plus", device=device)
     predictor = _MODELS["sam2"]
     predictor.set_image(arr)
     masks, scores, _ = predictor.predict(point_coords=point, point_labels=label, multimask_output=False)
