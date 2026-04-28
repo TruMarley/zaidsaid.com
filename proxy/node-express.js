@@ -73,6 +73,35 @@ app.get(/\/ping$/, (req, res) => {
 // Read raw body as a buffer for POST/PUT so we can forward it unchanged.
 app.use(express.raw({ type: "*/*", limit: "50mb" }));
 
+// HyperFrames render service — forwards to a local Node sidecar that runs
+// `hyperframes render` and streams back an MP4. Set HYPERFRAMES_URL in .env
+// (e.g. http://127.0.0.1:8788). See ../hyperframes-renderer/README.md.
+app.all("/hyperframes/*", async (req, res) => {
+  const base = process.env.HYPERFRAMES_URL;
+  if (!base) return res.status(503).json({ error: "hyperframes_disabled", detail: "HYPERFRAMES_URL not set" });
+  const rest = req.params[0] || "";
+  const qs = req.originalUrl.includes("?") ? req.originalUrl.slice(req.originalUrl.indexOf("?")) : "";
+  const target = base.replace(/\/$/, "") + "/" + rest + qs;
+  const forwardHeaders = {};
+  const incomingCT = req.headers["content-type"];
+  if (incomingCT) forwardHeaders["Content-Type"] = incomingCT;
+  try {
+    const upstream = await fetch(target, {
+      method: req.method,
+      headers: forwardHeaders,
+      body: (req.method === "GET" || req.method === "HEAD") ? undefined : req.body,
+      redirect: "follow"
+    });
+    const ct = upstream.headers.get("content-type");
+    if (ct) res.setHeader("Content-Type", ct);
+    res.status(upstream.status);
+    const buf = Buffer.from(await upstream.arrayBuffer());
+    res.send(buf);
+  } catch (err) {
+    res.status(502).json({ error: "hyperframes_unreachable", detail: String(err) });
+  }
+});
+
 // Main proxy route: /<vendor>/<rest...>
 app.all("/:vendor/*", async (req, res) => {
   const vendor = req.params.vendor;
