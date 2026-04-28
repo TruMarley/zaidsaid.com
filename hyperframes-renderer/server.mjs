@@ -35,12 +35,12 @@ const PORT = process.env.PORT || 8788;
 const TEMPLATES = path.join(__dirname, "templates");
 
 const app = express();
-app.use(express.json({ limit: "1mb" }));
+app.use(express.json({ limit: "60mb" })); // base64-encoded clip blobs
 
 app.get("/ping", (_req, res) => res.json({ ok: true, service: "hyperframes-renderer" }));
 
 app.post("/render", async (req, res) => {
-  const { clip_url, duration, title = "", handle = "", word_timings = [], style = "clip-9x16" } = req.body || {};
+  const { clip_url, clip_b64, duration, title = "", handle = "", word_timings = [], style = "clip-9x16" } = req.body || {};
   if (!duration) {
     return res.status(400).json({ error: "duration is required" });
   }
@@ -50,10 +50,17 @@ app.post("/render", async (req, res) => {
   await fs.mkdir(workDir, { recursive: true });
 
   try {
+    let resolvedClipUrl = clip_url || "";
+    if (clip_b64) {
+      const buf = Buffer.from(clip_b64, "base64");
+      await fs.writeFile(path.join(workDir, "clip.mp4"), buf);
+      resolvedClipUrl = "clip.mp4";
+    }
+
     const templatePath = path.join(TEMPLATES, `${style}.html`);
     const template = await fs.readFile(templatePath, "utf8");
-    const html = renderTemplate(stripVideoIfMissing(template, clip_url), {
-      CLIP_URL: clip_url || "",
+    const html = renderTemplate(stripVideoIfMissing(template, resolvedClipUrl), {
+      CLIP_URL: resolvedClipUrl,
       DURATION: duration.toFixed(2),
       TITLE: escapeHtml(title),
       HANDLE: escapeHtml(handle),

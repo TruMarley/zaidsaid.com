@@ -892,6 +892,39 @@ export default {
       }
     }
 
+    // x110b: HyperFrames render service forward — points at a Node sidecar that
+    // runs `hyperframes render`. Set HYPERFRAMES_URL secret (e.g.
+    // https://hf.your-domain.com). Returns 503 when unset so the front-end
+    // can detect the feature is disabled and skip the styling pass-through.
+    if (url.pathname.startsWith("/hyperframes/")) {
+      if (!env.HYPERFRAMES_URL) {
+        return new Response(JSON.stringify({ error: "hyperframes_disabled", detail: "HYPERFRAMES_URL not set" }), {
+          status: 503, headers: { ...cors, "Content-Type": "application/json" }
+        });
+      }
+      const rest = url.pathname.slice("/hyperframes/".length);
+      const target = env.HYPERFRAMES_URL.replace(/\/$/, "") + "/" + rest + url.search;
+      const incomingCT = req.headers.get("content-type");
+      const forwardHeaders = {};
+      if (incomingCT) forwardHeaders["Content-Type"] = incomingCT;
+      try {
+        const upstream = await fetch(target, {
+          method: req.method,
+          headers: forwardHeaders,
+          body: (req.method === "GET" || req.method === "HEAD") ? undefined : req.body,
+          redirect: "follow"
+        });
+        const responseHeaders = new Headers(cors);
+        const ct = upstream.headers.get("content-type");
+        if (ct) responseHeaders.set("Content-Type", ct);
+        return new Response(upstream.body, { status: upstream.status, headers: responseHeaders });
+      } catch (err) {
+        return new Response(JSON.stringify({ error: "hyperframes_unreachable", detail: String(err) }), {
+          status: 502, headers: { ...cors, "Content-Type": "application/json" }
+        });
+      }
+    }
+
     const parts = url.pathname.replace(/^\//, "").split("/");
     const vendor = parts.shift();
     const v = VENDORS[vendor];

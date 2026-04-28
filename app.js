@@ -18,6 +18,17 @@ const getAnthropicPath = () => {
     return String(anth.path || anth.proxyUrl || anth.url || "").trim();
   } catch(_) { return ""; }
 };
+// x110b: HyperFrames render service path. Returns "" when the provider is
+// missing or disabled, in which case the styled-export pass-through is skipped.
+const getHyperframesPath = () => {
+  try {
+    const a = safeGet("providers.cfg", {}) || {};
+    const b = safeGet("providers", {}) || {};
+    const hf = (a && a.hyperframes) || (b && b.hyperframes) || {};
+    if (hf.enabled === false) return "";
+    return String(hf.path || hf.proxyUrl || hf.url || "").trim();
+  } catch(_) { return ""; }
+};
 function useLocalState(key, initial){
   const [v, setV] = useState(() => safeGet(key, initial));
   useEffect(() => { safeSet(key, v); }, [key, v]);
@@ -160,6 +171,11 @@ try {
     stability:    { proxyUrl: _ZS_WORKER + "/stability",    enabled: true },
     pollinations: { proxyUrl: _ZS_WORKER + "/pollinations", enabled: true },
     grok:         { proxyUrl: _ZS_WORKER + "/grok",         enabled: true },
+    // x110b: HyperFrames render service. Off by default — enable in Settings →
+    // Providers once a HYPERFRAMES_URL secret is set on the worker (or override
+    // proxyUrl with a self-hosted renderer). When enabled, Share/Export pipes
+    // the finished clip through the styling sidecar (title + captions + lower-third).
+    hyperframes:  { proxyUrl: _ZS_WORKER + "/hyperframes",  enabled: false },
   };
   let _zsChanged = false;
   for (const [_k, _v] of Object.entries(_zsDefaults)) {
@@ -2621,6 +2637,10 @@ const transcribeUploadedFile = async (elevenBase, blob, filename) => {
   const fullText = (data.text || '').trim();
   const words = Array.isArray(data.words) ? data.words : [];
   const segments = [];
+  // x110b: also keep cleaned word-level timings (punctuation merged into the
+  // preceding word, spacing dropped) so HyperFrames can render word-by-word
+  // captions. The segment-bucketed shape below loses this granularity.
+  const cleanWords = [];
   const MIN_DUR = 3;
   const MAX_DUR = 8;
   const PUNCT_END = /[.!?]$/;
@@ -2628,10 +2648,14 @@ const transcribeUploadedFile = async (elevenBase, blob, filename) => {
   for(const w of words){
     if(w && typeof w.start === 'number' && typeof w.end === 'number' && (w.type === 'word' || w.type === undefined)){
       cur.push(w);
+      cleanWords.push({ text: String(w.text || '').trim(), start: +w.start.toFixed(3), end: +w.end.toFixed(3) });
     } else if(w && w.type === 'spacing'){
       continue;
     } else if(w && w.type === 'punctuation' && cur.length){
       cur[cur.length-1] = { ...cur[cur.length-1], text: (cur[cur.length-1].text || '') + (w.text || '') };
+      if(cleanWords.length){
+        cleanWords[cleanWords.length-1].text = (cleanWords[cleanWords.length-1].text || '') + (w.text || '');
+      }
       continue;
     }
     if(!cur.length) continue;
@@ -2654,7 +2678,66 @@ const transcribeUploadedFile = async (elevenBase, blob, filename) => {
       text: cur.map(x => String(x.text || '').trim()).filter(Boolean).join(' ').replace(/\s+([.,!?;:])/g, '$1').trim()
     });
   }
-  return { text: fullText || segments.map(s => s.text).join(' '), segments };
+  return { text: fullText || segments.map(s => s.text).join(' '), segments, words: cleanWords };
+};
+
+// x110b: Pass a finished clip MP4 through the HyperFrames render service and
+// get back a styled 9:16 (title, animated captions, lower-third). Returns the
+// styled blob on success, or null if the service is unavailable / fails. The
+// caller should fall back to the original blob on null.
+const renderViaHyperFrames = async (hfBase, clipBlob, clip, project) => {
+  if (!hfBase || !clipBlob) return null;
+  try {
+    const buf = await clipBlob.arrayBuffer();
+    // FileReader → base64 avoids stack-overflow from String.fromCharCode.apply on large blobs.
+    const b64 = await new Promise((resolve, reject) => {
+      const fr = new FileReader();
+      fr.onload = () => {
+        const result = String(fr.result || '');
+        const idx = result.indexOf(',');
+        resolve(idx >= 0 ? result.slice(idx + 1) : result);
+      };
+      fr.onerror = () => reject(fr.error || new Error('FileReader failed'));
+      fr.readAsDataURL(new Blob([buf], { type: clipBlob.type || 'video/mp4' }));
+    });
+    const clipStart = Number(clip.start || 0);
+    const clipEnd = Number(clip.end || (clipStart + (clip.duration || 0)));
+    const duration = Math.max(0.5, clipEnd - clipStart);
+    const allWords = Array.isArray(project.transcriptWords) ? project.transcriptWords : [];
+    const word_timings = allWords
+      .filter(w => Number(w.end) > clipStart && Number(w.start) < clipEnd)
+      .map(w => ({
+        text: String(w.text || '').trim(),
+        start: Math.max(0, Number(w.start) - clipStart),
+        end: Math.min(duration, Number(w.end) - clipStart)
+      }))
+      .filter(w => w.text && w.end > w.start);
+    const handle = '@' + (project.handle || 'zaidsaid').replace(/^@/, '');
+    const payload = {
+      clip_b64: b64,
+      duration,
+      title: String(clip.title || project.name || '').slice(0, 80),
+      handle,
+      word_timings,
+      style: clip.hfStyle || 'clip-9x16'
+    };
+    const url = hfBase.replace(/\/$/, '') + '/render';
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      console.warn('[zs] hyperframes render HTTP', res.status, detail.slice(0, 200));
+      return null;
+    }
+    const styled = await res.blob();
+    return styled && styled.size > 0 ? styled : null;
+  } catch(e) {
+    console.warn('[zs] hyperframes render failed, using raw clip:', e);
+    return null;
+  }
 };
 
 // x97: Fetch visual highlights from Gemini 2.5 Flash via worker /gemini-video-highlights.
@@ -7187,6 +7270,7 @@ function RepurposeTab(){
           const stt = await transcribeUploadedFile(elevenBase, uploadBlob, uploadFilename);
           text = stt.text || '';
           segments = stt.segments || [];
+          const transcriptWords = Array.isArray(stt.words) ? stt.words : []; // x110b: word-level for HyperFrames captions
           if(!text && !segments.length) throw new Error("Empty transcription — audio may be silent or unintelligible.");
           const lastSeg = segments[segments.length-1];
           const derivedDur = lastSeg ? (lastSeg.t + lastSeg.d) : 0;
@@ -7194,6 +7278,7 @@ function RepurposeTab(){
             ...p,
             transcriptText: text,
             transcriptSegments: segments,
+            transcriptWords,
             chapters: [],
             transcriptSource: 'transcribed',
             durationSec: derivedDur > 0 ? Math.round(derivedDur) : p.durationSec
@@ -7561,6 +7646,16 @@ function RepurposeTab(){
             const recBlob = await recordClipViaCaptureStream(project.uploadedVideoUrl, clip, null);
             outBlob = await reencodeWebmToPresetMP4(recBlob, preset, null);
           }
+          // x110b: optional HyperFrames pass — adds title, animated word-level captions, lower-third.
+          // Skipped silently when no hyperframes provider is configured.
+          const hfBase = getHyperframesPath();
+          if(hfBase && outBlob){
+            try {
+              setProcessStatus && setProcessStatus("Styling via HyperFrames…");
+              const styled = await renderViaHyperFrames(hfBase, outBlob, clip, project);
+              if(styled && styled.size > 0) outBlob = styled;
+            } catch(e){ console.warn("[zs] hyperframes share-style failed, using raw clip:", e); }
+          }
           const url = URL.createObjectURL(outBlob);
           const a = document.createElement("a");
           a.href = url;
@@ -7884,6 +7979,15 @@ const removeClip = (clipId) => {
             const recBlob = await recordClipViaCaptureStream(project.uploadedVideoUrl, clip, (p) => onProg(p));
             setProcessStatus("Encoding " + (i + 1) + "/" + selectedClips.length + " (1080p)…");
             outBlob = await reencodeWebmToPresetMP4(recBlob, preset, (p) => onProg(p));
+          }
+          // x110b: optional HyperFrames styling pass per clip — silent skip when not configured.
+          const hfBase = getHyperframesPath();
+          if(hfBase && outBlob && outBlob.size){
+            try {
+              setProcessStatus("Styling " + (i + 1) + "/" + selectedClips.length + " via HyperFrames…");
+              const styled = await renderViaHyperFrames(hfBase, outBlob, clip, project);
+              if(styled && styled.size > 0) outBlob = styled;
+            } catch(e){ console.warn("[zs] hyperframes batch-style failed for clip", clip.id, e); }
           }
         } catch(e){
           console.warn("[zs] captureStream/reencode failed for clip", clip.id, e);
