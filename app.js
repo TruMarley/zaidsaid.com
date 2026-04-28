@@ -171,6 +171,32 @@ const idbSetStudioAudio = (sceneId, blob) => idbPut(IDB_STUDIO_SCENE_PREFIX + sc
 const idbGetStudioAudio = (sceneId) => idbGet(IDB_STUDIO_SCENE_PREFIX + sceneId + ":audio");
 const idbDelStudioAudio = (sceneId) => idbDelete(IDB_STUDIO_SCENE_PREFIX + sceneId + ":audio");
 
+// x119: per-beat broll blob key convention — scripts:beat:{beatId}:broll:{promptIdx}:{variant}
+const IDB_BROLL_PREFIX = "scripts:beat:";
+const idbSetBrollBlob = (key, blob) => idbPut(key, blob);
+const idbGetBrollBlob = (key) => idbGet(key);
+const idbDelBrollBlob = (key) => idbDelete(key);
+
+// x119: Pollinations image generation helper (returns { url: objectURL, blob, seed })
+// Separate from the existing generateImageViaPollinations which returns dataURL.
+const generatePollinationsImage = async (prompt, { width = 1024, height = 576, seed = null, model = 'flux' } = {}) => {
+  const numSeed = seed != null ? Math.round(seed) : Math.floor(Math.random() * 99999999);
+  const cleanPrompt = String(prompt || 'cinematic shot').replace(/\s+/g, ' ').trim().slice(0, 400);
+  const url = 'https://image.pollinations.ai/prompt/' + encodeURIComponent(cleanPrompt) +
+    '?width=' + width + '&height=' + height + '&seed=' + numSeed + '&model=' + model + '&nologo=true';
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30000);
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    if (!res.ok) throw new Error('Pollinations HTTP ' + res.status);
+    const blob = await res.blob();
+    const objUrl = URL.createObjectURL(blob);
+    return { url: objUrl, blob, seed: numSeed };
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
 /* ---------------- God mode (admin / power-user surface toggle) ----------------
  * Public MVP hides advanced controls (per-scene regen, full provider config,
  * test endpoints, dev tabs). God mode re-reveals everything.
@@ -3785,6 +3811,37 @@ function SceneCard({ scene, onField, onRegen, onMove, onRemove, index, total }){
           <div className="flex justify-end mt-1"><button className="chip" onClick={()=>onRegen("captions")}>{I.refresh({size:12})} Regenerate</button></div>
         </label>
       </div>
+      {/* x119: B-roll thumbnails — show images when available, fallback to text prompt */}
+      {Array.isArray(scene.broll) && scene.broll.length > 0 && (
+        <div className="mt-2">
+          <div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)] mb-1">B-roll</div>
+          <div className="flex flex-wrap gap-2">
+            {scene.broll.map((item, i) => {
+              const prompt = typeof item === 'string' ? item : (item && item.prompt) || '';
+              const url = typeof item === 'object' && item && item.url;
+              return url ? (
+                <img
+                  key={i}
+                  src={url}
+                  alt={prompt}
+                  title={prompt}
+                  className="rounded-lg border border-white/10 object-cover"
+                  style={{ width: 128, height: 72 }}
+                />
+              ) : (
+                <div
+                  key={i}
+                  className="rounded-lg border border-dashed border-white/20 flex items-center justify-center text-[10px] text-[color:var(--muted)] px-2"
+                  style={{ width: 128, height: 72 }}
+                  title={prompt}
+                >
+                  <span className="truncate">{prompt.slice(0, 32)}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -5350,10 +5407,28 @@ function StepExport({ project, setProject }){
   );
 }
 
+// x119: Migrate scene.broll from legacy [string] to [{prompt, url}] schema.
+// One-time, backwards-compatible. Called on every StudioTab mount.
+const migrateBrollSchema = (scenes) => {
+  if (!Array.isArray(scenes)) return scenes;
+  return scenes.map(s => {
+    if (!Array.isArray(s.broll) || s.broll.length === 0) return s;
+    if (typeof s.broll[0] === 'string') {
+      return { ...s, broll: s.broll.map(p => ({ prompt: String(p), url: null })) };
+    }
+    return s;
+  });
+};
+
 function StudioTab({ setTab, studioStep, setStudioStep }){
   const [project, setProject] = useLocalState("studio.project", STUDIO_SEED);
   useEffect(() => {
-    if(project && typeof project === "object" && Array.isArray(project.scenes) && project.scenes.length > 0) return;
+    if(project && typeof project === "object" && Array.isArray(project.scenes) && project.scenes.length > 0) {
+      // x119: run broll schema migration on load
+      const migrated = migrateBrollSchema(project.scenes);
+      if (migrated !== project.scenes) setProject(prev => ({ ...prev, scenes: migrated }));
+      return;
+    }
     setProject(STUDIO_SEED);
   }, []);
   const [seeded, setSeeded] = React.useState(null);
@@ -9485,6 +9560,19 @@ function ScriptsTab({ setTab }) {
   // Long-form: chapter regen in-progress set
   const [regenChapterBusy, setRegenChapterBusy] = React.useState({});
 
+  // x119: broll generation state
+  // brollBlobUrls: Map<idbKey, objectURL> — blob URLs hydrated from IDB
+  const [brollBlobUrls, setBrollBlobUrls] = React.useState(() => new Map());
+  // brollBusy: Set<string> of idbKeys currently generating
+  const [brollBusy, setBrollBusy] = React.useState(() => new Set());
+  // brollErr: Map<idbKey, errorMessage>
+  const [brollErr, setBrollErr] = React.useState(() => new Map());
+  // top-level generate-all progress
+  const [brollAllProgress, setBrollAllProgress] = React.useState(null); // null | { done, total, chapter, cancelled }
+  const brollCancelRef = React.useRef(false);
+  // lightbox state
+  const [brollLightbox, setBrollLightbox] = React.useState(null); // { url, prompt } | null
+
   const isLongForm = Number(duration) >= 300;
 
   const appendStage = (label, status) => setStages(prev => [...prev, { label, status, id: Math.random().toString(36).slice(2) }]);
@@ -9738,6 +9826,17 @@ function ScriptsTab({ setTab }) {
     if (!script) return;
     const durSec = Number(duration) || 60;
 
+    // x119: Convert beat.broll (string[]) + beat.brollAssets into extended schema [{prompt, url}]
+    const beatBrollToSceneBroll = (b) => {
+      const prompts = Array.isArray(b.broll) ? b.broll : [];
+      const assets = b.brollAssets || [];
+      return prompts.map((prompt, pi) => {
+        const asset = assets.find(a => a.promptIdx === pi);
+        const blobUrl = asset && brollBlobUrls.get(asset.idbKey);
+        return { prompt, url: blobUrl || null };
+      });
+    };
+
     if (script._longForm) {
       if (!script.chapters) return;
       const per = 45;
@@ -9752,7 +9851,7 @@ function ScriptsTab({ setTab }) {
             voLine: (b.voLine || '').slice(0, 800),
             duration: b.duration_s || per,
             aroll: 'avatar',
-            broll: Array.isArray(b.broll) ? b.broll : [],
+            broll: beatBrollToSceneBroll(b),
             shot: b.shot || '',
             motion: b.motion || 'slow push-in',
             asset: 'b-roll',
@@ -9789,7 +9888,7 @@ function ScriptsTab({ setTab }) {
         voLine: (b.voLine || '').slice(0, 800),
         duration: b.duration_s || per,
         aroll: 'avatar',
-        broll: Array.isArray(b.broll) ? b.broll : [],
+        broll: beatBrollToSceneBroll(b),
         shot: b.shot || '',
         motion: b.motion || 'slow push-in',
         asset: 'b-roll',
@@ -9824,12 +9923,16 @@ function ScriptsTab({ setTab }) {
       : (script && script.beats && script.beats[0]));
     if (!firstBeat) return;
     try {
+      // x119: prime HF with first broll asset URL if available
+      const firstAsset = (firstBeat.brollAssets || []).find(a => a.idbKey && brollBlobUrls.get(a.idbKey));
+      const firstBrollUrl = firstAsset ? brollBlobUrls.get(firstAsset.idbKey) : null;
       localStorage.setItem('zaidsaid.v2.hf.seed', JSON.stringify({
         voLine: firstBeat.voLine || '',
         broll: Array.isArray(firstBeat.broll) ? firstBeat.broll : [],
-        title: topic.slice(0, 80)
+        title: topic.slice(0, 80),
+        brollImageUrl: firstBrollUrl || null
       }));
-      toast.push('Primed HyperFrames with first beat', 'success');
+      toast.push('Primed HyperFrames with first beat' + (firstBrollUrl ? ' + B-roll image' : ''), 'success');
       if (setTab) setTab('hyperframes');
     } catch(e) {
       toast.push('Failed: ' + (e && e.message || e), 'error');
@@ -9922,6 +10025,156 @@ function ScriptsTab({ setTab }) {
     catch(_) { toast.push('Copy failed', 'error'); }
   };
 
+  // x119: broll IDB key for a beat/prompt/variant
+  const brollIdbKey = (beatId, promptIdx, variant) =>
+    IDB_BROLL_PREFIX + (beatId || 'b') + ':broll:' + promptIdx + ':' + variant;
+
+  // x119: hydrate broll blob URLs from IDB whenever script changes
+  React.useEffect(() => {
+    if (!script) return;
+    let cancelled = false;
+    const beats = script._longForm
+      ? (script.chapters || []).flatMap(ch => ch.beats || [])
+      : (script.beats || []);
+    beats.forEach(beat => {
+      (beat.brollAssets || []).forEach(asset => {
+        if (!asset.idbKey) return;
+        idbGetBrollBlob(asset.idbKey).then(blob => {
+          if (cancelled || !blob) return;
+          const url = URL.createObjectURL(blob);
+          setBrollBlobUrls(prev => { const m = new Map(prev); m.set(asset.idbKey, url); return m; });
+        }).catch(() => {});
+      });
+    });
+    return () => { cancelled = true; };
+  }, [script && (script._longForm ? (script.chapters || []).length : (script.beats || []).length)]);
+
+  // x119: revoke broll blob URLs on unmount
+  React.useEffect(() => {
+    return () => {
+      setBrollBlobUrls(prev => {
+        prev.forEach(url => { try { URL.revokeObjectURL(url); } catch(_){} });
+        return new Map();
+      });
+    };
+  }, []);
+
+  // x119: update brollAssets on a beat (handles both short-form and long-form)
+  const updateBeatBrollAssets = (beatId, updater) => {
+    setScript(prev => {
+      if (!prev) return prev;
+      if (prev._longForm) {
+        return {
+          ...prev,
+          chapters: prev.chapters.map(ch => ({
+            ...ch,
+            beats: (ch.beats || []).map(b => b.id === beatId ? { ...b, brollAssets: updater(b.brollAssets || []) } : b)
+          }))
+        };
+      } else {
+        return {
+          ...prev,
+          beats: prev.beats.map(b => b.id === beatId ? { ...b, brollAssets: updater(b.brollAssets || []) } : b)
+        };
+      }
+    });
+  };
+
+  // x119: generate one broll image for a beat's prompt
+  const generateBrollImage = async (beat, promptIdx) => {
+    const prompt = (beat.broll || [])[promptIdx];
+    if (!prompt) return;
+    const beatId = beat.id || ('b_' + promptIdx);
+    // Find next variant index for this prompt
+    const existingVariants = (beat.brollAssets || []).filter(a => a.promptIdx === promptIdx);
+    const variant = existingVariants.length;
+    const idbKey = brollIdbKey(beatId, promptIdx, variant);
+
+    setBrollBusy(prev => { const s = new Set(prev); s.add(idbKey); return s; });
+    setBrollErr(prev => { const m = new Map(prev); m.delete(idbKey); return m; });
+    try {
+      const { url, blob, seed } = await generatePollinationsImage(prompt, { width: 1024, height: 576, model: 'flux' });
+      await idbSetBrollBlob(idbKey, blob);
+      setBrollBlobUrls(prev => { const m = new Map(prev); m.set(idbKey, url); return m; });
+      const asset = { prompt, promptIdx, url: idbKey, idbKey, seed, model: 'flux', generatedAt: Date.now() };
+      updateBeatBrollAssets(beatId, prev => [...prev, asset]);
+    } catch(e) {
+      setBrollErr(prev => { const m = new Map(prev); m.set(idbKey, (e && e.message) || String(e)); return m; });
+    } finally {
+      setBrollBusy(prev => { const s = new Set(prev); s.delete(idbKey); return s; });
+    }
+  };
+
+  // x119: remove a broll asset from a beat
+  const removeBrollAsset = async (beat, asset) => {
+    const beatId = beat.id || 'b';
+    if (asset.idbKey) {
+      try { await idbDelBrollBlob(asset.idbKey); } catch(_){}
+      setBrollBlobUrls(prev => { const m = new Map(prev); const url = m.get(asset.idbKey); if (url) { try { URL.revokeObjectURL(url); } catch(_){} } m.delete(asset.idbKey); return m; });
+    }
+    updateBeatBrollAssets(beatId, prev => prev.filter(a => a.idbKey !== asset.idbKey));
+  };
+
+  // x119: generate all broll for a single beat (sequential, respects cancel ref)
+  const generateBrollForBeat = async (beat) => {
+    const prompts = Array.isArray(beat.broll) ? beat.broll : [];
+    for (let pi = 0; pi < prompts.length; pi++) {
+      if (brollCancelRef.current) break;
+      const hasImage = (beat.brollAssets || []).some(a => a.promptIdx === pi);
+      if (!hasImage) {
+        await generateBrollImage(beat, pi);
+        if (pi < prompts.length - 1) await new Promise(r => setTimeout(r, 500));
+      }
+    }
+  };
+
+  // x119: generate all broll for a chapter (sequential beats)
+  const generateBrollForChapter = async (chapterIdx) => {
+    if (!script || !script._longForm) return;
+    const ch = (script.chapters || [])[chapterIdx];
+    if (!ch) return;
+    brollCancelRef.current = false;
+    const beats = ch.beats || [];
+    for (let bi = 0; bi < beats.length; bi++) {
+      if (brollCancelRef.current) break;
+      // Re-read beat from current script state
+      const currentBeat = ((script.chapters || [])[chapterIdx] || {}).beats || [];
+      await generateBrollForBeat(currentBeat[bi] || beats[bi]);
+    }
+  };
+
+  // x119: generate all broll for entire script (sequential)
+  const generateAllBroll = async () => {
+    if (brollAllProgress && !brollAllProgress.cancelled) return;
+    brollCancelRef.current = false;
+    const beats = script._longForm
+      ? (script.chapters || []).flatMap((ch, ci) => (ch.beats || []).map(b => ({ ...b, _ci: ci })))
+      : (script.beats || []).map(b => ({ ...b, _ci: null }));
+    const total = beats.reduce((n, b) => n + Math.max(0, (b.broll || []).length - (b.brollAssets || []).filter((a, _, arr) => {
+      const seen = new Set(); return arr.filter(x => !seen.has(x.promptIdx) && seen.add(x.promptIdx)).includes(a);
+    }).length), 0);
+    let done = 0;
+    setBrollAllProgress({ done: 0, total, chapter: null, cancelled: false });
+    for (let bi = 0; bi < beats.length; bi++) {
+      if (brollCancelRef.current) { setBrollAllProgress(p => p ? { ...p, cancelled: true } : p); break; }
+      const beat = beats[bi];
+      const chLabel = beat._ci != null ? ('chapter ' + (beat._ci + 1)) : null;
+      setBrollAllProgress(p => p ? { ...p, done, chapter: chLabel } : p);
+      const prompts = Array.isArray(beat.broll) ? beat.broll : [];
+      for (let pi = 0; pi < prompts.length; pi++) {
+        if (brollCancelRef.current) break;
+        const hasImage = (beat.brollAssets || []).some(a => a.promptIdx === pi);
+        if (!hasImage) {
+          await generateBrollImage(beat, pi);
+          done++;
+          setBrollAllProgress(p => p ? { ...p, done, chapter: chLabel } : p);
+          if (pi < prompts.length - 1) await new Promise(r => setTimeout(r, 500));
+        }
+      }
+    }
+    if (!brollCancelRef.current) setBrollAllProgress(null);
+  };
+
   // Chip status colors
   const stageColor = (status) => {
     if (status === 'running') return 'text-indigo-300 border-indigo-400/30 bg-indigo-500/10';
@@ -9929,6 +10182,105 @@ function ScriptsTab({ setTab }) {
     if (status === 'error') return 'text-rose-300 border-rose-400/30 bg-rose-500/10';
     if (status === 'warn') return 'text-amber-300 border-amber-400/30 bg-amber-500/10';
     return 'text-[color:var(--muted)] border-[color:var(--line)]';
+  };
+
+  // x119: Render broll thumbnail strip for a beat
+  const renderBrollStrip = (beat) => {
+    const prompts = Array.isArray(beat.broll) ? beat.broll : [];
+    if (prompts.length === 0) return null;
+    const beatId = beat.id || 'b';
+    const assets = beat.brollAssets || [];
+    const unrendered = prompts.filter((_, pi) => !assets.some(a => a.promptIdx === pi));
+    const anyBusy = prompts.some((_, pi) => {
+      const variant = assets.filter(a => a.promptIdx === pi).length;
+      const key = brollIdbKey(beatId, pi, variant);
+      return brollBusy.has(key);
+    });
+
+    return (
+      <div className="space-y-2">
+        <div className="text-[10px] uppercase tracking-wider text-[color:var(--muted)] mb-1">B-roll</div>
+        <div className="flex flex-wrap gap-2">
+          {prompts.map((prompt, pi) => {
+            const promptAssets = assets.filter(a => a.promptIdx === pi);
+            const variant = promptAssets.length;
+            const busyKey = brollIdbKey(beatId, pi, variant);
+            const isBusy = brollBusy.has(busyKey);
+            const errMsg = brollErr.get(busyKey);
+
+            return (
+              <div key={pi} className="flex flex-col gap-1">
+                {/* Rendered variants for this prompt */}
+                {promptAssets.map((asset, vi) => {
+                  const blobUrl = brollBlobUrls.get(asset.idbKey);
+                  if (!blobUrl) return null;
+                  return (
+                    <div key={vi} className="relative group" style={{ width: 128, height: 72 }}>
+                      <img
+                        src={blobUrl}
+                        alt={prompt}
+                        className="w-full h-full object-cover rounded-lg cursor-pointer border border-white/10 hover:border-white/30 transition-colors"
+                        style={{ width: 128, height: 72 }}
+                        onClick={() => setBrollLightbox({ url: blobUrl, prompt })}
+                        title={prompt}
+                      />
+                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 rounded-lg transition-colors flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100">
+                        <button
+                          className="text-[9px] bg-white/20 hover:bg-white/40 rounded px-1 py-0.5 text-white"
+                          title="Regenerate (new seed)"
+                          onClick={e => { e.stopPropagation(); generateBrollImage(beat, pi); }}
+                        >&#8635;</button>
+                        <button
+                          className="text-[9px] bg-rose-500/60 hover:bg-rose-500/90 rounded px-1 py-0.5 text-white"
+                          title="Remove"
+                          onClick={e => { e.stopPropagation(); removeBrollAsset(beat, asset); }}
+                        >&#10005;</button>
+                      </div>
+                    </div>
+                  );
+                })}
+                {/* Placeholder if not yet generated */}
+                {promptAssets.length === 0 && (
+                  <div
+                    className="rounded-lg border border-dashed border-white/20 flex flex-col items-center justify-center gap-1 text-[10px] text-[color:var(--muted)]"
+                    style={{ width: 128, height: 72 }}
+                    title={prompt}
+                  >
+                    {isBusy ? (
+                      <span className="animate-pulse">Generating…</span>
+                    ) : errMsg ? (
+                      <span className="text-rose-400 text-[9px] text-center px-1 leading-tight">{errMsg.slice(0, 40)}</span>
+                    ) : (
+                      <>
+                        <span className="text-center px-1 leading-tight truncate w-full text-center">{prompt.slice(0, 24)}</span>
+                        <button
+                          className="chip text-[9px]"
+                          onClick={() => generateBrollImage(beat, pi)}
+                        >Generate</button>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+        {/* "Generate all for this beat" button */}
+        {unrendered.length > 0 && !anyBusy && (
+          <button
+            className="chip text-[10px]"
+            onClick={() => generateBrollForBeat(beat)}
+          >
+            Generate all B-roll for this beat ({unrendered.length} remaining)
+          </button>
+        )}
+        {anyBusy && (
+          <span className="chip text-[10px] text-indigo-300 border-indigo-400/30 bg-indigo-500/10 animate-pulse">
+            Generating…
+          </span>
+        )}
+      </div>
+    );
   };
 
   // Render a single beat card (shared between short and long form)
@@ -9976,11 +10328,8 @@ function ScriptsTab({ setTab }) {
             <div className="text-[10px] uppercase tracking-wider text-[color:var(--muted)] mb-1">Shot</div>
             <div className="text-[color:var(--muted)]">{beat.shot || '—'}</div>
           </div>
-          <div>
-            <div className="text-[10px] uppercase tracking-wider text-[color:var(--muted)] mb-1">B-roll prompts</div>
-            <div className="text-[color:var(--muted)]">{Array.isArray(beat.broll) ? beat.broll.join(' · ') : (beat.broll || '—')}</div>
-          </div>
         </div>
+        {renderBrollStrip(beat)}
         {beat.captions && (
           <div className="text-[11px] text-[color:var(--muted)]">
             <span className="uppercase tracking-wider mr-1">Captions:</span>{beat.captions}
@@ -10025,6 +10374,44 @@ function ScriptsTab({ setTab }) {
 
   return (
     <div className="max-w-[1100px] mx-auto px-5 py-8 space-y-6">
+      {/* x119: Lightbox modal */}
+      {brollLightbox && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
+          onClick={() => setBrollLightbox(null)}
+        >
+          <div className="relative max-w-3xl w-full" onClick={e => e.stopPropagation()}>
+            <img src={brollLightbox.url} alt={brollLightbox.prompt} className="w-full rounded-xl" />
+            <div className="mt-2 text-[12px] text-white/70 text-center">{brollLightbox.prompt}</div>
+            <button
+              className="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/60 hover:bg-black/80 flex items-center justify-center text-white text-sm"
+              onClick={() => setBrollLightbox(null)}
+            >&#10005;</button>
+          </div>
+        </div>
+      )}
+
+      {/* x119: Global broll generation progress banner */}
+      {brollAllProgress && (
+        <div className="rounded-xl border border-indigo-400/30 bg-indigo-500/10 p-3 flex items-center justify-between gap-3">
+          <div className="text-[12px] text-indigo-200">
+            {brollAllProgress.cancelled
+              ? 'B-roll generation cancelled.'
+              : ('Generating B-roll: ' + brollAllProgress.done + ' / ' + brollAllProgress.total +
+                (brollAllProgress.chapter ? (' (' + brollAllProgress.chapter + ')') : '') + '…')}
+          </div>
+          {!brollAllProgress.cancelled && (
+            <button
+              className="chip text-[10px] text-rose-300 border-rose-400/30 bg-rose-500/10"
+              onClick={() => { brollCancelRef.current = true; setBrollAllProgress(p => p ? { ...p, cancelled: true } : p); }}
+            >Cancel</button>
+          )}
+          {brollAllProgress.cancelled && (
+            <button className="chip text-[10px]" onClick={() => setBrollAllProgress(null)}>Dismiss</button>
+          )}
+        </div>
+      )}
+
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-3xl font-bold">Scripts</h1>
@@ -10243,6 +10630,14 @@ function ScriptsTab({ setTab }) {
                         >
                           {regenChapterBusy[ci] ? '…' : I.refresh({size:10})}
                         </button>
+                        {/* x119: Generate all B-roll for chapter */}
+                        <button
+                          className="chip text-[10px]"
+                          title="Generate all B-roll for this chapter"
+                          onClick={e => { e.stopPropagation(); generateBrollForChapter(ci); }}
+                        >
+                          B-roll
+                        </button>
                         <span className="text-[color:var(--muted)] text-sm">{collapsed ? '▸' : '▾'}</span>
                       </div>
                     </div>
@@ -10304,6 +10699,15 @@ function ScriptsTab({ setTab }) {
           <div className="flex items-center gap-2 flex-wrap">
             <button className="btn btn-primary" onClick={sendToStudio}>{I.studio({size:14})} Send to Studio</button>
             <button className="btn" onClick={sendToHyperFrames}>{I.film({size:12})} Send to HyperFrames</button>
+            {/* x119: Generate all B-roll */}
+            <button
+              className="btn"
+              onClick={generateAllBroll}
+              disabled={!!(brollAllProgress && !brollAllProgress.cancelled)}
+              title="Generate images for all B-roll prompts across the entire script (sequential)"
+            >
+              {(brollAllProgress && !brollAllProgress.cancelled) ? 'Generating B-roll…' : 'Generate all B-roll'}
+            </button>
             <button className="btn btn-ghost text-xs" onClick={exportMd}>{I.down({size:12})} Export .md</button>
             <button className="btn btn-ghost text-xs" onClick={copyMd}>{I.copy({size:12})} Copy as text</button>
           </div>
