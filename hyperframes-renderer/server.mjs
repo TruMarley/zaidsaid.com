@@ -35,6 +35,20 @@ const PORT = process.env.PORT || 8788;
 const TEMPLATES = path.join(__dirname, "templates");
 
 const app = express();
+
+// Permissive CORS for direct browser testing. In production the request hits
+// the cloudflare worker first and never touches this CORS middleware — the
+// worker's CORS rules apply. Override with HF_CORS_ORIGIN if you want to
+// pin this to a specific origin for direct local development.
+const CORS_ORIGIN = process.env.HF_CORS_ORIGIN || "*";
+app.use((req, res, next) => {
+  res.setHeader("Access-Control-Allow-Origin", CORS_ORIGIN);
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  if (req.method === "OPTIONS") return res.status(204).end();
+  next();
+});
+
 app.use(express.json({ limit: "60mb" })); // base64-encoded clip blobs
 
 app.get("/ping", (_req, res) => res.json({ ok: true, service: "hyperframes-renderer" }));
