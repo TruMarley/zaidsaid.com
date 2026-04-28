@@ -892,18 +892,23 @@ export default {
       }
     }
 
-    // x110b: HyperFrames render service forward — points at a Node sidecar that
-    // runs `hyperframes render`. Set HYPERFRAMES_URL secret (e.g.
-    // https://hf.your-domain.com). Returns 503 when unset so the front-end
-    // can detect the feature is disabled and skip the styling pass-through.
-    if (url.pathname.startsWith("/hyperframes/")) {
-      if (!env.HYPERFRAMES_URL) {
-        return new Response(JSON.stringify({ error: "hyperframes_disabled", detail: "HYPERFRAMES_URL not set" }), {
+    // Sidecar forward routes — each points at an env secret and returns 503
+    // when unset so the front-end can detect "feature not deployed".
+    //   x110: hyperframes — Node sidecar running `hyperframes render`
+    //   x111: audio       — Python sidecar (WhisperX, silero-vad, demucs, pyannote, auto-editor, captacity)
+    const SIDECARS = [
+      { prefix: "/hyperframes/", envKey: "HYPERFRAMES_URL", name: "hyperframes" },
+      { prefix: "/audio/",        envKey: "AUDIO_AI_URL",    name: "audio" },
+    ];
+    for (const { prefix, envKey, name } of SIDECARS) {
+      if (!url.pathname.startsWith(prefix)) continue;
+      if (!env[envKey]) {
+        return new Response(JSON.stringify({ error: name + "_disabled", detail: envKey + " not set" }), {
           status: 503, headers: { ...cors, "Content-Type": "application/json" }
         });
       }
-      const rest = url.pathname.slice("/hyperframes/".length);
-      const target = env.HYPERFRAMES_URL.replace(/\/$/, "") + "/" + rest + url.search;
+      const rest = url.pathname.slice(prefix.length);
+      const target = env[envKey].replace(/\/$/, "") + "/" + rest + url.search;
       const incomingCT = req.headers.get("content-type");
       const forwardHeaders = {};
       if (incomingCT) forwardHeaders["Content-Type"] = incomingCT;
@@ -919,7 +924,7 @@ export default {
         if (ct) responseHeaders.set("Content-Type", ct);
         return new Response(upstream.body, { status: upstream.status, headers: responseHeaders });
       } catch (err) {
-        return new Response(JSON.stringify({ error: "hyperframes_unreachable", detail: String(err) }), {
+        return new Response(JSON.stringify({ error: name + "_unreachable", detail: String(err) }), {
           status: 502, headers: { ...cors, "Content-Type": "application/json" }
         });
       }
