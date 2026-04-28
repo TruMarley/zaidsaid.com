@@ -650,6 +650,69 @@ export default {
       }
     }
 
+    // x117: /fetch?url=... — proxy-fetch an article body for the Scripts research pipeline.
+    // Validates the URL (http/https only, no localhost/private IPs), fetches with a 10s timeout,
+    // strips HTML, returns { url, title, body, status }.
+    if (url.pathname === "/fetch") {
+      const rawUrl = url.searchParams.get("url") || "";
+      if (!rawUrl) {
+        return new Response(JSON.stringify({ error: "url param required" }), {
+          status: 400, headers: { ...cors, "Content-Type": "application/json" }
+        });
+      }
+      // Validate: must be http/https, not localhost or RFC-1918 ranges
+      let parsedTarget;
+      try { parsedTarget = new URL(rawUrl); } catch(_) {
+        return new Response(JSON.stringify({ error: "invalid url" }), {
+          status: 400, headers: { ...cors, "Content-Type": "application/json" }
+        });
+      }
+      if (parsedTarget.protocol !== "http:" && parsedTarget.protocol !== "https:") {
+        return new Response(JSON.stringify({ error: "only http/https allowed" }), {
+          status: 400, headers: { ...cors, "Content-Type": "application/json" }
+        });
+      }
+      const host = parsedTarget.hostname.toLowerCase();
+      const BLOCKED = ["localhost", "127.0.0.1", "0.0.0.0", "[::1]", "::1"];
+      if (BLOCKED.includes(host) || /^10\.|^192\.168\.|^172\.(1[6-9]|2\d|3[01])\./.test(host)) {
+        return new Response(JSON.stringify({ error: "private addresses not allowed" }), {
+          status: 400, headers: { ...cors, "Content-Type": "application/json" }
+        });
+      }
+      try {
+        const fetchRes = await fetch(rawUrl, {
+          headers: { "User-Agent": "Mozilla/5.0 (compatible; zaidsaid-fetch/1.0)", "Accept": "text/html,text/plain,*/*" },
+          signal: AbortSignal.timeout(10000),
+          redirect: "follow"
+        });
+        if (!fetchRes.ok) {
+          return new Response(JSON.stringify({ url: rawUrl, title: "", body: "", status: "http-" + fetchRes.status }), {
+            headers: { ...cors, "Content-Type": "application/json" }
+          });
+        }
+        const ct = fetchRes.headers.get("content-type") || "";
+        const text = await fetchRes.text();
+        // Extract title
+        const titleM = text.match(/<title[^>]*>([^<]{0,200})<\/title>/i);
+        const title = titleM ? decodeHtmlEntities(titleM[1]).trim() : "";
+        // Strip HTML: remove scripts/styles then tags
+        const body = text
+          .replace(/<script[\s\S]*?<\/script>/gi, "")
+          .replace(/<style[\s\S]*?<\/style>/gi, "")
+          .replace(/<[^>]+>/g, " ")
+          .replace(/\s{2,}/g, " ")
+          .trim()
+          .slice(0, 8000);
+        return new Response(JSON.stringify({ url: rawUrl, title, body, status: "ok" }), {
+          headers: { ...cors, "Content-Type": "application/json" }
+        });
+      } catch (err) {
+        return new Response(JSON.stringify({ url: rawUrl, title: "", body: "", status: "error", error: String((err && err.message) || err) }), {
+          headers: { ...cors, "Content-Type": "application/json" }
+        });
+      }
+    }
+
     // Phase D — trending context routes
     if (url.pathname === "/trends/google") {
       const q = url.searchParams.get("q") || "";

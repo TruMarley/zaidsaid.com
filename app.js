@@ -645,6 +645,7 @@ function HealthPanel({ filterCap }){
 const TABS = [
   { id:"home", label:"Home", icon:"home" },
   { id:"studio", label:"Studio", icon:"studio" },
+  { id:"scripts", label:"Scripts", icon:"edit" },
   { id:"repurpose", label:"Repurpose", icon:"scissors" },
   { id:"hyperframes", label:"HyperFrames", icon:"film" },
   { id:"avatars", label:"Avatars & Voices", icon:"avatar", godOnly:true },
@@ -1119,7 +1120,7 @@ function StudioInputAccepter({ project, setProject, onAdvance, toast }){ const [
   return brief;
 };
 const applyBrief = (brief) => { const beats = Array.isArray(brief && brief.beats) ? brief.beats : []; const total = Math.max(15, project.durationHint || 60); const per = Math.max(3, Math.round(total / Math.max(1, beats.length))); const scenes = beats.map((b, i) => ({ id: "s" + (i+1), title: (b.title || ("Beat " + (i+1))).slice(0, 80), script: (b.script || "").slice(0, 800), voLine: (b.script || "").slice(0, 800), duration: per, aroll: (project.scenes && project.scenes[i] && project.scenes[i].aroll) || "avatar", broll: (project.scenes && project.scenes[i] && project.scenes[i].broll) || [], shot: b.shot || ((b.title||"") + ": " + (b.script||"").split(/[.!?]/)[0].trim()), motion: b.motion || "slow push-in", asset: b.asset || "b-roll", captions: (b.script||"").slice(0,80) })); const _autoName = (project.name && String(project.name).trim()) || (brief.logline ? String(brief.logline).split(/[\s.,:;!?]+/).filter(Boolean).slice(0, 7).join(' ') : ""); setProject({ ...project, name: _autoName || project.name || "", logline: brief.logline || project.logline || "", hook: brief.hook || project.hook || "", cta: brief.cta || project.cta || "", audience: brief.audience || project.audience || "", angle: brief.angle || project.angle || "", scenes: scenes.length ? scenes : (project.scenes || []) }); }; const runBrief = async (overrideText) => { const text = (typeof overrideText === 'string' && overrideText ? overrideText : (project.source || "")).trim(); if (!text) { setErr("Paste a prompt, story, or source text first."); return; } setErr(""); setDiag(""); setBusy(true); const { providerId, proxyUrl, enabled } = getProviderForResearch(); try { if (providerId === "anthropic" && proxyUrl && enabled) { setDiag("Calling " + providerId + " via proxy…"); const brief = await callAnthropic(proxyUrl, text); applyBrief(brief); toast && toast("Brief generated via Claude · " + (brief.beats||[]).length + " beats", "success"); } else if (providerId === "grok" && proxyUrl && enabled) { setDiag("Calling Grok via proxy…"); try { const brief = await callGrok(proxyUrl, text); applyBrief(brief); toast && toast("Brief generated via Grok · " + (brief.beats||[]).length + " beats", "success"); } catch(err) { setDiag("Grok error: " + err.message); } } else { setDiag(providerId === "anthropic" ? "No proxy URL configured — using local outline." : "Provider '" + providerId + "' not wired yet in Studio — using local outline."); const brief = localFallback(text); applyBrief(brief); toast && toast("Brief generated locally · " + brief.beats.length + " beats", "info"); } setBusy(false); onAdvance && setTimeout(() => onAdvance(), 350); } catch (e) { setBusy(false); const msg = (e && e.message) || String(e); setErr(msg); try { const brief = localFallback(text); applyBrief(brief); toast && toast("Cloud call failed — used local outline (" + brief.beats.length + " beats)", "warn"); onAdvance && setTimeout(() => onAdvance(), 450); } catch(_){} } }; const sourceLen = (project.source || "").trim().length; const { providerId, proxyUrl, enabled } = getProviderForResearch(); const willUseCloud = (providerId === "anthropic" || providerId === "grok") && proxyUrl && enabled; return ( <div className="card p-5"> <div className="flex items-center justify-between gap-3 flex-wrap"> <div> <div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Source</div> <div className="text-lg font-semibold">What are we turning into a video?</div> </div> </div> <div className="mt-4 grid gap-3"> <label className="block"> <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Prompt or paste</span> <textarea ref={sourceRef} value={project.source || ""} onChange={(e)=>setProject({ ...project, source: e.target.value })} onKeyDown={(e)=>{ if((e.metaKey || e.ctrlKey) && e.key === 'Enter'){ e.preventDefault(); const _len = (project.source || "").trim().length; if(_len && !busy){ runBrief(); } } }} placeholder="Paste text, a URL, or describe the video you want." rows={6} className="mt-1 w-full bg-transparent border border-[color:var(--line)] rounded-xl p-3 text-sm focus:outline-none focus:border-white/20" /><div className="mt-1 text-[10px] text-[color:var(--muted)] flex items-center gap-1">Tip: press <kbd className="px-1.5 py-0.5 rounded bg-white/5 border border-white/10 text-white/80">⌘/Ctrl</kbd> <kbd className="px-1.5 py-0.5 rounded bg-white/5 border border-white/10 text-white/80">Enter</kbd> to generate</div>
-{/(?:youtube\.com\/watch|youtu\.be\/)/.test(project.source||"") && (<button type="button" className="chip mt-1" onClick={async()=>{setBusy(true);try{const _r=await fetch("https://noembed.com/embed?url="+encodeURIComponent((project.source||"").trim()));const _d=await _r.json();if(_d.title){setProject({...project,source:"Video: "+_d.title+"\nBy: "+(_d.author_name||"")+"\n\nMake a short-form social video about this topic.\nSource: "+(project.source||"").trim(),name:project.name||_d.title});}}catch(_e){}setBusy(false);}}>Fetch YouTube title ↗</button>)} </label> </div> <div className="mt-3 flex items-center gap-2 flex-wrap"> <input value={project.name || ""} onChange={(e)=>setProject({ ...project, name: e.target.value })} placeholder="Project name" className="bg-transparent border border-[color:var(--line)] rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-white/20 flex-1 min-w-[240px]" /> <select value={project.language || "English"} onChange={(e)=>setProject({ ...project, language: e.target.value })} className="bg-transparent border border-[color:var(--line)] rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-white/20"> {ARCHIVE_LANGS.map(l => <option key={l} value={l} style={{background:"#0b0b10"}}>{l}</option>)} </select> </div> <div className="mt-4 rounded-xl border border-[color:var(--line)] bg-white/[0.02] p-3 md:p-4 flex items-start md:items-center justify-between gap-3 flex-wrap"> <div className="flex items-start gap-3 min-w-0"> <span className="w-8 h-8 shrink-0 rounded-lg bg-white/10 flex items-center justify-center">{I.spark({size:14})}</span> <div className="min-w-0"> <div className="text-sm font-semibold">Generate brief & outline</div> <div className="text-[12px] text-[color:var(--muted)]"> {willUseCloud ? ("Uses Claude via your configured proxy (" + providerId + "). Returns a structured brief and populates your scenes.") : ("Runs a local outline from your prompt. Configure an Anthropic proxy in Settings to use Claude.")} </div> <div className="text-[11px] mt-1 text-[color:var(--muted)]"> Source length: <span className={sourceLen ? "text-white" : "text-rose-300"}>{sourceLen}</span> chars {(() => { let cls = "text-rose-300"; let msg = "· paste or type to begin"; if(sourceLen >= 200){ cls = "text-emerald-300"; msg = "· perfect — this will produce a rich brief"; } else if(sourceLen >= 50){ cls = "text-amber-300"; msg = "· good — more detail yields a sharper brief"; } else if(sourceLen > 0){ cls = "text-rose-300"; msg = "· add more for a sharper brief"; } return <span className={cls + " ml-1"}>{msg}</span>; })()} · Provider: <span className="text-white">{providerId}{willUseCloud ? "" : " (local fallback)"}</span></div> </div> </div> <div className="flex items-center gap-2"> <button type="button" onClick={runBrief} disabled={busy || !sourceLen} className={"btn " + (busy || !sourceLen ? "opacity-60 cursor-not-allowed" : "btn-primary")}> {I.spark({size:14})} {busy ? BRIEF_STAGES[stageIdx] : "Generate brief & outline"}</button> <button type="button" onClick={()=>{ const _pool = ["Most people think an espresso has more caffeine than a brewed coffee. It does not. A single espresso shot is about 63mg. A typical 12oz brewed coffee is 120-180mg. The surprise is volume — espresso concentrates caffeine into a smaller sip, but you drink less of it. This matters if you care about sleep, anxiety, or how long you stay alert.", "The cheapest habit that compounds fastest is walking. Ten thousand steps burns ~400 calories. Do that daily for a year and you burn through 40 pounds of body fat without touching your diet. It also drops resting heart rate, improves mood, and costs nothing. Most people skip it because it feels too small to matter.", "Your phone is not the problem — the lock screen is. Every time you unlock to check one thing, you open twelve. The fix is brutal: move every app off your home screen except calls, messages, camera. No browser, no email, no social. Unlocking now shows nothing. Your focus returns in 48 hours.", "A cold shower does not toughen you up. It trains your nervous system to sit with discomfort. Ninety seconds, three times a week, is enough. After a month, hard conversations feel lighter. Red-lined deadlines feel manageable. The shower is a rehearsal — your real life is the performance."]; const _s = _pool[Math.floor(Math.random() * _pool.length)]; setProject({ ...project, source: _s }); setTimeout(()=>{ runBrief(_s); }, 80); }} className={"btn " + (!sourceLen ? "btn-primary" : "btn-ghost text-xs")}> {!sourceLen ? <>{I.spark({size:14})} Try a sample brief →</> : "Try with sample brief"} </button><button type="button" onClick={()=> onAdvance && onAdvance()} className="btn btn-ghost text-xs"> Skip — edit manually </button> </div> </div> {(diag || err) && ( <div className="mt-3 text-[12px] flex flex-col gap-1"> {diag && !err && <div className="text-[color:var(--muted)]">{diag}</div>} {err && <div className="text-rose-300">Error: {err}</div>} </div> )} </div> );}
+{/(?:youtube\.com\/watch|youtu\.be\/)/.test(project.source||"") && (<button type="button" className="chip mt-1" onClick={async()=>{setBusy(true);try{const _r=await fetch("https://noembed.com/embed?url="+encodeURIComponent((project.source||"").trim()));const _d=await _r.json();if(_d.title){setProject({...project,source:"Video: "+_d.title+"\nBy: "+(_d.author_name||"")+"\n\nMake a short-form social video about this topic.\nSource: "+(project.source||"").trim(),name:project.name||_d.title});}}catch(_e){}setBusy(false);}}>Fetch YouTube title ↗</button>)} </label> </div> <div className="mt-3 flex items-center gap-2 flex-wrap"> <input value={project.name || ""} onChange={(e)=>setProject({ ...project, name: e.target.value })} placeholder="Project name" className="bg-transparent border border-[color:var(--line)] rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-white/20 flex-1 min-w-[240px]" /> <select value={project.language || "English"} onChange={(e)=>setProject({ ...project, language: e.target.value })} className="bg-transparent border border-[color:var(--line)] rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-white/20"> {ARCHIVE_LANGS.map(l => <option key={l} value={l} style={{background:"#0b0b10"}}>{l}</option>)} </select> </div> <div className="mt-4 rounded-xl border border-[color:var(--line)] bg-white/[0.02] p-3 md:p-4 flex items-start md:items-center justify-between gap-3 flex-wrap"> <div className="flex items-start gap-3 min-w-0"> <span className="w-8 h-8 shrink-0 rounded-lg bg-white/10 flex items-center justify-center">{I.spark({size:14})}</span> <div className="min-w-0"> <div className="text-sm font-semibold">Generate brief & outline</div> <div className="text-[12px] text-[color:var(--muted)]"> {willUseCloud ? ("Uses Claude via your configured proxy (" + providerId + "). Returns a structured brief and populates your scenes.") : ("Runs a local outline from your prompt. Configure an Anthropic proxy in Settings to use Claude.")} </div> <div className="text-[11px] mt-1 text-[color:var(--muted)]"> Source length: <span className={sourceLen ? "text-white" : "text-rose-300"}>{sourceLen}</span> chars {(() => { let cls = "text-rose-300"; let msg = "· paste or type to begin"; if(sourceLen >= 200){ cls = "text-emerald-300"; msg = "· perfect — this will produce a rich brief"; } else if(sourceLen >= 50){ cls = "text-amber-300"; msg = "· good — more detail yields a sharper brief"; } else if(sourceLen > 0){ cls = "text-rose-300"; msg = "· add more for a sharper brief"; } return <span className={cls + " ml-1"}>{msg}</span>; })()} · Provider: <span className="text-white">{providerId}{willUseCloud ? "" : " (local fallback)"}</span></div> </div> </div> <div className="flex items-center gap-2"> <button type="button" onClick={runBrief} disabled={busy || !sourceLen} className={"btn " + (busy || !sourceLen ? "opacity-60 cursor-not-allowed" : "btn-primary")}> {I.spark({size:14})} {busy ? BRIEF_STAGES[stageIdx] : "Generate brief & outline"}</button> <button type="button" onClick={()=>{ const _pool = ["Most people think an espresso has more caffeine than a brewed coffee. It does not. A single espresso shot is about 63mg. A typical 12oz brewed coffee is 120-180mg. The surprise is volume — espresso concentrates caffeine into a smaller sip, but you drink less of it. This matters if you care about sleep, anxiety, or how long you stay alert.", "The cheapest habit that compounds fastest is walking. Ten thousand steps burns ~400 calories. Do that daily for a year and you burn through 40 pounds of body fat without touching your diet. It also drops resting heart rate, improves mood, and costs nothing. Most people skip it because it feels too small to matter.", "Your phone is not the problem — the lock screen is. Every time you unlock to check one thing, you open twelve. The fix is brutal: move every app off your home screen except calls, messages, camera. No browser, no email, no social. Unlocking now shows nothing. Your focus returns in 48 hours.", "A cold shower does not toughen you up. It trains your nervous system to sit with discomfort. Ninety seconds, three times a week, is enough. After a month, hard conversations feel lighter. Red-lined deadlines feel manageable. The shower is a rehearsal — your real life is the performance."]; const _s = _pool[Math.floor(Math.random() * _pool.length)]; setProject({ ...project, source: _s }); setTimeout(()=>{ runBrief(_s); }, 80); }} className={"btn " + (!sourceLen ? "btn-primary" : "btn-ghost text-xs")}> {!sourceLen ? <>{I.spark({size:14})} Try a sample brief →</> : "Try with sample brief"} </button><button type="button" onClick={()=> onAdvance && onAdvance()} className="btn btn-ghost text-xs"> Skip — edit manually </button> </div> </div> {(diag || err) && ( <div className="mt-3 text-[12px] flex flex-col gap-1"> {diag && !err && <div className="text-[color:var(--muted)]">{diag}</div>} {err && <div className="text-rose-300">Error: {err}</div>} </div> )} <div className="mt-4 rounded-xl border border-indigo-500/20 bg-indigo-500/5 p-3 flex items-center gap-3"> <span className="w-7 h-7 rounded-lg bg-indigo-500/20 flex items-center justify-center shrink-0">{I.search({size:12})}</span> <div className="flex-1 min-w-0 text-[12px] text-[color:var(--muted)]">Want a fully-researched script? Use the <button type="button" className="text-indigo-300 underline hover:text-white" onClick={()=>{ try { window.dispatchEvent(new CustomEvent('zs:goto-tab', { detail: { tab: 'scripts' } })); } catch(_){} }}>Scripts tab</button> — it scrapes the internet, pulls trending context, and writes a sourced script with citations ready to send back here.</div> </div> </div> );}
 const fetchWithRetry = async (url, init, opts) => {
   const max = (opts && opts.max) || 3;
   const baseMs = (opts && opts.baseMs) || 600;
@@ -9065,6 +9066,686 @@ function AvatarEditor({ open, avatar, onClose, onSave }){
   );
 }
 
+// x117: Scripts tab — real AI research + full script generator.
+// Phase 1: topic input (topic, reference URLs, duration, tone, format)
+// Phase 2: multi-stage pipeline with live progress chips
+//   1. extract_keywords → Claude Sonnet 4.6
+//   2. fetch_trending → /trends/{google,reddit,hn,x}
+//   3. fetch_url (new) → /fetch?url=... worker proxy or direct fetch
+//   4. youtube-transcript → /youtube-transcript for YT refs
+//   5. emit_research → sourced claims
+//   6. generate_full_script → beats + references
+// Phase 3: editable script with per-beat regen, Send to Studio, Export
+
+// Fetch a URL body for research (try direct then proxy fallback)
+const fetchUrlForResearch = async (url, proxyBase) => {
+  // Only http/https
+  if (!/^https?:\/\//i.test(url)) return { url, title: '', body: '', status: 'skip' };
+  try {
+    // Try direct first (works for CORS-permissive sites)
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 8000);
+    try {
+      const r = await fetch(url, { signal: ctrl.signal });
+      clearTimeout(timer);
+      if (r.ok) {
+        const html = await r.text();
+        // Basic HTML strip + title extract
+        const titleM = html.match(/<title[^>]*>([^<]{0,200})<\/title>/i);
+        const title = titleM ? titleM[1].replace(/&amp;/g,'&').replace(/&#39;/g,"'").replace(/&quot;/g,'"').replace(/&lt;/g,'<').replace(/&gt;/g,'>').trim() : '';
+        const body = html
+          .replace(/<script[\s\S]*?<\/script>/gi, '')
+          .replace(/<style[\s\S]*?<\/style>/gi, '')
+          .replace(/<[^>]+>/g, ' ')
+          .replace(/\s{2,}/g, ' ')
+          .trim()
+          .slice(0, 4000);
+        return { url, title, body, status: 'ok' };
+      }
+    } catch(_) { clearTimeout(timer); }
+    // Proxy fallback
+    if (proxyBase) {
+      const proxyUrl = proxyBase.replace(/\/$/, '') + '/fetch?url=' + encodeURIComponent(url);
+      const r2 = await fetch(proxyUrl, { signal: AbortSignal.timeout(12000) });
+      if (r2.ok) {
+        const data = await r2.json();
+        return { url, title: data.title || '', body: String(data.body || '').slice(0, 4000), status: data.status || 'ok' };
+      }
+    }
+    return { url, title: '', body: '', status: 'cors-blocked' };
+  } catch(e) {
+    return { url, title: '', body: '', status: 'fetch-error' };
+  }
+};
+
+// Full script generator sub-agent
+const runFullScriptAgent = async (proxyUrl, topic, tone, format, durationTarget, researchBundle, refTranscripts, onStatus) => {
+  const url = (proxyUrl || '').replace(/\/$/, '') + '/v1/messages';
+  const DURATION_MAP = { '15': 15, '30': 30, '60': 60, '90': 90, '180': 180 };
+  const durSec = DURATION_MAP[String(durationTarget)] || 60;
+  const beatCount = durSec <= 15 ? 2 : durSec <= 30 ? 3 : durSec <= 60 ? 4 : durSec <= 90 ? 5 : 7;
+
+  const researchSummary = (researchBundle.claims || []).map(c => '- ' + c.claim + ' [source: ' + c.source + ']').join('\n') || 'No grounded claims available.';
+  const trendingContext = (researchBundle._trendingRaw || []).flatMap(t => (t.matches || []).slice(0, 2).map(m => m.source + ': ' + (m.title || '').slice(0, 80))).slice(0, 8).join('\n') || 'No trending context.';
+  const refContext = refTranscripts.filter(r => r.body).map(r => '--- ' + (r.title || r.url) + ' ---\n' + r.body.slice(0, 1200)).join('\n\n').slice(0, 5000) || '';
+
+  const system = [
+    'You are a senior short-form video scriptwriter. Write fully grounded, spoken-tone scripts.',
+    'Rules:',
+    '1. EVERY claim must come from the RESEARCH block. Do NOT invent facts not in research.',
+    '2. If research is thin, say so in the `angle` field (e.g. "Note: research was limited — verify claims before recording").',
+    '3. voLine must be spoken-tone — how someone actually talks, not how they write.',
+    '4. Each beat must have a clear payoff. No beat ends mid-idea.',
+    '5. Total duration of all beats should approximately equal ' + durSec + ' seconds.',
+    '6. references[] must only list URLs/titles that appear in the research block. Do NOT invent URLs.',
+    '7. Tone: ' + tone + '. Format: ' + format + '.',
+  ].join('\n');
+
+  const userMsg = [
+    'TOPIC: ' + topic,
+    'TARGET DURATION: ' + durSec + 's (' + beatCount + ' beats)',
+    'TONE: ' + tone,
+    'FORMAT: ' + format,
+    '',
+    'RESEARCH CLAIMS:',
+    researchSummary,
+    '',
+    'TRENDING CONTEXT:',
+    trendingContext,
+    refContext ? ('\nREFERENCE MATERIAL:\n' + refContext) : '',
+  ].join('\n');
+
+  const tool = {
+    name: 'generate_full_script',
+    description: 'Generate a complete, sourced video script.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        hook: { type: 'string', description: '8-15 words. Attention-grabbing opening line.' },
+        logline: { type: 'string', description: 'One sentence summary of the video.' },
+        audience: { type: 'string' },
+        angle: { type: 'string', description: 'The specific angle or take. If research was thin, note it here.' },
+        cta: { type: 'string', description: 'Closing call-to-action.' },
+        beats: {
+          type: 'array',
+          description: 'Ordered beats. Each has a clear payoff.',
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'string' },
+              title: { type: 'string', description: '2-6 word label.' },
+              voLine: { type: 'string', description: 'Spoken script for this beat. Natural spoken tone.' },
+              duration_s: { type: 'number', description: 'Approximate duration in seconds.' },
+              shot: { type: 'string', description: 'Concrete visual description for the shot (image-gen prompt).' },
+              motion: { type: 'string', description: 'Camera motion: slow push-in, zoom out, etc.' },
+              broll: { type: 'array', items: { type: 'string' }, description: 'B-roll search prompts for this beat.' },
+              captions: { type: 'string', description: 'On-screen caption text, max 80 chars.' }
+            },
+            required: ['id', 'title', 'voLine', 'duration_s', 'shot']
+          }
+        },
+        references: {
+          type: 'array',
+          description: 'Only URLs/titles from the research block. Do NOT invent.',
+          items: {
+            type: 'object',
+            properties: {
+              claim: { type: 'string' },
+              source_url: { type: 'string' },
+              source_title: { type: 'string' }
+            },
+            required: ['claim', 'source_url', 'source_title']
+          }
+        }
+      },
+      required: ['hook', 'logline', 'beats', 'references']
+    }
+  };
+
+  if (onStatus) onStatus('Writing full script…');
+  const body = {
+    model: 'claude-sonnet-4-6',
+    max_tokens: 4000,
+    system,
+    tools: [tool],
+    tool_choice: { type: 'tool', name: 'generate_full_script' },
+    messages: [{ role: 'user', content: userMsg }]
+  };
+  const res = await fetchWithRetry(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'anthropic-version': '2023-06-01' },
+    body: JSON.stringify(body)
+  });
+  const ct = res.headers.get('content-type') || '';
+  const raw = ct.includes('application/json') ? await res.json() : await res.text();
+  if (!res.ok) throw new Error('Script agent HTTP ' + res.status + ': ' + (typeof raw === 'string' ? raw.slice(0,200) : JSON.stringify(raw).slice(0,200)));
+  const blocks = Array.isArray(raw && raw.content) ? raw.content : [];
+  const tb = blocks.find(b => b && b.type === 'tool_use' && b.name === 'generate_full_script');
+  if (!tb || !tb.input) throw new Error('Script agent did not return generate_full_script');
+  return tb.input;
+};
+
+function ScriptsTab({ setTab }) {
+  const toast = useToast();
+  const anthropicPath = getAnthropicPath();
+  const proxyBase = anthropicPath ? anthropicPath.replace(/\/anthropic\/?$/, '').replace(/\/v1\/?$/, '') : '';
+
+  // Phase state: 'input' | 'running' | 'review'
+  const [phase, setPhase] = React.useState('input');
+
+  // Phase 1 inputs
+  const [topic, setTopic] = React.useState('');
+  const [refUrls, setRefUrls] = React.useState('');
+  const [duration, setDuration] = React.useState('60');
+  const [tone, setTone] = React.useState('educational');
+  const [format, setFormat] = React.useState('talking-head');
+
+  // Phase 2 pipeline progress
+  const [stages, setStages] = React.useState([]);
+  const [pipelineErr, setPipelineErr] = React.useState('');
+  const [researchThin, setResearchThin] = React.useState(false);
+
+  // Phase 3 result
+  const [script, setScript] = React.useState(null); // generate_full_script output
+
+  const appendStage = (label, status) => setStages(prev => [...prev, { label, status, id: Math.random().toString(36).slice(2) }]);
+  const updateLastStage = (status) => setStages(prev => prev.length ? [...prev.slice(0,-1), { ...prev[prev.length-1], status }] : prev);
+
+  const parseRefUrls = (raw) => String(raw || '').split(/[\n,]+/).map(s => s.trim()).filter(s => /^https?:\/\//i.test(s));
+
+  const runPipeline = async () => {
+    if (!topic.trim()) { toast.push('Enter a topic first', 'warn'); return; }
+    if (!anthropicPath) { toast.push('Configure Anthropic proxy in Settings first', 'warn'); return; }
+    setPhase('running');
+    setStages([]);
+    setPipelineErr('');
+    setResearchThin(false);
+    setScript(null);
+
+    try {
+      // Stage 1: keywords
+      appendStage('Extracting keywords…', 'running');
+      const keywords = await extractTopicKeywords(anthropicPath, topic, null);
+      updateLastStage('done');
+      appendStage('Keywords: ' + (keywords.slice(0,5).join(', ') || 'none'), 'info');
+
+      // Stage 2: trends
+      appendStage('Fetching trending context…', 'running');
+      let trendingData = [];
+      if (keywords.length && proxyBase) {
+        trendingData = await fetchTrendingContext(proxyBase, keywords.slice(0, 6));
+      }
+      updateLastStage('done');
+      const trendCount = trendingData.reduce((n,r) => n + (r.matches||[]).length, 0);
+      appendStage('Trends: ' + trendCount + ' matches across Google/Reddit/HN/X', trendCount > 0 ? 'info' : 'warn');
+
+      // Stage 3: URL scrape
+      const urlList = parseRefUrls(refUrls);
+      // Also add top 2 most-relevant trend URLs
+      const trendUrls = trendingData.flatMap(r => (r.matches||[]).filter(m => /^https?:\/\//i.test(m.url)).slice(0,1).map(m => m.url)).slice(0, 3);
+      const allUrls = [...new Set([...urlList, ...trendUrls])].slice(0, 6);
+
+      const ytUrls = allUrls.filter(u => isYouTubeUrl(u));
+      const plainUrls = allUrls.filter(u => !isYouTubeUrl(u));
+
+      // Stage 4: YT transcripts
+      let refTranscripts = [];
+      if (ytUrls.length) {
+        appendStage('Pulling YouTube transcripts (' + ytUrls.length + ')…', 'running');
+        const ytResults = await Promise.allSettled(ytUrls.map(u => fetchYouTubeTranscript(u)));
+        ytResults.forEach((r, i) => {
+          if (r.status === 'fulfilled' && r.value && r.value.transcript) {
+            refTranscripts.push({ url: ytUrls[i], title: r.value.title || ytUrls[i], body: r.value.transcript.slice(0, 3000) });
+          }
+        });
+        updateLastStage('done');
+        appendStage('YT transcripts: ' + refTranscripts.length + '/' + ytUrls.length + ' fetched', 'info');
+      }
+
+      if (plainUrls.length) {
+        appendStage('Scraping reference URLs (' + plainUrls.length + ')…', 'running');
+        const urlResults = await Promise.allSettled(plainUrls.map(u => fetchUrlForResearch(u, proxyBase)));
+        let fetched = 0;
+        urlResults.forEach((r, i) => {
+          if (r.status === 'fulfilled' && r.value && r.value.body) {
+            refTranscripts.push({ url: plainUrls[i], title: r.value.title || plainUrls[i], body: r.value.body });
+            fetched++;
+          }
+        });
+        updateLastStage('done');
+        appendStage('URLs scraped: ' + fetched + '/' + plainUrls.length, fetched > 0 ? 'info' : 'warn');
+      }
+
+      // Stage 5: emit_research via runResearchSubAgent
+      appendStage('Synthesizing research…', 'running');
+      const srcText = topic + (refTranscripts.length ? '\n\nReference material:\n' + refTranscripts.map(r => r.body.slice(0,600)).join('\n---\n') : '');
+      const researchBundle = await runResearchSubAgent(anthropicPath, { source: srcText, durationHint: Number(duration) || 60 }, (msg) => {
+        appendStage(msg, 'info');
+      });
+      updateLastStage('done');
+      const claimCount = (researchBundle.claims || []).length;
+      const thin = claimCount < 2;
+      setResearchThin(thin);
+      if (thin) appendStage('Research limited (' + claimCount + ' claims) — script may be less grounded', 'warn');
+      else appendStage('Research: ' + claimCount + ' sourced claims', 'info');
+
+      // Stage 6: generate_full_script
+      appendStage('Writing full script…', 'running');
+      const fullScript = await runFullScriptAgent(
+        anthropicPath, topic, tone, format, duration,
+        { ...researchBundle, _trendingRaw: trendingData },
+        refTranscripts,
+        (msg) => appendStage(msg, 'info')
+      );
+      updateLastStage('done');
+      appendStage('Script ready — ' + (fullScript.beats||[]).length + ' beats', 'info');
+
+      setScript({ ...fullScript, _research: researchBundle, _trendingData: trendingData });
+      setPhase('review');
+    } catch(err) {
+      setPipelineErr(String(err && err.message || err));
+      updateLastStage('error');
+      setPhase('running'); // stay on running to show error + log
+    }
+  };
+
+  // Per-beat regen
+  const regenBeat = async (beatIdx) => {
+    if (!script || !anthropicPath) return;
+    const beat = script.beats[beatIdx];
+    try {
+      const url = anthropicPath.replace(/\/$/, '') + '/v1/messages';
+      const body = {
+        model: 'claude-sonnet-4-6',
+        max_tokens: 800,
+        tool_choice: { type: 'tool', name: 'rewrite_beat' },
+        tools: [{
+          name: 'rewrite_beat',
+          description: 'Rewrite a single script beat.',
+          input_schema: {
+            type: 'object',
+            properties: {
+              voLine: { type: 'string' },
+              shot: { type: 'string' },
+              broll: { type: 'array', items: { type: 'string' } },
+              captions: { type: 'string' }
+            },
+            required: ['voLine', 'shot']
+          }
+        }],
+        messages: [{
+          role: 'user',
+          content: 'Rewrite this beat in a ' + tone + ' tone for a ' + format + ' video.\n' +
+            'Beat title: ' + beat.title + '\nCurrent voLine: ' + beat.voLine + '\nTopic: ' + topic +
+            '\nResearch: ' + (script._research && script._research.claims || []).slice(0,3).map(c => c.claim).join('; ')
+        }]
+      };
+      const res = await fetchWithRetry(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'anthropic-version': '2023-06-01' }, body: JSON.stringify(body) });
+      const data = await res.json();
+      const tb = (data.content || []).find(b => b.type === 'tool_use' && b.name === 'rewrite_beat');
+      if (tb && tb.input) {
+        const newBeats = script.beats.map((b, i) => i === beatIdx ? { ...b, voLine: tb.input.voLine || b.voLine, shot: tb.input.shot || b.shot, broll: tb.input.broll || b.broll, captions: tb.input.captions || b.captions } : b);
+        setScript(prev => ({ ...prev, beats: newBeats }));
+        toast.push('Beat regenerated', 'success');
+      }
+    } catch(e) {
+      toast.push('Regen failed: ' + (e && e.message || e), 'error');
+    }
+  };
+
+  // Send to Studio
+  const sendToStudio = () => {
+    if (!script || !script.beats) return;
+    const durSec = Number(duration) || 60;
+    const per = Math.max(3, Math.round(durSec / Math.max(1, script.beats.length)));
+    const scenes = script.beats.map((b, i) => ({
+      id: 's' + (i + 1),
+      title: (b.title || ('Beat ' + (i + 1))).slice(0, 80),
+      script: (b.voLine || '').slice(0, 800),
+      voLine: (b.voLine || '').slice(0, 800),
+      duration: b.duration_s || per,
+      aroll: 'avatar',
+      broll: Array.isArray(b.broll) ? b.broll : [],
+      shot: b.shot || '',
+      motion: b.motion || 'slow push-in',
+      asset: 'b-roll',
+      captions: (b.captions || (b.voLine || '').slice(0, 80))
+    }));
+    const projectPatch = {
+      name: topic.slice(0, 80),
+      logline: script.logline || '',
+      hook: script.hook || '',
+      cta: script.cta || '',
+      audience: script.audience || '',
+      angle: script.angle || '',
+      source: topic,
+      durationHint: durSec,
+      scenes
+    };
+    try {
+      const existing = JSON.parse(localStorage.getItem('zaidsaid.v2.studio.project') || '{}');
+      localStorage.setItem('zaidsaid.v2.studio.project', JSON.stringify({ ...existing, ...projectPatch }));
+      toast.push('Sent to Studio — ' + scenes.length + ' scenes', 'success');
+      if (setTab) setTab('studio');
+    } catch(e) {
+      toast.push('Send to Studio failed: ' + (e && e.message || e), 'error');
+    }
+  };
+
+  // Send to HyperFrames (prime first beat)
+  const sendToHyperFrames = () => {
+    if (!script || !script.beats || !script.beats[0]) return;
+    const b = script.beats[0];
+    try {
+      localStorage.setItem('zaidsaid.v2.hf.seed', JSON.stringify({
+        voLine: b.voLine || '',
+        broll: Array.isArray(b.broll) ? b.broll : [],
+        title: topic.slice(0, 80)
+      }));
+      toast.push('Primed HyperFrames with first beat', 'success');
+      if (setTab) setTab('hyperframes');
+    } catch(e) {
+      toast.push('Failed: ' + (e && e.message || e), 'error');
+    }
+  };
+
+  // Export as Markdown
+  const exportMd = () => {
+    if (!script) return;
+    const lines = [
+      '# ' + (script.logline || topic),
+      '',
+      '**Hook:** ' + (script.hook || ''),
+      '**Audience:** ' + (script.audience || ''),
+      '**Angle:** ' + (script.angle || ''),
+      '**CTA:** ' + (script.cta || ''),
+      '',
+      '## Script Beats',
+      ''
+    ];
+    (script.beats || []).forEach((b, i) => {
+      lines.push('### ' + (i+1) + '. ' + (b.title || ''));
+      lines.push('**VO:** ' + (b.voLine || ''));
+      lines.push('**Shot:** ' + (b.shot || ''));
+      if (b.broll && b.broll.length) lines.push('**B-roll:** ' + b.broll.join(', '));
+      if (b.captions) lines.push('**Captions:** ' + b.captions);
+      lines.push('');
+    });
+    if ((script.references || []).length) {
+      lines.push('## References', '');
+      (script.references || []).forEach(r => {
+        lines.push('- ' + r.claim + ' — [' + (r.source_title || r.source_url) + '](' + r.source_url + ')');
+      });
+    }
+    const blob = new Blob([lines.join('\n')], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = (topic.slice(0, 40).replace(/[^a-z0-9]+/gi, '-') || 'script') + '.md';
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.push('Exported as Markdown', 'success');
+  };
+
+  // Clipboard copy as markdown
+  const copyMd = () => {
+    if (!script) return;
+    const lines = [(script.logline || topic), '', '**Hook:** ' + (script.hook || ''), ''];
+    (script.beats || []).forEach((b, i) => {
+      lines.push((i+1) + '. ' + (b.title || '') + '\n' + (b.voLine || ''));
+      lines.push('');
+    });
+    try { navigator.clipboard.writeText(lines.join('\n')); toast.push('Copied', 'success'); }
+    catch(_) { toast.push('Copy failed', 'error'); }
+  };
+
+  // Chip status colors
+  const stageColor = (status) => {
+    if (status === 'running') return 'text-indigo-300 border-indigo-400/30 bg-indigo-500/10';
+    if (status === 'done') return 'text-emerald-300 border-emerald-400/30 bg-emerald-500/10';
+    if (status === 'error') return 'text-rose-300 border-rose-400/30 bg-rose-500/10';
+    if (status === 'warn') return 'text-amber-300 border-amber-400/30 bg-amber-500/10';
+    return 'text-[color:var(--muted)] border-[color:var(--line)]';
+  };
+
+  return (
+    <div className="max-w-[1100px] mx-auto px-5 py-8 space-y-6">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <h1 className="text-3xl font-bold">Scripts</h1>
+          <p className="text-[color:var(--muted)] mt-1">Research the internet, then write a fully grounded script ready to record.</p>
+        </div>
+        {phase === 'review' && (
+          <div className="flex items-center gap-2 flex-wrap">
+            <button className="btn btn-ghost text-xs" onClick={() => { setPhase('input'); setScript(null); setStages([]); }}>{I.refresh({size:12})} Start over</button>
+            <button className="btn btn-ghost text-xs" onClick={copyMd}>{I.copy({size:12})} Copy</button>
+            <button className="btn btn-ghost text-xs" onClick={exportMd}>{I.down({size:12})} Export .md</button>
+            <button className="btn" onClick={sendToHyperFrames}>{I.film({size:12})} HyperFrames</button>
+            <button className="btn btn-primary" onClick={sendToStudio}>{I.studio({size:14})} Send to Studio</button>
+          </div>
+        )}
+      </div>
+
+      {/* Phase 1 — Input */}
+      {(phase === 'input') && (
+        <div className="card p-5 space-y-4">
+          <div>
+            <div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Topic</div>
+            <div className="text-lg font-semibold">What is the video about?</div>
+          </div>
+          <label className="block">
+            <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Topic & angle</span>
+            <textarea
+              value={topic}
+              onChange={e => setTopic(e.target.value)}
+              placeholder="e.g. The dangers of AI sycophancy — why LLMs are trained to agree with you and why that's a problem"
+              rows={3}
+              className="mt-1 w-full bg-transparent border border-[color:var(--line)] rounded-xl p-3 text-sm focus:outline-none focus:border-white/20"
+            />
+          </label>
+          <label className="block">
+            <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Reference URLs (optional)</span>
+            <span className="ml-2 text-[11px] text-[color:var(--muted)]">Articles, YouTube videos — comma or newline separated</span>
+            <textarea
+              value={refUrls}
+              onChange={e => setRefUrls(e.target.value)}
+              placeholder="https://example.com/article&#10;https://youtu.be/abc123"
+              rows={3}
+              className="mt-1 w-full bg-transparent border border-[color:var(--line)] rounded-xl p-3 text-sm focus:outline-none focus:border-white/20 font-mono text-xs"
+            />
+          </label>
+          <div className="grid sm:grid-cols-3 gap-3">
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Target duration</span>
+              <select value={duration} onChange={e => setDuration(e.target.value)} className="bg-transparent border border-[color:var(--line)] rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-white/20">
+                <option value="15" style={{background:'#0b0b10'}}>15 seconds</option>
+                <option value="30" style={{background:'#0b0b10'}}>30 seconds</option>
+                <option value="60" style={{background:'#0b0b10'}}>60 seconds</option>
+                <option value="90" style={{background:'#0b0b10'}}>90 seconds</option>
+                <option value="180" style={{background:'#0b0b10'}}>3 minutes</option>
+              </select>
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Tone</span>
+              <select value={tone} onChange={e => setTone(e.target.value)} className="bg-transparent border border-[color:var(--line)] rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-white/20">
+                <option value="educational" style={{background:'#0b0b10'}}>Educational</option>
+                <option value="hype" style={{background:'#0b0b10'}}>Hype</option>
+                <option value="contrarian" style={{background:'#0b0b10'}}>Contrarian</option>
+                <option value="story-driven" style={{background:'#0b0b10'}}>Story-driven</option>
+              </select>
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Format</span>
+              <select value={format} onChange={e => setFormat(e.target.value)} className="bg-transparent border border-[color:var(--line)] rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-white/20">
+                <option value="talking-head" style={{background:'#0b0b10'}}>Talking head</option>
+                <option value="voiceover-with-broll" style={{background:'#0b0b10'}}>Voiceover + B-roll</option>
+                <option value="explainer" style={{background:'#0b0b10'}}>Explainer</option>
+              </select>
+            </label>
+          </div>
+          {!anthropicPath && (
+            <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 p-3 text-[12px] text-amber-200">
+              No Anthropic proxy configured. Go to Settings to add one — this tool needs Claude Sonnet.
+            </div>
+          )}
+          <div className="flex items-center gap-2 pt-2">
+            <button className="btn btn-primary" onClick={runPipeline} disabled={!topic.trim() || !anthropicPath}>
+              {I.search({size:14})} Research &amp; write
+            </button>
+            <span className="text-[11px] text-[color:var(--muted)]">~30–60s · 6 pipeline stages · Claude Sonnet</span>
+          </div>
+        </div>
+      )}
+
+      {/* Phase 2 — Running */}
+      {(phase === 'running') && (
+        <div className="card p-5 space-y-4">
+          <div className="flex items-center gap-3">
+            <span className="w-8 h-8 rounded-lg bg-indigo-500/20 flex items-center justify-center animate-pulse">{I.search({size:14})}</span>
+            <div>
+              <div className="text-sm font-semibold">Researching &amp; writing…</div>
+              <div className="text-[11px] text-[color:var(--muted)]">{topic.slice(0,80)}</div>
+            </div>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            {stages.map(s => (
+              <div key={s.id} className={"chip text-xs " + stageColor(s.status)}>
+                {s.status === 'running' && <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse mr-1 inline-block" />}
+                {s.label}
+              </div>
+            ))}
+          </div>
+          {pipelineErr && (
+            <div className="rounded-xl border border-rose-400/30 bg-rose-500/10 p-3 space-y-2">
+              <div className="text-[12px] text-rose-300">Pipeline error: {pipelineErr}</div>
+              <button className="btn btn-ghost text-xs" onClick={() => { setPhase('input'); setStages([]); setPipelineErr(''); }}>← Try again</button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Phase 3 — Review */}
+      {(phase === 'review' && script) && (
+        <div className="space-y-4">
+          {researchThin && (
+            <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 p-3 text-[12px] text-amber-200">
+              Research limited — script may be less grounded. Consider adding reference URLs and re-running.
+            </div>
+          )}
+
+          {/* Header fields */}
+          <div className="card p-5 space-y-3">
+            <div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Script overview</div>
+            <div className="grid md:grid-cols-2 gap-3">
+              <label className="flex flex-col gap-1">
+                <span className="text-[11px] text-[color:var(--muted)] uppercase tracking-wider">Hook</span>
+                <input value={script.hook || ''} onChange={e => setScript(s => ({ ...s, hook: e.target.value }))} className="bg-transparent border border-[color:var(--line)] rounded-xl px-3 py-2 text-sm" />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-[11px] text-[color:var(--muted)] uppercase tracking-wider">Logline</span>
+                <input value={script.logline || ''} onChange={e => setScript(s => ({ ...s, logline: e.target.value }))} className="bg-transparent border border-[color:var(--line)] rounded-xl px-3 py-2 text-sm" />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-[11px] text-[color:var(--muted)] uppercase tracking-wider">Audience</span>
+                <input value={script.audience || ''} onChange={e => setScript(s => ({ ...s, audience: e.target.value }))} className="bg-transparent border border-[color:var(--line)] rounded-xl px-3 py-2 text-sm" />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-[11px] text-[color:var(--muted)] uppercase tracking-wider">Angle</span>
+                <input value={script.angle || ''} onChange={e => setScript(s => ({ ...s, angle: e.target.value }))} className="bg-transparent border border-[color:var(--line)] rounded-xl px-3 py-2 text-sm" />
+              </label>
+              <label className="flex flex-col gap-1 md:col-span-2">
+                <span className="text-[11px] text-[color:var(--muted)] uppercase tracking-wider">CTA</span>
+                <input value={script.cta || ''} onChange={e => setScript(s => ({ ...s, cta: e.target.value }))} className="bg-transparent border border-[color:var(--line)] rounded-xl px-3 py-2 text-sm" />
+              </label>
+            </div>
+          </div>
+
+          {/* Beat cards */}
+          <div className="card p-5 space-y-4">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Script beats</div>
+                <div className="text-lg font-semibold">{(script.beats||[]).length} beats</div>
+              </div>
+              <button className="btn btn-ghost text-xs" onClick={runPipeline}>{I.refresh({size:12})} Regenerate all</button>
+            </div>
+            <div className="space-y-3">
+              {(script.beats || []).map((beat, i) => (
+                <div key={beat.id || i} className="rounded-xl border border-[color:var(--line)] p-4 space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="w-6 h-6 rounded-lg bg-white/10 flex items-center justify-center text-[11px] font-bold">{i+1}</span>
+                      <input
+                        value={beat.title || ''}
+                        onChange={e => setScript(s => ({ ...s, beats: s.beats.map((b, j) => j===i ? { ...b, title: e.target.value } : b) }))}
+                        className="bg-transparent text-sm font-semibold border-none outline-none"
+                      />
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="chip text-[10px]">{beat.duration_s || '?'}s</span>
+                      <button className="chip text-[10px]" onClick={() => regenBeat(i)}>{I.refresh({size:10})} Regen</button>
+                    </div>
+                  </div>
+                  <label className="block">
+                    <span className="text-[10px] uppercase tracking-wider text-[color:var(--muted)]">VO Line</span>
+                    <textarea
+                      value={beat.voLine || ''}
+                      onChange={e => setScript(s => ({ ...s, beats: s.beats.map((b, j) => j===i ? { ...b, voLine: e.target.value } : b) }))}
+                      rows={3}
+                      className="mt-1 w-full bg-transparent border border-[color:var(--line)] rounded-xl p-2.5 text-sm resize-none"
+                    />
+                  </label>
+                  <div className="grid sm:grid-cols-2 gap-2 text-[12px]">
+                    <div>
+                      <div className="text-[10px] uppercase tracking-wider text-[color:var(--muted)] mb-1">Shot</div>
+                      <div className="text-[color:var(--muted)]">{beat.shot || '—'}</div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] uppercase tracking-wider text-[color:var(--muted)] mb-1">B-roll prompts</div>
+                      <div className="text-[color:var(--muted)]">{Array.isArray(beat.broll) ? beat.broll.join(' · ') : (beat.broll || '—')}</div>
+                    </div>
+                  </div>
+                  {beat.captions && (
+                    <div className="text-[11px] text-[color:var(--muted)]">
+                      <span className="uppercase tracking-wider mr-1">Captions:</span>{beat.captions}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Citations */}
+          {(script.references || []).length > 0 && (
+            <div className="card p-5 space-y-3">
+              <div className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Citations</div>
+              <div className="text-lg font-semibold">Sources the script is grounded in</div>
+              <div className="space-y-2">
+                {(script.references || []).map((ref, i) => (
+                  <div key={i} className="rounded-xl border border-[color:var(--line)] p-3">
+                    <div className="text-sm">{ref.claim}</div>
+                    <div className="mt-1 text-[11px] text-[color:var(--muted)]">
+                      <a href={ref.source_url} target="_blank" rel="noopener noreferrer" className="underline hover:text-white">{ref.source_title || ref.source_url}</a>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Action bar */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <button className="btn btn-primary" onClick={sendToStudio}>{I.studio({size:14})} Send to Studio</button>
+            <button className="btn" onClick={sendToHyperFrames}>{I.film({size:12})} Send to HyperFrames</button>
+            <button className="btn btn-ghost text-xs" onClick={exportMd}>{I.down({size:12})} Export .md</button>
+            <button className="btn btn-ghost text-xs" onClick={copyMd}>{I.copy({size:12})} Copy as text</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // x116: HyperFrames Studio — manual playground tab.
 // Exposes the hyperframes-renderer /render + /thumbnail endpoints and all
 // sidecar tools (audio-ai, vision-ai, tts) in a single workbench UI.
@@ -11013,6 +11694,14 @@ function App(){
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
   useEffect(()=>{
+    const onGoto = (e) => {
+      const t = e && e.detail && e.detail.tab;
+      if(t && TABS.find(x => x.id === t)) setTab(t);
+    };
+    window.addEventListener("zs:goto-tab", onGoto);
+    return () => window.removeEventListener("zs:goto-tab", onGoto);
+  }, []);
+  useEffect(()=>{
     if(!tab) return;
     if(tab === "studio"){
       setHash("studio", { step: studioStep });
@@ -11034,6 +11723,7 @@ function App(){
     switch(tab){
       case "home":         return <HomeTab setTab={setTab} startProject={startProject} />;
       case "studio":       return <StudioTab setTab={setTab} studioStep={studioStep} setStudioStep={setStudioStep} />;
+      case "scripts":      return <ScriptsTab setTab={setTab} />;
       case "repurpose":    return <RepurposeTab/>;
       case "hyperframes":  return <HyperFramesTab/>;
       case "avatars":      return <AvatarsTab/>;
