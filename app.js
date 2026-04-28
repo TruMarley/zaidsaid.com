@@ -2808,6 +2808,29 @@ const renderThumbnailViaHyperFrames = async (thumb) => {
   }
 };
 
+// x112c: YOLOv8 person tracking via vision-ai. Returns { tracks, sampled_frames }
+// on success, null on failure. Pair with audio-ai pyannote for "everything
+// Speaker A said while Speaker A was on camera" multi-person clip splits.
+const trackPeopleViaVisionAi = async (visionBase, videoBlob, sampleFps) => {
+  if (!visionBase || !videoBlob) return null;
+  try {
+    const form = new FormData();
+    form.append('file', videoBlob, 'in.mp4');
+    form.append('sample_fps', String(sampleFps != null ? sampleFps : 2));
+    form.append('classes', 'person');
+    form.append('model', 'yolov8n.pt');
+    const res = await fetch(visionBase.replace(/\/$/, '') + '/track-people', { method: 'POST', body: form });
+    if (!res.ok) {
+      console.warn('[zs] vision-ai track HTTP', res.status);
+      return null;
+    }
+    return await res.json();
+  } catch (e) {
+    console.warn('[zs] vision-ai track failed:', e);
+    return null;
+  }
+};
+
 // x112b: SAM2 subject segmentation via vision-ai. Returns RGBA cutout PNG
 // (Blob) on success, null on failure. Use as an optional upgrade path for
 // smart-crop on clips where the subject occupies <30% of the frame and
@@ -8374,6 +8397,24 @@ const removeClip = (clipId) => {
                 downloadBlob(out, (firstClip.title || "clip").replace(/[^a-z0-9]+/gi,"-") + "-mask.png");
                 toast("Subject mask downloaded · " + Math.round(out.size / 1024) + " KB", "success");
               }}>SAM2 mask</button>
+              {/* x112c: YOLOv8 person tracking on the upload video. Downloads
+                  tracks.json — one entry per tracked person with bbox time series.
+                  Pair with pyannote for multi-host clip splits. */}
+              <button className="chip" onClick={async () => {
+                const visBase = getVisionAiPath();
+                if(!visBase){ toast("vision-ai not configured", "warn"); return; }
+                let srcBlob = null;
+                try { srcBlob = await idbGet(IDB_UPLOAD_KEY); } catch(_){}
+                if(!srcBlob){ toast("Upload a video first", "warn"); return; }
+                toast("Tracking people… (YOLOv8 ~0.5s/sampled-frame)", "info");
+                const data = await trackPeopleViaVisionAi(visBase, srcBlob, 2);
+                if(!data){ toast("Tracking failed — see console", "error"); return; }
+                const json = JSON.stringify(data, null, 2);
+                downloadBlob(new Blob([json], { type: "application/json" }),
+                             (project.name || "upload").replace(/[^a-z0-9]+/gi,"-") + "-tracks.json");
+                const nTracks = (data.tracks || []).length;
+                toast("Tracked " + nTracks + " " + (nTracks === 1 ? "person" : "people") + " across " + (data.sampled_frames || 0) + " frames", "success");
+              }}>Track people</button>
               <button className="chip" onClick={() => setPrecisionEnabled(v => !v)}>Precision pass {precisionEnabled ? "ON" : "OFF"}</button>
               <button className="chip" onClick={() => { setSmartCropEnabled(v => !v); smartCropCacheRef.current = {}; setCropPaths({}); }}>Smart crop {smartCropEnabled ? "ON" : "OFF"}</button>
               <button className="chip" onClick={() => setShowWeak(v => !v)}>Show weak {showWeak ? "ON" : "OFF"}</button>
