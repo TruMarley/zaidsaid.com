@@ -2776,6 +2776,38 @@ const transcribeUploadedFile = async (elevenBase, blob, filename) => {
   return { text: fullText || segments.map(s => s.text).join(' '), segments, words: cleanWords };
 };
 
+// x114b: Server-side thumbnail render via hyperframes-renderer's satori
+// /thumbnail endpoint. Faster + cleaner than the Pollinations-image-gen
+// path (which garbles text). Returns a Blob on success, null on failure
+// (caller falls back to Pollinations).
+const renderThumbnailViaHyperFrames = async (thumb) => {
+  const hfBase = getHyperframesPath();
+  if (!hfBase || !thumb || !thumb.headline) return null;
+  try {
+    const palette = String(thumb.palette || thumb.background || '#0a0a0a').slice(0, 32);
+    // Pick an accent color — prefer thumb.accent, fall back to a neon pink that pops on dark.
+    const accent = String(thumb.accent || '#ff3366').slice(0, 32);
+    const subhead = String(thumb.subject || thumb.handle || '').slice(0, 60);
+    const res = await fetch(hfBase.replace(/\/$/, '') + '/thumbnail', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        headline: String(thumb.headline).slice(0, 60),
+        subhead, palette, accent
+      })
+    });
+    if (!res.ok) {
+      console.warn('[zs] hyperframes thumbnail HTTP', res.status);
+      return null;
+    }
+    const blob = await res.blob();
+    return blob && blob.size > 0 ? blob : null;
+  } catch (e) {
+    console.warn('[zs] hyperframes thumbnail failed:', e);
+    return null;
+  }
+};
+
 // x111c: Run silero-vad on the upload audio (via audio-ai sidecar) to get
 // speech-presence intervals. snapClipBoundaries uses these to trim leading/
 // trailing dead air after the sentence-end snap. Returns [] on failure.
@@ -8367,10 +8399,15 @@ function ShareMetadataModal({ meta, onClose, toast }){
     if(!thumb){ toast("No thumbnail brief in this bundle — regenerate metadata", "warn"); return; }
     setThumbBusy(true);
     try {
-      const blob = await renderThumbnailFromBrief(thumb);
+      // x114b: try HyperFrames satori first when configured — server-side SVG
+      // → PNG with crisp text in 1-2s. Falls through to the Pollinations +
+      // canvas-overlay path when hyperframes is disabled or unreachable.
+      let blob = await renderThumbnailViaHyperFrames(thumb);
+      let viaHF = !!blob;
+      if(!blob) blob = await renderThumbnailFromBrief(thumb);
       const url = URL.createObjectURL(blob);
       setThumbUrl(url);
-      toast("Thumbnail rendered — click to download", "success");
+      toast(viaHF ? "Thumbnail rendered (HyperFrames) — click to download" : "Thumbnail rendered — click to download", "success");
     } catch(e){
       toast("Thumbnail render failed: " + (e.message || "unknown"), "error");
     } finally {
