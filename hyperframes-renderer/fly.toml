@@ -1,0 +1,36 @@
+# fly.toml — HyperFrames render service
+#
+# Deploy:  fly launch  (first time)  OR  fly deploy
+# Logs:    fly logs
+# Shell:   fly ssh console
+#
+# Sized for the typical render: a single 1080x1920 H.264 MP4 ~10-30s long.
+# Headless Chrome plus ffmpeg encoding wants ~1.5 GB during render; we
+# size at 2 GB to leave headroom for hyperframes' parallel workers.
+
+app = "zaidsaid-hf-renderer"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8788"
+  HF_CORS_ORIGIN = "https://zaidsaid.com"
+
+[http_service]
+  internal_port = 8788
+  force_https = true
+  auto_stop_machines = "stop"     # idle machines shut down → no per-minute cost when no traffic
+  auto_start_machines = true      # incoming request boots a stopped machine
+  min_machines_running = 0        # zero baseline cost
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 2                # one render per machine; spawn another at 2+ in flight
+    hard_limit = 4
+
+[[vm]]
+  size = "shared-cpu-2x"          # 2 shared vCPU
+  memory = "4gb"                  # headless Chrome + ffmpeg encoding need ~1.5-2 GB during render
