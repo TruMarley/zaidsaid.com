@@ -202,11 +202,11 @@ try {
     stability:    { proxyUrl: _ZS_WORKER + "/stability",    enabled: true },
     pollinations: { proxyUrl: _ZS_WORKER + "/pollinations", enabled: true },
     grok:         { proxyUrl: _ZS_WORKER + "/grok",         enabled: true },
-    // x110b: HyperFrames render service. Off by default — enable in Settings →
-    // Providers once a HYPERFRAMES_URL secret is set on the worker (or override
-    // proxyUrl with a self-hosted renderer). When enabled, Share/Export pipes
+    // x110b: HyperFrames render service. On by default (x116) — the HyperFrames
+    // Studio playground tab is the main entry point. Disable in Settings →
+    // Providers if the renderer is not deployed. Share/Export also pipes
     // the finished clip through the styling sidecar (title + captions + lower-third).
-    hyperframes:  { proxyUrl: _ZS_WORKER + "/hyperframes",  enabled: false },
+    hyperframes:  { proxyUrl: _ZS_WORKER + "/hyperframes",  enabled: true },
     // x111: open-source audio AI sidecar. Off by default — enable once
     // AUDIO_AI_URL is set on the worker. Wraps WhisperX, silero-vad, demucs,
     // pyannote, auto-editor, captacity. Replaces ElevenLabs Scribe and adds
@@ -226,6 +226,15 @@ try {
   let _zsChanged = false;
   for (const [_k, _v] of Object.entries(_zsDefaults)) {
     if (!_zsPrev[_k] || !_zsPrev[_k].proxyUrl) { _zsPrev[_k] = _v; _zsChanged = true; }
+  }
+  // x116: flip hyperframes to enabled:true for existing installs that had the
+  // old disabled default. Only flip once — if the user has explicitly changed
+  // enabled to false themselves we leave it alone (we can't distinguish, so we
+  // check proxyUrl still matches the worker default as a proxy signal).
+  if (_zsPrev.hyperframes && _zsPrev.hyperframes.enabled === false &&
+      (_zsPrev.hyperframes.proxyUrl || '').includes('/hyperframes')) {
+    _zsPrev.hyperframes = { ..._zsPrev.hyperframes, enabled: true };
+    _zsChanged = true;
   }
   if (_zsChanged) localStorage.setItem("zaidsaid.v2.providers", JSON.stringify(_zsPrev));
 } catch(e){}
@@ -272,6 +281,7 @@ const I = {
   layers: (p)=> <svg viewBox="0 0 24 24" width={p?.size||14} height={p?.size||14} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M12 3 2 8l10 5 10-5-10-5Z"/><path d="M2 13l10 5 10-5"/><path d="M2 18l10 5 10-5"/></svg>,
   eye: (p)=> <svg viewBox="0 0 24 24" width={p?.size||14} height={p?.size||14} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>,
   pause: (p)=> <svg viewBox="0 0 24 24" width={p?.size||14} height={p?.size||14} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>,
+  film: (p)=> <svg viewBox="0 0 24 24" width={p?.size||18} height={p?.size||18} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M7 4v16M17 4v16M2 9h5M17 9h5M2 15h5M17 15h5"/></svg>,
 
 };
 
@@ -636,6 +646,7 @@ const TABS = [
   { id:"home", label:"Home", icon:"home" },
   { id:"studio", label:"Studio", icon:"studio" },
   { id:"repurpose", label:"Repurpose", icon:"scissors" },
+  { id:"hyperframes", label:"HyperFrames", icon:"film" },
   { id:"avatars", label:"Avatars & Voices", icon:"avatar", godOnly:true },
   { id:"brands", label:"Brand Kits", icon:"brand", godOnly:true },
   { id:"templates", label:"Templates", icon:"template", godOnly:true },
@@ -9054,6 +9065,587 @@ function AvatarEditor({ open, avatar, onClose, onSave }){
   );
 }
 
+// x116: HyperFrames Studio — manual playground tab.
+// Exposes the hyperframes-renderer /render + /thumbnail endpoints and all
+// sidecar tools (audio-ai, vision-ai, tts) in a single workbench UI.
+// Health pings on mount; tool results shown inline; errors surfaced honestly.
+function HyperFramesTab() {
+  // ── provider paths ──────────────────────────────────────────────────────
+  const hfBase     = getHyperframesPath();
+  const audioBase  = getAudioAiPath();
+  const visionBase = getVisionAiPath();
+  const ttsBase    = getTtsPath();
+
+  // ── health pings ─────────────────────────────────────────────────────────
+  const [pings, setPings] = React.useState({ hf: null, audio: null, vision: null, tts: null });
+  React.useEffect(() => {
+    const ping = async (base, key) => {
+      if (!base) { setPings(p => ({ ...p, [key]: false })); return; }
+      try {
+        const r = await fetch(base.replace(/\/$/, '') + '/ping', { signal: AbortSignal.timeout(6000) });
+        setPings(p => ({ ...p, [key]: r.ok }));
+      } catch { setPings(p => ({ ...p, [key]: false })); }
+    };
+    ping(hfBase,    'hf');
+    ping(audioBase, 'audio');
+    ping(visionBase,'vision');
+    ping(ttsBase,   'tts');
+  }, [hfBase, audioBase, visionBase, ttsBase]);
+
+  // ── input state ──────────────────────────────────────────────────────────
+  const [clipUrl,   setClipUrl]   = React.useState('');
+  const [clipFile,  setClipFile]  = React.useState(null);
+  const [clipObjUrl, setClipObjUrl] = React.useState('');
+  const [transcriptWords, setTranscriptWords] = React.useState('');
+  const [title,     setTitle]     = React.useState('');
+  const [handle,    setHandle]    = React.useState('@zaidsaid');
+  const [style,     setStyle]     = React.useState('clip-9x16');
+  const [aspectRatio, setAspectRatio] = React.useState('9:16');
+  const [brandColor, setBrandColor] = React.useState('#ff3366');
+
+  // ── output state ─────────────────────────────────────────────────────────
+  const [renderedBlob,   setRenderedBlob]   = React.useState(null);
+  const [renderedUrl,    setRenderedUrl]    = React.useState('');
+  const [thumbBlob,      setThumbBlob]      = React.useState(null);
+  const [thumbUrl,       setThumbUrl]       = React.useState('');
+  const [renderBusy,     setRenderBusy]     = React.useState(false);
+  const [thumbBusy,      setThumbBusy]      = React.useState(false);
+  const [renderErr,      setRenderErr]      = React.useState('');
+  const [thumbErr,       setThumbErr]       = React.useState('');
+
+  // ── tools state ──────────────────────────────────────────────────────────
+  const [toolFile,       setToolFile]       = React.useState(null);
+  const [toolImageFile,  setToolImageFile]  = React.useState(null);
+  const [toolRefAudio,   setToolRefAudio]   = React.useState(null);
+  const [ttsScript,      setTtsScript]      = React.useState('');
+  const [voicesList,     setVoicesList]     = React.useState(null);
+  const [selectedVoice,  setSelectedVoice]  = React.useState('');
+  const [toolResults,    setToolResults]    = React.useState({}); // key → { busy, result, err, blobUrl }
+
+  const setTR = (key, patch) => setToolResults(prev => ({ ...prev, [key]: { ...(prev[key]||{}), ...patch } }));
+
+  // ── file handling ─────────────────────────────────────────────────────────
+  const onClipFile = (e) => {
+    const f = e.target.files && e.target.files[0];
+    if (!f) return;
+    if (clipObjUrl) URL.revokeObjectURL(clipObjUrl);
+    const url = URL.createObjectURL(f);
+    setClipFile(f);
+    setClipObjUrl(url);
+    setClipUrl('');
+  };
+
+  // ── auto-transcribe via audio-ai ──────────────────────────────────────────
+  const onAutoTranscribe = async () => {
+    const blob = clipFile;
+    if (!blob) { setRenderErr('Load a clip file first to auto-transcribe.'); return; }
+    if (!audioBase) { setRenderErr('audio-ai provider not configured — add URL in Settings.'); return; }
+    setRenderBusy(true); setRenderErr('');
+    try {
+      const form = new FormData();
+      form.append('file', blob, blob.name || 'clip.mp4');
+      form.append('language', 'en');
+      const r = await fetch(audioBase.replace(/\/$/, '') + '/transcribe', { method: 'POST', body: form });
+      if (!r.ok) throw new Error('audio-ai /transcribe HTTP ' + r.status);
+      const data = await r.json();
+      const words = Array.isArray(data.words) ? data.words : [];
+      setTranscriptWords(JSON.stringify(words, null, 2));
+    } catch (e) {
+      setRenderErr('Auto-transcribe failed: ' + e.message);
+    } finally {
+      setRenderBusy(false);
+    }
+  };
+
+  // ── /render call ─────────────────────────────────────────────────────────
+  const onRender = async () => {
+    if (!hfBase) return;
+    const sourceUrl = clipUrl.trim();
+    const sourceBlob = clipFile;
+    if (!sourceUrl && !sourceBlob) { setRenderErr('Provide a clip URL or upload a file.'); return; }
+    setRenderBusy(true); setRenderErr(''); setRenderedBlob(null); setRenderedUrl('');
+    try {
+      let word_timings = [];
+      try { word_timings = JSON.parse(transcriptWords || '[]'); } catch { word_timings = []; }
+      let payload = {
+        duration: 30,
+        title: title || 'Untitled',
+        handle: handle || '@zaidsaid',
+        word_timings: Array.isArray(word_timings) ? word_timings : [],
+        style,
+      };
+      if (sourceBlob) {
+        const b64 = await new Promise((res, rej) => {
+          const fr = new FileReader();
+          fr.onload = () => { const r = String(fr.result||''); const i = r.indexOf(','); res(i>=0?r.slice(i+1):r); };
+          fr.onerror = () => rej(fr.error);
+          fr.readAsDataURL(sourceBlob);
+        });
+        // detect duration from blob via <video>
+        const dur = await new Promise(res => {
+          const v = document.createElement('video');
+          v.preload = 'metadata';
+          v.onloadedmetadata = () => res(v.duration || 30);
+          v.onerror = () => res(30);
+          v.src = clipObjUrl || URL.createObjectURL(sourceBlob);
+        });
+        payload.clip_b64 = b64;
+        payload.duration = dur;
+      } else {
+        payload.clip_url = sourceUrl;
+      }
+      const r = await fetch(hfBase.replace(/\/$/, '') + '/render', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!r.ok) {
+        const detail = await r.text().catch(() => '');
+        throw new Error('HTTP ' + r.status + ' — ' + detail.slice(0, 200));
+      }
+      const blob = await r.blob();
+      if (!blob || blob.size === 0) throw new Error('Renderer returned empty file');
+      if (renderedUrl) URL.revokeObjectURL(renderedUrl);
+      const url = URL.createObjectURL(blob);
+      setRenderedBlob(blob);
+      setRenderedUrl(url);
+    } catch (e) {
+      setRenderErr('Render failed: ' + e.message);
+    } finally {
+      setRenderBusy(false);
+    }
+  };
+
+  // ── /thumbnail call ───────────────────────────────────────────────────────
+  const onThumb = async () => {
+    if (!hfBase) return;
+    setThumbBusy(true); setThumbErr(''); setThumbBlob(null); setThumbUrl('');
+    try {
+      const r = await fetch(hfBase.replace(/\/$/, '') + '/thumbnail', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ headline: title || 'Untitled', subhead: handle || '@zaidsaid', palette: '#0a0a0a', accent: brandColor }),
+      });
+      if (!r.ok) {
+        const d = await r.text().catch(() => '');
+        throw new Error('HTTP ' + r.status + ' — ' + d.slice(0,200));
+      }
+      const blob = await r.blob();
+      if (!blob || blob.size === 0) throw new Error('Empty thumbnail response');
+      if (thumbUrl) URL.revokeObjectURL(thumbUrl);
+      const url = URL.createObjectURL(blob);
+      setThumbBlob(blob);
+      setThumbUrl(url);
+    } catch (e) {
+      setThumbErr('Thumbnail failed: ' + e.message);
+    } finally {
+      setThumbBusy(false);
+    }
+  };
+
+  // ── tool: transcribe ─────────────────────────────────────────────────────
+  const onToolTranscribe = async () => {
+    if (!audioBase) { setTR('transcribe', { err: 'audio-ai not configured — add URL in Settings.' }); return; }
+    if (!toolFile) { setTR('transcribe', { err: 'Upload an audio/video file first.' }); return; }
+    setTR('transcribe', { busy: true, result: null, err: '', blobUrl: '' });
+    try {
+      const form = new FormData();
+      form.append('file', toolFile, toolFile.name);
+      form.append('language', 'en');
+      const r = await fetch(audioBase.replace(/\/$/, '') + '/transcribe', { method: 'POST', body: form });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const data = await r.json();
+      setTR('transcribe', { busy: false, result: JSON.stringify(data, null, 2) });
+    } catch (e) {
+      setTR('transcribe', { busy: false, err: e.message });
+    }
+  };
+
+  // ── tool: captions ───────────────────────────────────────────────────────
+  const onToolCaptions = async () => {
+    if (!audioBase) { setTR('captions', { err: 'audio-ai not configured.' }); return; }
+    if (!toolFile) { setTR('captions', { err: 'Upload a video file first.' }); return; }
+    let word_timings = [];
+    try { word_timings = JSON.parse(transcriptWords || '[]'); } catch { word_timings = []; }
+    if (!word_timings.length) { setTR('captions', { err: 'Paste transcript words or auto-transcribe first.' }); return; }
+    setTR('captions', { busy: true, result: null, err: '', blobUrl: '' });
+    try {
+      const form = new FormData();
+      form.append('file', toolFile, toolFile.name);
+      form.append('words', JSON.stringify(word_timings));
+      form.append('style', 'bold');
+      const r = await fetch(audioBase.replace(/\/$/, '') + '/captions', { method: 'POST', body: form });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const blob = await r.blob();
+      if (!blob || blob.size === 0) throw new Error('Empty response');
+      const url = URL.createObjectURL(blob);
+      setTR('captions', { busy: false, blobUrl: url, result: 'Caption burn-in complete (' + (blob.size/1024).toFixed(0) + ' KB)' });
+    } catch (e) {
+      setTR('captions', { busy: false, err: e.message });
+    }
+  };
+
+  // ── tool: stems split ────────────────────────────────────────────────────
+  const onToolStems = async () => {
+    if (!audioBase) { setTR('stems', { err: 'audio-ai not configured.' }); return; }
+    if (!toolFile) { setTR('stems', { err: 'Upload an audio/video file first.' }); return; }
+    setTR('stems', { busy: true, result: null, err: '', blobUrl: '' });
+    try {
+      const form = new FormData();
+      form.append('file', toolFile, toolFile.name);
+      form.append('stems', 'vocals');
+      const r = await fetch(audioBase.replace(/\/$/, '') + '/separate', { method: 'POST', body: form });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const blob = await r.blob();
+      if (!blob || blob.size === 0) throw new Error('Empty response');
+      const url = URL.createObjectURL(blob);
+      setTR('stems', { busy: false, blobUrl: url, result: 'Vocals stem ready (' + (blob.size/1024).toFixed(0) + ' KB)' });
+    } catch (e) {
+      setTR('stems', { busy: false, err: e.message });
+    }
+  };
+
+  // ── tool: subject cutout (vision-ai /segment) ─────────────────────────────
+  const onToolSegment = async () => {
+    if (!visionBase) { setTR('segment', { err: 'vision-ai not configured — add URL in Settings.' }); return; }
+    if (!toolImageFile) { setTR('segment', { err: 'Upload an image first.' }); return; }
+    setTR('segment', { busy: true, result: null, err: '', blobUrl: '' });
+    try {
+      const form = new FormData();
+      form.append('file', toolImageFile, toolImageFile.name);
+      const r = await fetch(visionBase.replace(/\/$/, '') + '/segment', { method: 'POST', body: form });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const blob = await r.blob();
+      if (!blob || blob.size === 0) throw new Error('Empty response');
+      const url = URL.createObjectURL(blob);
+      setTR('segment', { busy: false, blobUrl: url, result: 'Mask ready (' + (blob.size/1024).toFixed(0) + ' KB)' });
+    } catch (e) {
+      setTR('segment', { busy: false, err: e.message });
+    }
+  };
+
+  // ── tool: voices list ────────────────────────────────────────────────────
+  const onToolVoices = async () => {
+    if (!ttsBase) { setTR('voices', { err: 'tts not configured — add URL in Settings.' }); return; }
+    setTR('voices', { busy: true, result: null, err: '' });
+    try {
+      const r = await fetch(ttsBase.replace(/\/$/, '') + '/voices');
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const data = await r.json();
+      const voices = Array.isArray(data.voices) ? data.voices : Array.isArray(data) ? data : [];
+      setVoicesList(voices);
+      if (!selectedVoice && voices.length) setSelectedVoice(voices[0].id || voices[0].name || voices[0]);
+      setTR('voices', { busy: false, result: voices.length + ' voices loaded' });
+    } catch (e) {
+      setTR('voices', { busy: false, err: e.message });
+    }
+  };
+
+  // ── tool: voice clone ─────────────────────────────────────────────────────
+  const onToolVoiceClone = async () => {
+    if (!ttsBase) { setTR('clone', { err: 'tts not configured.' }); return; }
+    if (!toolRefAudio) { setTR('clone', { err: 'Upload a reference audio file first.' }); return; }
+    if (!ttsScript.trim()) { setTR('clone', { err: 'Enter a script to synthesize.' }); return; }
+    setTR('clone', { busy: true, result: null, err: '', blobUrl: '' });
+    try {
+      const form = new FormData();
+      form.append('file', toolRefAudio, toolRefAudio.name);
+      form.append('text', ttsScript.trim());
+      const r = await fetch(ttsBase.replace(/\/$/, '') + '/clone', { method: 'POST', body: form });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const blob = await r.blob();
+      if (!blob || blob.size === 0) throw new Error('Empty response');
+      const url = URL.createObjectURL(blob);
+      setTR('clone', { busy: false, blobUrl: url, result: 'Cloned voice ready (' + (blob.size/1024).toFixed(0) + ' KB)' });
+    } catch (e) {
+      setTR('clone', { busy: false, err: e.message });
+    }
+  };
+
+  // ── render helpers ────────────────────────────────────────────────────────
+  const PingDot = ({ ok }) => (
+    React.createElement('span', {
+      title: ok == null ? 'checking…' : ok ? 'online' : 'offline / not configured',
+      style: { display:'inline-block', width:10, height:10, borderRadius:'50%', marginRight:4,
+               background: ok == null ? '#888' : ok ? '#22c55e' : '#ef4444' }
+    })
+  );
+
+  const ToolSection = ({ title, children }) => (
+    React.createElement('div', { style: { marginBottom:16, padding:'10px 12px', background:'rgba(255,255,255,0.03)', borderRadius:8, border:'1px solid rgba(255,255,255,0.07)' } },
+      React.createElement('div', { style: { fontWeight:600, fontSize:12, textTransform:'uppercase', letterSpacing:'0.06em', color:'var(--muted)', marginBottom:8 } }, title),
+      children
+    )
+  );
+
+  const TR = (key) => toolResults[key] || {};
+  const ErrBanner = ({ msg }) => msg ? React.createElement('div', { style:{ background:'rgba(239,68,68,0.12)', border:'1px solid rgba(239,68,68,0.3)', color:'#fca5a5', borderRadius:6, padding:'6px 10px', fontSize:12, marginTop:8 } }, msg) : null;
+  const OkBanner  = ({ msg }) => msg ? React.createElement('div', { style:{ background:'rgba(34,197,94,0.1)', border:'1px solid rgba(34,197,94,0.25)', color:'#86efac', borderRadius:6, padding:'6px 10px', fontSize:12, marginTop:8 } }, msg) : null;
+
+  const missingBanner = (label) => React.createElement('div', { style:{ color:'#fbbf24', fontSize:12, marginTop:6 } }, label + ' URL not configured — add it in Settings → Providers.');
+
+  return (
+    React.createElement('div', { style: { padding:'20px 24px', maxWidth:1400, margin:'0 auto' } },
+      /* ── page header ── */
+      React.createElement('div', { style:{ display:'flex', alignItems:'center', gap:12, marginBottom:20 } },
+        React.createElement('h1', { style:{ fontSize:22, fontWeight:700, margin:0 } }, 'HyperFrames Studio'),
+        React.createElement('span', { style:{ fontSize:12, color:'var(--muted)' } }, 'Manual renderer playground')
+      ),
+
+      /* ── health strip ── */
+      React.createElement('div', { style:{ display:'flex', gap:20, flexWrap:'wrap', marginBottom:20, padding:'8px 14px', background:'rgba(255,255,255,0.03)', borderRadius:8, border:'1px solid rgba(255,255,255,0.06)', fontSize:12 } },
+        React.createElement('span', null, PingDot({ok:pings.hf}),     'Renderer'),
+        React.createElement('span', null, PingDot({ok:pings.audio}),  'audio-ai'),
+        React.createElement('span', null, PingDot({ok:pings.vision}), 'vision-ai'),
+        React.createElement('span', null, PingDot({ok:pings.tts}),    'tts'),
+      ),
+
+      !hfBase && React.createElement('div', { style:{ background:'rgba(251,191,36,0.12)', border:'1px solid rgba(251,191,36,0.3)', color:'#fde68a', borderRadius:8, padding:'10px 14px', marginBottom:16, fontSize:13 } },
+        'HyperFrames renderer is disabled — enable it in Settings → Providers to use the Render and Thumbnail buttons.'
+      ),
+
+      /* ── three-column layout ── */
+      React.createElement('div', { style:{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:20, alignItems:'start' } },
+
+        /* ── LEFT: inputs ── */
+        React.createElement('div', { className:'card', style:{ padding:20 } },
+          React.createElement('h2', { style:{ fontSize:14, fontWeight:700, marginBottom:14 } }, 'Input'),
+
+          React.createElement('div', { style:{ marginBottom:14 } },
+            React.createElement('label', { style:{ fontSize:12, color:'var(--muted)', display:'block', marginBottom:4 } }, 'Clip URL (public MP4)'),
+            React.createElement('input', {
+              type:'url', placeholder:'https://…/clip.mp4',
+              value: clipUrl,
+              onChange: e => { setClipUrl(e.target.value); setClipFile(null); if(clipObjUrl) URL.revokeObjectURL(clipObjUrl); setClipObjUrl(''); },
+              style:{ width:'100%', boxSizing:'border-box', padding:'6px 8px', borderRadius:6, border:'1px solid rgba(255,255,255,0.12)', background:'rgba(0,0,0,0.25)', color:'inherit', fontSize:13 }
+            })
+          ),
+
+          React.createElement('div', { style:{ marginBottom:14 } },
+            React.createElement('label', { style:{ fontSize:12, color:'var(--muted)', display:'block', marginBottom:4 } }, 'Or upload clip (MP4)'),
+            React.createElement('input', { type:'file', accept:'video/mp4,video/*', onChange: onClipFile }),
+            clipObjUrl && React.createElement('video', { src: clipObjUrl, controls: true, muted: true, style:{ width:'100%', borderRadius:6, marginTop:8, maxHeight:160, objectFit:'contain', background:'#000' } })
+          ),
+
+          React.createElement('div', { style:{ marginBottom:14 } },
+            React.createElement('label', { style:{ fontSize:12, color:'var(--muted)', display:'block', marginBottom:4 } }, 'Title'),
+            React.createElement('input', { type:'text', placeholder:'Hook copy…', value: title, onChange: e => setTitle(e.target.value), style:{ width:'100%', boxSizing:'border-box', padding:'6px 8px', borderRadius:6, border:'1px solid rgba(255,255,255,0.12)', background:'rgba(0,0,0,0.25)', color:'inherit', fontSize:13 } })
+          ),
+
+          React.createElement('div', { style:{ marginBottom:14 } },
+            React.createElement('label', { style:{ fontSize:12, color:'var(--muted)', display:'block', marginBottom:4 } }, 'Handle'),
+            React.createElement('input', { type:'text', placeholder:'@zaidsaid', value: handle, onChange: e => setHandle(e.target.value), style:{ width:'100%', boxSizing:'border-box', padding:'6px 8px', borderRadius:6, border:'1px solid rgba(255,255,255,0.12)', background:'rgba(0,0,0,0.25)', color:'inherit', fontSize:13 } })
+          ),
+
+          React.createElement('div', { style:{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:14 } },
+            React.createElement('div', null,
+              React.createElement('label', { style:{ fontSize:12, color:'var(--muted)', display:'block', marginBottom:4 } }, 'Style'),
+              React.createElement('select', { value: style, onChange: e => setStyle(e.target.value), style:{ width:'100%', padding:'6px 8px', borderRadius:6, border:'1px solid rgba(255,255,255,0.12)', background:'rgba(0,0,0,0.25)', color:'inherit', fontSize:13 } },
+                React.createElement('option', { value:'clip-9x16' }, 'clip-9x16 (default)'),
+              )
+            ),
+            React.createElement('div', null,
+              React.createElement('label', { style:{ fontSize:12, color:'var(--muted)', display:'block', marginBottom:4 } }, 'Accent color'),
+              React.createElement('input', { type:'color', value: brandColor, onChange: e => setBrandColor(e.target.value), style:{ width:'100%', height:36, borderRadius:6, border:'1px solid rgba(255,255,255,0.12)', background:'rgba(0,0,0,0.25)', cursor:'pointer' } })
+            )
+          ),
+
+          React.createElement('div', { style:{ marginBottom:14 } },
+            React.createElement('label', { style:{ fontSize:12, color:'var(--muted)', display:'block', marginBottom:4 } }, 'Transcript words (JSON word_timings)'),
+            React.createElement('textarea', {
+              placeholder:'[{"text":"Hello","start":0.1,"end":0.4}, …] or click Auto-transcribe',
+              value: transcriptWords,
+              onChange: e => setTranscriptWords(e.target.value),
+              rows: 4,
+              style:{ width:'100%', boxSizing:'border-box', padding:'6px 8px', borderRadius:6, border:'1px solid rgba(255,255,255,0.12)', background:'rgba(0,0,0,0.25)', color:'inherit', fontSize:11, fontFamily:'monospace', resize:'vertical' }
+            }),
+            React.createElement('button', { className:'btn btn-ghost', style:{ marginTop:6, fontSize:12 }, onClick: onAutoTranscribe, disabled: !audioBase || renderBusy },
+              renderBusy ? 'Transcribing…' : 'Auto-transcribe via audio-ai'
+            ),
+            !audioBase && missingBanner('audio-ai')
+          ),
+        ),
+
+        /* ── CENTER: outputs ── */
+        React.createElement('div', { className:'card', style:{ padding:20 } },
+          React.createElement('h2', { style:{ fontSize:14, fontWeight:700, marginBottom:14 } }, 'Output'),
+
+          React.createElement('div', { style:{ display:'flex', gap:8, marginBottom:16, flexWrap:'wrap' } },
+            React.createElement('button', {
+              className:'btn btn-primary',
+              onClick: onRender,
+              disabled: renderBusy || !hfBase,
+              style: !hfBase ? { opacity:0.4 } : {}
+            }, renderBusy ? 'Rendering…' : 'Render video'),
+            React.createElement('button', {
+              className:'btn',
+              onClick: onThumb,
+              disabled: thumbBusy || !hfBase,
+              style: !hfBase ? { opacity:0.4 } : {}
+            }, thumbBusy ? 'Generating…' : 'Generate thumbnail'),
+          ),
+
+          renderErr && React.createElement(ErrBanner, { msg: renderErr }),
+          thumbErr  && React.createElement(ErrBanner, { msg: thumbErr }),
+
+          renderedUrl && React.createElement('div', { style:{ marginBottom:16 } },
+            React.createElement('div', { style:{ fontSize:12, color:'var(--muted)', marginBottom:4 } }, 'Rendered video'),
+            React.createElement('video', { src: renderedUrl, controls: true, style:{ width:'100%', borderRadius:6, background:'#000', maxHeight:280 } }),
+            React.createElement('a', {
+              href: renderedUrl,
+              download: 'hyperframes-render.mp4',
+              className:'btn btn-ghost',
+              style:{ marginTop:6, fontSize:12, display:'inline-block' }
+            }, 'Download MP4')
+          ),
+
+          thumbUrl && React.createElement('div', null,
+            React.createElement('div', { style:{ fontSize:12, color:'var(--muted)', marginBottom:4 } }, 'Thumbnail'),
+            React.createElement('img', { src: thumbUrl, alt:'thumbnail', style:{ width:'100%', borderRadius:6, objectFit:'contain', maxHeight:240 } }),
+            React.createElement('a', {
+              href: thumbUrl,
+              download: 'hyperframes-thumb.png',
+              className:'btn btn-ghost',
+              style:{ marginTop:6, fontSize:12, display:'inline-block' }
+            }, 'Download PNG')
+          ),
+        ),
+
+        /* ── RIGHT: sidecar tools tray ── */
+        React.createElement('div', null,
+
+          ToolSection({ title: 'Tools', children:
+            React.createElement('div', { style:{ fontSize:11, color:'var(--muted)' } }, 'Upload a file below to use the audio-ai, vision-ai, and tts tools.')
+          }),
+
+          /* shared file inputs */
+          ToolSection({ title: 'File inputs', children:
+            React.createElement('div', null,
+              React.createElement('div', { style:{ marginBottom:8 } },
+                React.createElement('label', { style:{ fontSize:12, color:'var(--muted)', display:'block', marginBottom:3 } }, 'Audio/video file (audio-ai tools)'),
+                React.createElement('input', { type:'file', accept:'audio/*,video/*', onChange: e => setToolFile(e.target.files && e.target.files[0]) })
+              ),
+              React.createElement('div', { style:{ marginBottom:8 } },
+                React.createElement('label', { style:{ fontSize:12, color:'var(--muted)', display:'block', marginBottom:3 } }, 'Image file (vision-ai tools)'),
+                React.createElement('input', { type:'file', accept:'image/*', onChange: e => setToolImageFile(e.target.files && e.target.files[0]) })
+              ),
+              React.createElement('div', null,
+                React.createElement('label', { style:{ fontSize:12, color:'var(--muted)', display:'block', marginBottom:3 } }, 'Reference audio (voice clone)'),
+                React.createElement('input', { type:'file', accept:'audio/*', onChange: e => setToolRefAudio(e.target.files && e.target.files[0]) })
+              )
+            )
+          }),
+
+          /* transcribe */
+          ToolSection({ title: 'Transcribe (audio-ai)', children:
+            React.createElement('div', null,
+              !audioBase && missingBanner('audio-ai'),
+              React.createElement('button', { className:'btn', style:{ fontSize:12, width:'100%' }, disabled: !audioBase || TR('transcribe').busy, onClick: onToolTranscribe },
+                TR('transcribe').busy ? 'Transcribing…' : 'POST /transcribe'
+              ),
+              ErrBanner({ msg: TR('transcribe').err }),
+              OkBanner({ msg: TR('transcribe').result && !TR('transcribe').blobUrl ? 'Transcript received' : null }),
+              TR('transcribe').result && React.createElement('details', { style:{ marginTop:8 } },
+                React.createElement('summary', { style:{ fontSize:11, cursor:'pointer', color:'var(--muted)' } }, 'Transcript JSON'),
+                React.createElement('pre', { style:{ fontSize:10, overflow:'auto', maxHeight:140, marginTop:6, background:'rgba(0,0,0,0.3)', padding:8, borderRadius:6 } }, TR('transcribe').result)
+              )
+            )
+          }),
+
+          /* captions burn-in */
+          ToolSection({ title: 'Captions burn-in (audio-ai)', children:
+            React.createElement('div', null,
+              !audioBase && missingBanner('audio-ai'),
+              React.createElement('button', { className:'btn', style:{ fontSize:12, width:'100%' }, disabled: !audioBase || TR('captions').busy, onClick: onToolCaptions },
+                TR('captions').busy ? 'Processing…' : 'POST /captions'
+              ),
+              ErrBanner({ msg: TR('captions').err }),
+              OkBanner({ msg: TR('captions').result }),
+              TR('captions').blobUrl && React.createElement('a', { href: TR('captions').blobUrl, download:'captions.mp4', className:'btn btn-ghost', style:{ marginTop:6, fontSize:11, display:'inline-block' } }, 'Download MP4')
+            )
+          }),
+
+          /* stems split */
+          ToolSection({ title: 'Stems split (audio-ai)', children:
+            React.createElement('div', null,
+              !audioBase && missingBanner('audio-ai'),
+              React.createElement('button', { className:'btn', style:{ fontSize:12, width:'100%' }, disabled: !audioBase || TR('stems').busy, onClick: onToolStems },
+                TR('stems').busy ? 'Separating…' : 'POST /separate (vocals)'
+              ),
+              ErrBanner({ msg: TR('stems').err }),
+              OkBanner({ msg: TR('stems').result }),
+              TR('stems').blobUrl && React.createElement('a', { href: TR('stems').blobUrl, download:'vocals.wav', className:'btn btn-ghost', style:{ marginTop:6, fontSize:11, display:'inline-block' } }, 'Download vocals WAV')
+            )
+          }),
+
+          /* subject cutout */
+          ToolSection({ title: 'Subject cutout (vision-ai)', children:
+            React.createElement('div', null,
+              !visionBase && missingBanner('vision-ai'),
+              React.createElement('button', { className:'btn', style:{ fontSize:12, width:'100%' }, disabled: !visionBase || TR('segment').busy, onClick: onToolSegment },
+                TR('segment').busy ? 'Segmenting…' : 'POST /segment'
+              ),
+              ErrBanner({ msg: TR('segment').err }),
+              TR('segment').blobUrl && React.createElement('img', { src: TR('segment').blobUrl, alt:'mask', style:{ width:'100%', borderRadius:6, marginTop:8, maxHeight:140, objectFit:'contain' } }),
+              OkBanner({ msg: TR('segment').result })
+            )
+          }),
+
+          /* voices list */
+          ToolSection({ title: 'Voices list (tts)', children:
+            React.createElement('div', null,
+              !ttsBase && missingBanner('tts'),
+              React.createElement('button', { className:'btn', style:{ fontSize:12, width:'100%' }, disabled: !ttsBase || TR('voices').busy, onClick: onToolVoices },
+                TR('voices').busy ? 'Loading…' : 'GET /voices'
+              ),
+              ErrBanner({ msg: TR('voices').err }),
+              voicesList && voicesList.length > 0 && React.createElement('select', {
+                value: selectedVoice,
+                onChange: e => setSelectedVoice(e.target.value),
+                style:{ width:'100%', marginTop:8, padding:'6px 8px', borderRadius:6, border:'1px solid rgba(255,255,255,0.12)', background:'rgba(0,0,0,0.25)', color:'inherit', fontSize:12 }
+              }, voicesList.map((v, i) => {
+                const id = v.id || v.name || String(v);
+                return React.createElement('option', { key: i, value: id }, v.name || id);
+              }))
+            )
+          }),
+
+          /* voice clone */
+          ToolSection({ title: 'Voice clone (tts)', children:
+            React.createElement('div', null,
+              !ttsBase && missingBanner('tts'),
+              React.createElement('textarea', {
+                placeholder: 'Script to synthesize in the cloned voice…',
+                value: ttsScript,
+                onChange: e => setTtsScript(e.target.value),
+                rows: 3,
+                style:{ width:'100%', boxSizing:'border-box', padding:'6px 8px', borderRadius:6, border:'1px solid rgba(255,255,255,0.12)', background:'rgba(0,0,0,0.25)', color:'inherit', fontSize:12, resize:'vertical', marginBottom:6 }
+              }),
+              React.createElement('button', { className:'btn', style:{ fontSize:12, width:'100%' }, disabled: !ttsBase || TR('clone').busy, onClick: onToolVoiceClone },
+                TR('clone').busy ? 'Cloning…' : 'POST /clone'
+              ),
+              ErrBanner({ msg: TR('clone').err }),
+              OkBanner({ msg: TR('clone').result }),
+              TR('clone').blobUrl && React.createElement('audio', { src: TR('clone').blobUrl, controls: true, style:{ width:'100%', marginTop:8 } })
+            )
+          }),
+
+          /* VAD stub */
+          ToolSection({ title: 'VAD silence detect (audio-ai) — coming soon', children:
+            React.createElement('div', { style:{ fontSize:11, color:'var(--muted)' } }, 'POST /vad — wired, UI pending.  Will trim silence from uploads automatically.')
+          }),
+
+          /* track people stub */
+          ToolSection({ title: 'Track people (vision-ai) — coming soon', children:
+            React.createElement('div', { style:{ fontSize:11, color:'var(--muted)' } }, 'POST /track-people — wired in Repurpose toolbar chip. Dedicated UI pending.')
+          }),
+
+        ) /* end right column */
+      ) /* end 3-col grid */
+    ) /* end outer div */
+  );
+}
+
 function AvatarsTab(){
   const [avatars, setAvatars] = useLocalState("avatars", AVATAR_SEED);
   const [query, setQuery] = useState("");
@@ -10443,6 +11035,7 @@ function App(){
       case "home":         return <HomeTab setTab={setTab} startProject={startProject} />;
       case "studio":       return <StudioTab setTab={setTab} studioStep={studioStep} setStudioStep={setStudioStep} />;
       case "repurpose":    return <RepurposeTab/>;
+      case "hyperframes":  return <HyperFramesTab/>;
       case "avatars":      return <AvatarsTab/>;
       case "brands":       return <BrandsTab/>;
       case "templates":    return <TemplatesTab/>;
