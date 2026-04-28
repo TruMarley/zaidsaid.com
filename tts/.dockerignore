@@ -1,0 +1,10 @@
+.venv
+__pycache__
+*.pyc
+.uv-cache
+uv.lock
+*.onnx
+*.pt
+*.log
+.python-version
+.fly
