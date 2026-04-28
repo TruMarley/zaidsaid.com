@@ -29,6 +29,17 @@ const getHyperframesPath = () => {
     return String(hf.path || hf.proxyUrl || hf.url || "").trim();
   } catch(_) { return ""; }
 };
+// x111: audio-ai sidecar path (WhisperX / silero-vad / demucs / pyannote / auto-editor / captacity).
+// Returns "" when the provider is missing or disabled.
+const getAudioAiPath = () => {
+  try {
+    const a = safeGet("providers.cfg", {}) || {};
+    const b = safeGet("providers", {}) || {};
+    const ai = (a && a.audioAi) || (b && b.audioAi) || {};
+    if (ai.enabled === false) return "";
+    return String(ai.path || ai.proxyUrl || ai.url || "").trim();
+  } catch(_) { return ""; }
+};
 function useLocalState(key, initial){
   const [v, setV] = useState(() => safeGet(key, initial));
   useEffect(() => { safeSet(key, v); }, [key, v]);
@@ -176,6 +187,11 @@ try {
     // proxyUrl with a self-hosted renderer). When enabled, Share/Export pipes
     // the finished clip through the styling sidecar (title + captions + lower-third).
     hyperframes:  { proxyUrl: _ZS_WORKER + "/hyperframes",  enabled: false },
+    // x111: open-source audio AI sidecar. Off by default — enable once
+    // AUDIO_AI_URL is set on the worker. Wraps WhisperX, silero-vad, demucs,
+    // pyannote, auto-editor, captacity. Replaces ElevenLabs Scribe and adds
+    // diarization, speech-presence VAD, music separation, and silence trim.
+    audioAi:      { proxyUrl: _ZS_WORKER + "/audio",        enabled: false },
   };
   let _zsChanged = false;
   for (const [_k, _v] of Object.entries(_zsDefaults)) {

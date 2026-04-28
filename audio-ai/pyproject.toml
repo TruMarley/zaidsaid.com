@@ -1,0 +1,32 @@
+[project]
+name = "zaidsaid-audio-ai"
+version = "0.1.0"
+description = "Open-source audio AI sidecar for zaidsaid: transcription, diarization, separation, VAD, silence-trim, caption burn-in"
+requires-python = ">=3.11,<3.13"
+
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.32",
+  "python-multipart>=0.0.20",
+  "pydantic>=2.9",
+  # ffmpeg helpers
+  "ffmpeg-python>=0.2.0",
+  # Voice activity detection — tiny ONNX, always loaded
+  "silero-vad>=5.1",
+  "onnxruntime>=1.20",
+  # silero-vad relies on torchaudio's I/O backend; torchaudio 2.9+ needs torchcodec.
+  "torchcodec>=0.11",
+  # Silence trim — auto-editor
+  "auto-editor>=27",
+  # Heavy AI deps — lazy-imported. Listed here so `uv sync` warms the venv.
+  # Pin/upgrade individually as you onboard each route.
+  "faster-whisper>=1.1",                # /transcribe (default engine)
+  "whisperx>=3.3 ; sys_platform != 'darwin' or platform_machine != 'arm64'",  # /transcribe (with diarization)
+  "pyannote-audio>=3.3",                # /diarize
+  "demucs>=4.0",                        # /separate
+  "moviepy>=1.0",                       # composition helpers
+  "captacity>=0.2",                     # /captions burn-in
+]
+
+[tool.uv]
+package = false
