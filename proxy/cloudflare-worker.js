@@ -646,6 +646,10 @@ export default {
       } catch (err) {
         return new Response(JSON.stringify({ error: String((err && err.message) || err), disabled: false }), {
           status: 502, headers: { ...cors, "Content-Type": "application/json" }
+        });
+      }
+    }
+
     // Phase D — trending context routes
     if (url.pathname === "/trends/google") {
       const q = url.searchParams.get("q") || "";
@@ -785,6 +789,10 @@ export default {
       } catch (err) {
         return new Response(JSON.stringify({ error: String((err && err.message) || err), events: [] }), {
           status: 502, headers: { ...cors, "Content-Type": "application/json" }
+        });
+      }
+    }
+
     if (url.pathname === "/trends/reddit") {
       const q = url.searchParams.get("q") || "";
       if (!q) {
