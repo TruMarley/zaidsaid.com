@@ -50,6 +50,16 @@ const getVisionAiPath = () => {
     return String(v.path || v.proxyUrl || v.url || "").trim();
   } catch(_) { return ""; }
 };
+// x113: tts sidecar path (piper + Coqui XTTS-v2 voice cloning).
+const getTtsPath = () => {
+  try {
+    const a = safeGet("providers.cfg", {}) || {};
+    const b = safeGet("providers", {}) || {};
+    const t = (a && a.ttsOss) || (b && b.ttsOss) || {};
+    if (t.enabled === false) return "";
+    return String(t.path || t.proxyUrl || t.url || "").trim();
+  } catch(_) { return ""; }
+};
 function useLocalState(key, initial){
   const [v, setV] = useState(() => safeGet(key, initial));
   useEffect(() => { safeSet(key, v); }, [key, v]);
@@ -207,6 +217,11 @@ try {
     // smart-crop), multi-person tracking (YOLOv8), and semantic B-roll match
     // (OpenCLIP) once VISION_AI_URL is set on the worker.
     visionAi:     { proxyUrl: _ZS_WORKER + "/vision",       enabled: false },
+    // x113: open-source TTS sidecar — piper (fast multilingual, replaces EL
+    // cost line) + Coqui XTTS-v2 (voice cloning from a single reference
+    // clip). Studio's voice stage gets a third "tts-oss" pick alongside
+    // browser SpeechSynthesis and ElevenLabs once TTS_URL is set.
+    ttsOss:       { proxyUrl: _ZS_WORKER + "/tts",          enabled: false },
   };
   let _zsChanged = false;
   for (const [_k, _v] of Object.entries(_zsDefaults)) {
