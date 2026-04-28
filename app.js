@@ -2808,6 +2808,30 @@ const renderThumbnailViaHyperFrames = async (thumb) => {
   }
 };
 
+// x111d: Strip non-vocal audio (music, sfx) from a clip via demucs in the
+// audio-ai sidecar. Returns a Blob (mono WAV of the requested stem) on
+// success, null on failure. Use stems="vocals" for copyright-safe TikTok/
+// Shorts uploads where background music would trip detection. stems="other"
+// keeps music + sfx but removes dialog (rare use case but available).
+const separateAudioViaAudioAi = async (audioAiBase, blob, stems) => {
+  if (!audioAiBase || !blob) return null;
+  try {
+    const form = new FormData();
+    form.append('file', blob, 'in.mp4');
+    form.append('stems', String(stems || 'vocals'));
+    const res = await fetch(audioAiBase.replace(/\/$/, '') + '/separate', { method: 'POST', body: form });
+    if (!res.ok) {
+      console.warn('[zs] audio-ai separate HTTP', res.status);
+      return null;
+    }
+    const out = await res.blob();
+    return out && out.size > 0 ? out : null;
+  } catch (e) {
+    console.warn('[zs] audio-ai separate failed:', e);
+    return null;
+  }
+};
+
 // x111c: Run silero-vad on the upload audio (via audio-ai sidecar) to get
 // speech-presence intervals. snapClipBoundaries uses these to trim leading/
 // trailing dead air after the sentence-end snap. Returns [] on failure.
@@ -8293,6 +8317,20 @@ const removeClip = (clipId) => {
                 setProject(p => ({ ...p, clips: snapped }));
                 toast("Re-snapped " + changed + " clip" + (changed===1?'':'s') + " to complete thoughts", "success");
               }} disabled={!project.clips || project.clips.length===0}>Fix cuts</button>
+              {/* x111d: strip background music from the upload audio via demucs;
+                  download as vocals.wav for copyright-clean TikTok/Shorts uploads. */}
+              <button className="chip" onClick={async () => {
+                const aiBase = getAudioAiPath();
+                if(!aiBase){ toast("audio-ai not configured", "warn"); return; }
+                let srcBlob = null;
+                try { srcBlob = await idbGet(IDB_UPLOAD_KEY); } catch(_){}
+                if(!srcBlob){ toast("Upload a video first", "warn"); return; }
+                toast("Stripping music… (demucs ~5s/min on CPU)", "info");
+                const out = await separateAudioViaAudioAi(aiBase, srcBlob, "vocals");
+                if(!out){ toast("Music separation failed — see console", "error"); return; }
+                downloadBlob(out, (project.name || "upload").replace(/[^a-z0-9]+/gi,"-") + "-vocals.wav");
+                toast("Speech-only audio downloaded · " + Math.round(out.size / 1024) + " KB", "success");
+              }}>Strip music</button>
               <button className="chip" onClick={() => setPrecisionEnabled(v => !v)}>Precision pass {precisionEnabled ? "ON" : "OFF"}</button>
               <button className="chip" onClick={() => { setSmartCropEnabled(v => !v); smartCropCacheRef.current = {}; setCropPaths({}); }}>Smart crop {smartCropEnabled ? "ON" : "OFF"}</button>
               <button className="chip" onClick={() => setShowWeak(v => !v)}>Show weak {showWeak ? "ON" : "OFF"}</button>

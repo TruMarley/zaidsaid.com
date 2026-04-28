@@ -31,7 +31,7 @@ from typing import Any
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 app = FastAPI(title="zaidsaid-audio-ai", version="0.1.0")
 
@@ -110,7 +110,7 @@ async def separate(
     file: UploadFile = File(...),
     stems: str = Form("vocals"),
     model: str = Form("htdemucs"),
-) -> FileResponse:
+):
     """
     demucs source separation. Returns the requested stem as audio/wav.
 
@@ -118,10 +118,15 @@ async def separate(
     stems="other"   → music + sfx without vocals (keep music, lose dialog)
     stems="drums" | "bass" | "all"
     """
+    import io as _io
     with _tmpdir() as tmp:
         in_path = await _stash_upload(file, tmp, "in.wav")
         out_path = _demucs(in_path, stems=stems, model=model, work_dir=tmp)
-        return FileResponse(out_path, media_type="audio/wav", filename=f"{stems}.wav")
+        # Read bytes inside the with-block — tmp dir is removed on exit, so
+        # FileResponse on out_path would 500 with "File does not exist".
+        wav_bytes = out_path.read_bytes()
+    headers = {"Content-Disposition": f'attachment; filename="{stems}.wav"'}
+    return StreamingResponse(_io.BytesIO(wav_bytes), media_type="audio/wav", headers=headers)
 
 
 @app.post("/vad")
@@ -165,16 +170,19 @@ async def captions(
     file: UploadFile = File(...),
     model: str = Form("base"),
     style: str = Form("default"),
-) -> FileResponse:
+):
     """
     Burn whisper-aligned captions directly onto a video. Use this when you
     want legible captions without the full HyperFrames composition (no
     title, no lower-third, no overlay design — just bottom-third subtitles).
     """
+    import io as _io
     with _tmpdir() as tmp:
         in_path = await _stash_upload(file, tmp, "in.mp4")
         out_path = _captacity(in_path, model=model, style=style, work_dir=tmp)
-        return FileResponse(out_path, media_type="video/mp4", filename="captioned.mp4")
+        mp4_bytes = out_path.read_bytes()
+    headers = {"Content-Disposition": 'attachment; filename="captioned.mp4"'}
+    return StreamingResponse(_io.BytesIO(mp4_bytes), media_type="video/mp4", headers=headers)
 
 
 # -----------------------------------------------------------------------------
