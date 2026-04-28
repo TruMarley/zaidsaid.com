@@ -2808,6 +2808,39 @@ const renderThumbnailViaHyperFrames = async (thumb) => {
   }
 };
 
+// x112d: OpenCLIP image / text embedding via vision-ai. Returns { vec, dim }
+// on success, null on failure. Use to find Pexels stock B-roll that
+// semantically matches a clip's transcript paragraph (or any text caption).
+const embedTextViaVisionAi = async (visionBase, text) => {
+  if (!visionBase || !text) return null;
+  try {
+    const form = new FormData();
+    form.append('text', String(text).slice(0, 2000));
+    form.append('model', 'ViT-B-32');
+    const res = await fetch(visionBase.replace(/\/$/, '') + '/embed-text', { method: 'POST', body: form });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (e) { console.warn('[zs] embed-text failed:', e); return null; }
+};
+const embedImageViaVisionAi = async (visionBase, imageBlob) => {
+  if (!visionBase || !imageBlob) return null;
+  try {
+    const form = new FormData();
+    form.append('file', imageBlob, 'frame.jpg');
+    form.append('model', 'ViT-B-32');
+    const res = await fetch(visionBase.replace(/\/$/, '') + '/embed-image', { method: 'POST', body: form });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (e) { console.warn('[zs] embed-image failed:', e); return null; }
+};
+// Pure cosine on already-normalized OpenCLIP vectors.
+const cosineSim = (a, b) => {
+  if (!a || !b || a.length !== b.length) return 0;
+  let dot = 0;
+  for (let i = 0; i < a.length; i++) dot += a[i] * b[i];
+  return dot;
+};
+
 // x112c: YOLOv8 person tracking via vision-ai. Returns { tracks, sampled_frames }
 // on success, null on failure. Pair with audio-ai pyannote for "everything
 // Speaker A said while Speaker A was on camera" multi-person clip splits.
@@ -8415,6 +8448,26 @@ const removeClip = (clipId) => {
                 const nTracks = (data.tracks || []).length;
                 toast("Tracked " + nTracks + " " + (nTracks === 1 ? "person" : "people") + " across " + (data.sampled_frames || 0) + " frames", "success");
               }}>Track people</button>
+              {/* x112d: OpenCLIP semantic match demo — embed first clip's caption
+                  + thumbnail, compute cosine similarity. Validates whether the
+                  caption describes the visual. Foundation for Pexels B-roll match. */}
+              <button className="chip" onClick={async () => {
+                const visBase = getVisionAiPath();
+                if(!visBase){ toast("vision-ai not configured", "warn"); return; }
+                const firstClip = (project.clips || [])[0];
+                if(!firstClip){ toast("Generate clips first", "warn"); return; }
+                const caption = (firstClip.caption || firstClip.title || firstClip.hook || '').toString();
+                if(!caption.trim()){ toast("First clip has no caption to embed", "warn"); return; }
+                let thumbBlob = null;
+                try { thumbBlob = await idbGetClip(firstClip.id + ":thumb"); } catch(_){}
+                if(!thumbBlob){ toast("No thumbnail for first clip", "warn"); return; }
+                toast("Embedding caption + thumbnail (OpenCLIP)…", "info");
+                const [t, i] = await Promise.all([embedTextViaVisionAi(visBase, caption), embedImageViaVisionAi(visBase, thumbBlob)]);
+                if(!t || !i){ toast("Embedding failed — see console", "error"); return; }
+                const sim = cosineSim(t.vec, i.vec);
+                const verdict = sim > 0.25 ? "strong match" : sim > 0.15 ? "weak match" : "unrelated";
+                toast("CLIP cosine = " + sim.toFixed(3) + " · " + verdict + " (text↔visual)", sim > 0.20 ? "success" : "warn");
+              }}>CLIP match</button>
               <button className="chip" onClick={() => setPrecisionEnabled(v => !v)}>Precision pass {precisionEnabled ? "ON" : "OFF"}</button>
               <button className="chip" onClick={() => { setSmartCropEnabled(v => !v); smartCropCacheRef.current = {}; setCropPaths({}); }}>Smart crop {smartCropEnabled ? "ON" : "OFF"}</button>
               <button className="chip" onClick={() => setShowWeak(v => !v)}>Show weak {showWeak ? "ON" : "OFF"}</button>
