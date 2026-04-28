@@ -2808,6 +2808,31 @@ const renderThumbnailViaHyperFrames = async (thumb) => {
   }
 };
 
+// x112b: SAM2 subject segmentation via vision-ai. Returns RGBA cutout PNG
+// (Blob) on success, null on failure. Use as an optional upgrade path for
+// smart-crop on clips where the subject occupies <30% of the frame and
+// MediaPipe's bbox crop loses context.
+const segmentSubjectViaVisionAi = async (visionBase, imageBlob, px, py) => {
+  if (!visionBase || !imageBlob) return null;
+  try {
+    const form = new FormData();
+    form.append('file', imageBlob, 'frame.jpg');
+    form.append('point_x', String(px != null ? px : 0.5));
+    form.append('point_y', String(py != null ? py : 0.5));
+    form.append('return_format', 'png');
+    const res = await fetch(visionBase.replace(/\/$/, '') + '/segment', { method: 'POST', body: form });
+    if (!res.ok) {
+      console.warn('[zs] vision-ai segment HTTP', res.status);
+      return null;
+    }
+    const blob = await res.blob();
+    return blob && blob.size > 0 ? blob : null;
+  } catch (e) {
+    console.warn('[zs] vision-ai segment failed:', e);
+    return null;
+  }
+};
+
 // x111d: Strip non-vocal audio (music, sfx) from a clip via demucs in the
 // audio-ai sidecar. Returns a Blob (mono WAV of the requested stem) on
 // success, null on failure. Use stems="vocals" for copyright-safe TikTok/
@@ -8331,6 +8356,24 @@ const removeClip = (clipId) => {
                 downloadBlob(out, (project.name || "upload").replace(/[^a-z0-9]+/gi,"-") + "-vocals.wav");
                 toast("Speech-only audio downloaded · " + Math.round(out.size / 1024) + " KB", "success");
               }}>Strip music</button>
+              {/* x112b: SAM2 subject mask preview. Pulls the first clip's thumbnail,
+                  segments around the center point, downloads RGBA cutout PNG. Useful
+                  for previewing whether SAM2 mask would beat MediaPipe bbox for
+                  smart-crop on the current upload. */}
+              <button className="chip" onClick={async () => {
+                const visBase = getVisionAiPath();
+                if(!visBase){ toast("vision-ai not configured", "warn"); return; }
+                const firstClip = (project.clips || [])[0];
+                if(!firstClip){ toast("Generate clips first", "warn"); return; }
+                let thumbBlob = null;
+                try { thumbBlob = await idbGetClip(firstClip.id + ":thumb"); } catch(_){}
+                if(!thumbBlob){ toast("No thumbnail for first clip yet", "warn"); return; }
+                toast("Segmenting subject… (SAM2 ~5-10s on CPU)", "info");
+                const out = await segmentSubjectViaVisionAi(visBase, thumbBlob, 0.5, 0.4);
+                if(!out){ toast("Segmentation failed — see console", "error"); return; }
+                downloadBlob(out, (firstClip.title || "clip").replace(/[^a-z0-9]+/gi,"-") + "-mask.png");
+                toast("Subject mask downloaded · " + Math.round(out.size / 1024) + " KB", "success");
+              }}>SAM2 mask</button>
               <button className="chip" onClick={() => setPrecisionEnabled(v => !v)}>Precision pass {precisionEnabled ? "ON" : "OFF"}</button>
               <button className="chip" onClick={() => { setSmartCropEnabled(v => !v); smartCropCacheRef.current = {}; setCropPaths({}); }}>Smart crop {smartCropEnabled ? "ON" : "OFF"}</button>
               <button className="chip" onClick={() => setShowWeak(v => !v)}>Show weak {showWeak ? "ON" : "OFF"}</button>
