@@ -1,0 +1,32 @@
+# fly.toml — tts sidecar (piper)
+#
+# Piper is tiny ONNX. 1 GB is plenty without XTTS-v2 voice cloning.
+# auto_stop keeps idle baseline at $0.
+
+app = "zaidsaid-tts"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8791"
+  TTS_CORS_ORIGIN = "https://zaidsaid.com"
+  PIPER_CACHE = "/tmp/piper-cache"
+
+[http_service]
+  internal_port = 8791
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 4
+    hard_limit = 8
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"

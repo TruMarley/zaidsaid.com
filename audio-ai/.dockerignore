@@ -1,0 +1,9 @@
+.venv
+__pycache__
+*.pyc
+.uv-cache
+uv.lock
+models
+*.log
+.python-version
+.fly

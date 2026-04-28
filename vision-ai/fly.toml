@@ -1,0 +1,36 @@
+# fly.toml — vision-ai sidecar
+#
+# SAM2 + OpenCLIP weights are large (300 MB - 2 GB each). Memory should
+# fit the largest expected model resident plus inference workspace; 8 GB
+# is a safe single-machine size for hiera-base-plus + ViT-B-32 + YOLOv8n.
+# auto_stop keeps idle baseline at $0.
+
+app = "zaidsaid-vision-ai"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8790"
+  VISION_AI_CORS_ORIGIN = "https://zaidsaid.com"
+  HF_HOME = "/tmp/hf-cache"
+  YOLO_CONFIG_DIR = "/tmp/yolo-cfg"
+
+[http_service]
+  internal_port = 8790
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 1
+    hard_limit = 2
+
+[[vm]]
+  size = "shared-cpu-2x"           # account-limited to 2 cores + 4 GB per machine
+  memory = "4gb"                   # tight — keep one model warm at a time;
+                                   # bump if account caps lift
