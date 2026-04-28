@@ -900,6 +900,7 @@ export default {
       { prefix: "/hyperframes/", envKey: "HYPERFRAMES_URL", name: "hyperframes" },
       { prefix: "/audio/",        envKey: "AUDIO_AI_URL",    name: "audio" },
       { prefix: "/vision/",       envKey: "VISION_AI_URL",   name: "vision" },
+      { prefix: "/tts/",          envKey: "TTS_URL",         name: "tts" },
     ];
     for (const { prefix, envKey, name } of SIDECARS) {
       if (!url.pathname.startsWith(prefix)) continue;

@@ -79,6 +79,7 @@ const SIDECARS = {
   hyperframes: { env: "HYPERFRAMES_URL", prefix: "/hyperframes/" }, // x110: server-side 9:16 styling
   audio:       { env: "AUDIO_AI_URL",    prefix: "/audio/" },        // x111: WhisperX, silero-vad, demucs, pyannote, auto-editor, captacity
   vision:      { env: "VISION_AI_URL",   prefix: "/vision/" },       // x112: SAM2, YOLOv8, OpenCLIP
+  tts:         { env: "TTS_URL",         prefix: "/tts/" },          // x113: piper + Coqui XTTS-v2 (voice cloning)
 };
 
 for (const [name, { env: envKey, prefix }] of Object.entries(SIDECARS)) {

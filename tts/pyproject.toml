@@ -1,0 +1,20 @@
+[project]
+name = "zaidsaid-tts"
+version = "0.1.0"
+description = "Open-source TTS sidecar for zaidsaid: piper (fast, dozens of voices) + Coqui XTTS-v2 (voice cloning)"
+requires-python = ">=3.11,<3.13"
+
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.32",
+  "python-multipart>=0.0.20",
+  "pydantic>=2.9",
+  "numpy>=1.26",
+  # Fast local TTS — ONNX-based, ~50 MB per voice
+  "piper-tts>=1.2",
+  # Voice cloning — Mozilla / Coqui TTS, MPL-2.0; XTTS-v2 weights ~1.5 GB
+  "TTS>=0.22 ; python_version < '3.13'",
+]
+
+[tool.uv]
+package = false
