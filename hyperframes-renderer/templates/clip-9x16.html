@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1080, height=1920" />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body {
+        margin: 0;
+        width: 1080px;
+        height: 1920px;
+        overflow: hidden;
+        background: #000;
+        font-family: inter, -apple-system, system-ui, sans-serif;
+      }
+      .clip { position: absolute; }
+      #bg-video {
+        inset: 0;
+        width: 1080px;
+        height: 1920px;
+        object-fit: cover;
+      }
+      #title {
+        top: 120px; left: 60px; right: 60px;
+        font-size: 72px; font-weight: 800; line-height: 1.05;
+        color: #fff; text-align: center; letter-spacing: -0.02em;
+        text-shadow: 0 4px 24px rgba(0,0,0,0.7);
+      }
+      .caption {
+        bottom: 360px; left: 48px; right: 48px;
+        font-size: 88px; font-weight: 800;
+        color: #fff; text-align: center;
+        text-shadow: 0 6px 28px rgba(0,0,0,0.8);
+        line-height: 1.1;
+      }
+      #lower-third {
+        bottom: 120px; left: 60px;
+        padding: 24px 40px;
+        background: linear-gradient(90deg, #ff3366, #ff6b00);
+        color: #fff; font-size: 38px; font-weight: 700;
+        border-radius: 14px;
+        box-shadow: 0 8px 32px rgba(255, 51, 102, 0.4);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"
+      data-composition-id="main"
+      data-start="0"
+      data-duration="{{DURATION}}"
+      data-width="1080"
+      data-height="1920">
+
+      <div id="bg-fallback" class="clip"
+           data-start="0" data-duration="{{DURATION}}" data-track-index="0"
+           style="inset:0; background:#0a0a0a;"></div>
+
+      <video id="bg-video" class="clip"
+             data-start="0" data-duration="{{DURATION}}" data-track-index="0"
+             src="{{CLIP_URL}}" muted playsinline crossorigin="anonymous" preload="auto"></video>
+
+      <div id="title" class="clip"
+           data-start="0" data-duration="2.5" data-track-index="1">
+        {{TITLE}}
+      </div>
+
+      {{CAPTION_BLOCKS}}
+
+      <div id="lower-third" class="clip"
+           data-start="{{LOWER_THIRD_START}}" data-duration="2" data-track-index="3">
+        {{HANDLE}}
+      </div>
+    </div>
+
+    <script>
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true });
+      tl.from("#title", { opacity: 0, y: -40, duration: 0.6, ease: "power3.out" }, 0);
+      tl.to("#title", { opacity: 0, duration: 0.4 }, 2.1);
+      tl.from("#lower-third", { opacity: 0, x: -120, duration: 0.5, ease: "power3.out" }, {{LOWER_THIRD_START}});
+      // Per-caption tweens are appended by server.mjs from word_timings.
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>
