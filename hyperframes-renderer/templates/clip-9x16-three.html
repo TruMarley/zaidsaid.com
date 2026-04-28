@@ -1,0 +1,86 @@
+<!doctype html>
+<!--
+  x114: HF template variant with a Three.js intro card.
+
+  3 seconds of a rotating wireframe globe / cube / icosahedron over the bg
+  video before the clip's main content kicks in. Frame-accurate because
+  the Three.js scene renders manually per `requestAnimationFrame` tick
+  driven off the GSAP timeline (HF seeks the frame-driver deterministically).
+
+  Pass `style=clip-9x16-three` and override `THREE_GEOM` (cube|icos|globe).
+-->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1080, height=1920" />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <script type="importmap">
+      { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js" } }
+    </script>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { margin: 0; width: 1080px; height: 1920px; overflow: hidden; background: #000; font-family: inter, system-ui, sans-serif; }
+      .clip { position: absolute; }
+      #bg-video { inset: 0; width: 1080px; height: 1920px; object-fit: cover; }
+      #three-canvas { top: 0; left: 0; width: 1080px; height: 1920px; mix-blend-mode: screen; }
+      #title { top: 200px; left: 60px; right: 60px; font-size: 96px; font-weight: 800; color: #fff; text-align: center; letter-spacing: -2px; text-shadow: 0 4px 32px rgba(0,0,0,0.8); }
+      .caption { bottom: 360px; left: 48px; right: 48px; font-size: 88px; font-weight: 800; color: #fff; text-align: center; text-shadow: 0 6px 28px rgba(0,0,0,0.8); }
+    </style>
+  </head>
+  <body>
+    <div id="root"
+      data-composition-id="main"
+      data-start="0"
+      data-duration="{{DURATION}}"
+      data-width="1080"
+      data-height="1920">
+
+      <video id="bg-video" class="clip"
+             data-start="0" data-duration="{{DURATION}}" data-track-index="0"
+             src="{{CLIP_URL}}" muted playsinline crossorigin="anonymous" preload="auto"></video>
+
+      <canvas id="three-canvas" class="clip"
+              data-start="0" data-duration="3" data-track-index="1"
+              width="1080" height="1920"></canvas>
+
+      <div id="title" class="clip"
+           data-start="0.2" data-duration="2.8" data-track-index="2">{{TITLE}}</div>
+
+      {{CAPTION_BLOCKS}}
+    </div>
+
+    <script type="module">
+      import * as THREE from "three";
+
+      const canvas = document.getElementById("three-canvas");
+      const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+      renderer.setSize(1080, 1920);
+      const scene = new THREE.Scene();
+      const camera = new THREE.PerspectiveCamera(50, 1080 / 1920, 0.1, 100);
+      camera.position.z = 4;
+      const geom = new THREE.IcosahedronGeometry(1.4, 1);
+      const mat = new THREE.MeshBasicMaterial({ color: 0xff3366, wireframe: true });
+      const mesh = new THREE.Mesh(geom, mat);
+      scene.add(mesh);
+
+      // Drive the rotation off a window-level "tick" var that GSAP advances.
+      window.__threeTick = 0;
+      function tick() {
+        const t = window.__threeTick;
+        mesh.rotation.x = t * 0.6;
+        mesh.rotation.y = t * 0.9;
+        renderer.render(scene, camera);
+        requestAnimationFrame(tick);
+      }
+      tick();
+
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true });
+      tl.to(window, { __threeTick: 6.28, duration: 3, ease: "power1.inOut" }, 0);
+      tl.from("#title", { opacity: 0, y: -40, duration: 0.6, ease: "power3.out" }, 0.2);
+      tl.to("#title", { opacity: 0, duration: 0.4 }, 2.6);
+      // Per-caption tweens are appended by server.mjs from word_timings.
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>

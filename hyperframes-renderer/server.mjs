@@ -54,7 +54,12 @@ app.use(express.json({ limit: "60mb" })); // base64-encoded clip blobs
 app.get("/ping", (_req, res) => res.json({ ok: true, service: "hyperframes-renderer" }));
 
 app.post("/render", async (req, res) => {
-  const { clip_url, clip_b64, duration, title = "", handle = "", word_timings = [], style = "clip-9x16" } = req.body || {};
+  const {
+    clip_url, clip_b64, duration, title = "", handle = "", word_timings = [],
+    style = "clip-9x16",
+    // x114: extension-template fields, ignored by clip-9x16.
+    lottie_url = "", lottie_start = null, lottie_duration = null,
+  } = req.body || {};
   if (!duration) {
     return res.status(400).json({ error: "duration is required" });
   }
@@ -73,6 +78,8 @@ app.post("/render", async (req, res) => {
 
     const templatePath = path.join(TEMPLATES, `${style}.html`);
     const template = await fs.readFile(templatePath, "utf8");
+    const lottieStart = lottie_start != null ? Number(lottie_start) : Math.max(0, duration - 4);
+    const lottieDuration = lottie_duration != null ? Number(lottie_duration) : 2.5;
     const html = renderTemplate(stripVideoIfMissing(template, resolvedClipUrl), {
       CLIP_URL: resolvedClipUrl,
       DURATION: duration.toFixed(2),
@@ -80,6 +87,9 @@ app.post("/render", async (req, res) => {
       HANDLE: escapeHtml(handle),
       LOWER_THIRD_START: Math.max(0, duration - 3).toFixed(2),
       CAPTION_BLOCKS: buildCaptionBlocks(word_timings),
+      LOTTIE_URL: lottie_url,
+      LOTTIE_START: lottieStart.toFixed(2),
+      LOTTIE_DURATION: lottieDuration.toFixed(2),
     });
 
     const indexPath = path.join(workDir, "index.html");
@@ -152,6 +162,69 @@ function runRender(cwd, outPath) {
     child.on("exit", code => code === 0 ? resolve() : reject(new Error(`hyperframes render exited ${code}`)));
   });
 }
+
+// x114: satori thumbnail endpoint — programmatic 1080x1920 PNG thumbnails
+// from a JSON description. Pairs with x100/x102 YouTube metadata generation
+// (Claude returns headline/subject/background/palette → /thumbnail returns
+// a render-ready PNG).
+let _thumbnailFontPromise = null;
+async function _loadThumbnailFont() {
+  // Google Fonts CSS API serves a TTF when the UA isn't a modern browser.
+  // Fetch the CSS, extract the .ttf URL, then fetch the bytes. Cached for
+  // the process lifetime — discovers Google's hash-rotated path each cold
+  // start without bundling font binary in the repo.
+  const cssUrl = "https://fonts.googleapis.com/css2?family=Inter:wght@800";
+  const cssResp = await fetch(cssUrl, { headers: { "User-Agent": "Mozilla/4.0" } });
+  if (!cssResp.ok) throw new Error(`font css fetch ${cssResp.status}`);
+  const css = await cssResp.text();
+  const m = css.match(/url\((https:\/\/[^)]+\.ttf)\)/);
+  if (!m) throw new Error("no .ttf url in font css");
+  const ttfResp = await fetch(m[1]);
+  if (!ttfResp.ok) throw new Error(`ttf fetch ${ttfResp.status}`);
+  return Buffer.from(await ttfResp.arrayBuffer());
+}
+
+app.post("/thumbnail", async (req, res) => {
+  try {
+    const { default: satori } = await import("satori");
+    const { Resvg } = await import("@resvg/resvg-js");
+    if (!_thumbnailFontPromise) _thumbnailFontPromise = _loadThumbnailFont();
+    const fontData = await _thumbnailFontPromise;
+    const { headline = "Zaidsaid", subhead = "", palette = "#0a0a0a", accent = "#ff3366", width = 1080, height = 1920 } = req.body || {};
+    const node = {
+      type: "div",
+      props: {
+        style: {
+          width, height, display: "flex", flexDirection: "column", justifyContent: "space-between",
+          padding: 80, background: palette, color: "#fff", fontFamily: "Inter"
+        },
+        children: [
+          { type: "div", props: { style: { fontSize: 48, opacity: 0.7, fontWeight: 800 }, children: subhead } },
+          {
+            type: "div",
+            props: {
+              style: { display: "flex", flexDirection: "column", gap: 24 },
+              children: [
+                { type: "div", props: { style: { fontSize: 96, fontWeight: 800, lineHeight: 1.05, letterSpacing: -2 }, children: headline } },
+                { type: "div", props: { style: { width: 240, height: 12, background: accent, borderRadius: 6 } } }
+              ]
+            }
+          }
+        ]
+      }
+    };
+    const svg = await satori(node, {
+      width, height,
+      fonts: [{ name: "Inter", data: fontData, weight: 800, style: "normal" }]
+    });
+    const png = new Resvg(svg, { fitTo: { mode: "width", value: width } }).render().asPng();
+    res.setHeader("Content-Type", "image/png");
+    res.send(Buffer.from(png));
+  } catch (err) {
+    console.error("[thumbnail] failed", err);
+    res.status(500).json({ error: "thumbnail_failed", detail: String(err) });
+  }
+});
 
 app.listen(PORT, () => {
   console.log(`hyperframes-renderer listening on :${PORT}`);

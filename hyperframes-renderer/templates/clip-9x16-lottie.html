@@ -1,0 +1,59 @@
+<!doctype html>
+<!--
+  x114: HF template variant with a Lottie animation overlay slot.
+
+  Drop a `lottie_url` field into the /render payload and pass `style=clip-9x16-lottie`.
+  The Lottie player runs deterministically because GSAP drives the timeline;
+  we tween its `data-anim-time` so the JSON animation seeks frame-by-frame.
+
+  Use cases: animated logos, lower-third callouts, sticker reactions, badge bursts.
+-->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1080, height=1920" />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@lottiefiles/lottie-player@2.0.12/dist/lottie-player.js"></script>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { margin: 0; width: 1080px; height: 1920px; overflow: hidden; background: #000; font-family: inter, system-ui, sans-serif; }
+      .clip { position: absolute; }
+      #bg-video { inset: 0; width: 1080px; height: 1920px; object-fit: cover; }
+      #title { top: 120px; left: 60px; right: 60px; font-size: 72px; font-weight: 800; color: #fff; text-align: center; text-shadow: 0 4px 24px rgba(0,0,0,0.7); }
+      .caption { bottom: 360px; left: 48px; right: 48px; font-size: 88px; font-weight: 800; color: #fff; text-align: center; text-shadow: 0 6px 28px rgba(0,0,0,0.8); }
+      #lottie-overlay { top: 50%; left: 50%; transform: translate(-50%, -50%); width: 720px; height: 720px; }
+    </style>
+  </head>
+  <body>
+    <div id="root"
+      data-composition-id="main"
+      data-start="0"
+      data-duration="{{DURATION}}"
+      data-width="1080"
+      data-height="1920">
+
+      <video id="bg-video" class="clip"
+             data-start="0" data-duration="{{DURATION}}" data-track-index="0"
+             src="{{CLIP_URL}}" muted playsinline crossorigin="anonymous" preload="auto"></video>
+
+      <div id="title" class="clip"
+           data-start="0" data-duration="3" data-track-index="1">{{TITLE}}</div>
+
+      {{CAPTION_BLOCKS}}
+
+      <lottie-player id="lottie-overlay" class="clip"
+                     data-start="{{LOTTIE_START}}" data-duration="{{LOTTIE_DURATION}}" data-track-index="3"
+                     src="{{LOTTIE_URL}}" autoplay></lottie-player>
+    </div>
+
+    <script>
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true });
+      tl.from("#title", { opacity: 0, y: -40, duration: 0.6, ease: "power3.out" }, 0);
+      tl.to("#title", { opacity: 0, duration: 0.4 }, 2.6);
+      tl.from("#lottie-overlay", { opacity: 0, scale: 0.7, duration: 0.5, ease: "back.out(2)" }, {{LOTTIE_START}});
+      // Per-caption tweens are appended by server.mjs from word_timings.
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>
