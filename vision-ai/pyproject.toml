@@ -1,0 +1,25 @@
+[project]
+name = "zaidsaid-vision-ai"
+version = "0.1.0"
+description = "Open-source vision AI sidecar for zaidsaid: subject segmentation, person/face tracking, semantic asset search"
+requires-python = ">=3.11,<3.13"
+
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.32",
+  "python-multipart>=0.0.20",
+  "pydantic>=2.9",
+  "pillow>=10.4",
+  "numpy>=1.26",
+  "opencv-python-headless>=4.10",
+  # Tracking + person/face detection — small, fast, models 5-200 MB
+  "ultralytics>=8.3",
+  # Subject segmentation — Apache-2.0, lazy-loaded SAM2 weights
+  "sam2>=1.1 ; python_version < '3.13'",
+  # Semantic embedding for asset / B-roll search
+  "open-clip-torch>=2.30",
+  # Heavy ML deps installed transitively (torch, torchvision)
+]
+
+[tool.uv]
+package = false

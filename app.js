@@ -40,6 +40,16 @@ const getAudioAiPath = () => {
     return String(ai.path || ai.proxyUrl || ai.url || "").trim();
   } catch(_) { return ""; }
 };
+// x112: vision-ai sidecar path (SAM2 / YOLOv8 / OpenCLIP).
+const getVisionAiPath = () => {
+  try {
+    const a = safeGet("providers.cfg", {}) || {};
+    const b = safeGet("providers", {}) || {};
+    const v = (a && a.visionAi) || (b && b.visionAi) || {};
+    if (v.enabled === false) return "";
+    return String(v.path || v.proxyUrl || v.url || "").trim();
+  } catch(_) { return ""; }
+};
 function useLocalState(key, initial){
   const [v, setV] = useState(() => safeGet(key, initial));
   useEffect(() => { safeSet(key, v); }, [key, v]);
@@ -192,6 +202,11 @@ try {
     // pyannote, auto-editor, captacity. Replaces ElevenLabs Scribe and adds
     // diarization, speech-presence VAD, music separation, and silence trim.
     audioAi:      { proxyUrl: _ZS_WORKER + "/audio",        enabled: false },
+    // x112: open-source vision AI sidecar (SAM2 + YOLOv8 + OpenCLIP). Off by
+    // default. Enables subject segmentation (SAM2 upgrade to MediaPipe
+    // smart-crop), multi-person tracking (YOLOv8), and semantic B-roll match
+    // (OpenCLIP) once VISION_AI_URL is set on the worker.
+    visionAi:     { proxyUrl: _ZS_WORKER + "/vision",       enabled: false },
   };
   let _zsChanged = false;
   for (const [_k, _v] of Object.entries(_zsDefaults)) {
