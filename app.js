@@ -1443,6 +1443,27 @@ const snapClipBoundaries = (clip, segments, opts) => {
     newStart = bestPrevEnd + 0.05; // start right after the period
   }
 
+  // x111c: VAD refinement — if the audio-ai sidecar gave us speech-presence
+  // intervals, trim leading and trailing dead air. Catches cases where
+  // sentence-end snap landed in a >0.3s silence (long breath, mic dropout,
+  // post-roll music). Only TRIMS — never extends past the sentence-end snap,
+  // which would risk truncating the payoff.
+  const vadIntervals = (opts && Array.isArray(opts.vadIntervals)) ? opts.vadIntervals : null;
+  if(vadIntervals && vadIntervals.length){
+    // Pull start FORWARD to the first interval beginning at/after newStart,
+    // but only if there's a >0.3s gap (silence) currently being included.
+    const nextSpeech = vadIntervals.find(iv => iv.end >= newStart);
+    if(nextSpeech && nextSpeech.start > newStart + 0.3 && nextSpeech.start < newEnd){
+      newStart = nextSpeech.start;
+    }
+    // Pull end BACKWARD to the last interval ending at/before newEnd,
+    // but only if there's a >0.3s gap at the tail.
+    const prevSpeech = [...vadIntervals].reverse().find(iv => iv.start <= newEnd);
+    if(prevSpeech && prevSpeech.end < newEnd - 0.3 && prevSpeech.end > newStart){
+      newEnd = prevSpeech.end + 0.15; // tiny tail so the final consonant lands
+    }
+  }
+
   // Hard safety: never let start drop below 0 or cross end.
   newStart = Math.max(0, newStart);
   if(newEnd <= newStart) newEnd = newStart + 5;
@@ -1620,7 +1641,12 @@ const analyzeViaClaude = async (proxyUrl, sourceText, targetCount, segments, met
       rawEnd = Math.min(rawStart + 1800, Number(arc.payoff_end) + 0.5);
     }
     // Snap to sentence boundaries so we never cut off the payoff or start mid-clause.
-    const snapped = snapClipBoundaries({ start: rawStart, end: rawEnd }, segments, { maxExtendEnd: 30, maxBackStart: 15 });
+    // x111c: also pass through VAD intervals so we trim leading/trailing dead air.
+    const snapped = snapClipBoundaries({ start: rawStart, end: rawEnd }, segments, {
+      maxExtendEnd: 30,
+      maxBackStart: 15,
+      vadIntervals: signals && Array.isArray(signals.vadIntervals) ? signals.vadIntervals : null
+    });
     let start = snapped.start;
     let end = snapped.end;
     if(end - start > 1800) end = start + 1800;
@@ -2748,6 +2774,29 @@ const transcribeUploadedFile = async (elevenBase, blob, filename) => {
     });
   }
   return { text: fullText || segments.map(s => s.text).join(' '), segments, words: cleanWords };
+};
+
+// x111c: Run silero-vad on the upload audio (via audio-ai sidecar) to get
+// speech-presence intervals. snapClipBoundaries uses these to trim leading/
+// trailing dead air after the sentence-end snap. Returns [] on failure.
+const fetchVadIntervals = async (audioAiBase, blob) => {
+  if (!audioAiBase || !blob) return [];
+  try {
+    const form = new FormData();
+    form.append('file', blob, 'upload.mp4');
+    form.append('threshold', '0.5');
+    form.append('min_silence_ms', '300');
+    const res = await fetch(audioAiBase.replace(/\/$/, '') + '/vad', { method: 'POST', body: form });
+    if (!res.ok) {
+      console.warn('[zs] audio-ai vad HTTP', res.status);
+      return [];
+    }
+    const data = await res.json();
+    return Array.isArray(data.intervals) ? data.intervals : [];
+  } catch (e) {
+    console.warn('[zs] audio-ai vad failed:', e);
+    return [];
+  }
 };
 
 // x110b: Pass a finished clip MP4 through the HyperFrames render service and
@@ -7341,6 +7390,13 @@ function RepurposeTab(){
           segments = stt.segments || [];
           const transcriptWords = Array.isArray(stt.words) ? stt.words : []; // x110b: word-level for HyperFrames captions
           if(!text && !segments.length) throw new Error("Empty transcription — audio may be silent or unintelligible.");
+          // x111c: also fetch speech-presence intervals so snapClipBoundaries can
+          // trim leading/trailing dead air. Cheap (~realtime on CPU), best-effort.
+          let transcriptVadIntervals = [];
+          const aiVadBase = getAudioAiPath();
+          if (aiVadBase) {
+            transcriptVadIntervals = await fetchVadIntervals(aiVadBase, audioMp3Blob || uploadBlob);
+          }
           const lastSeg = segments[segments.length-1];
           const derivedDur = lastSeg ? (lastSeg.t + lastSeg.d) : 0;
           setProject(p => ({
@@ -7348,11 +7404,12 @@ function RepurposeTab(){
             transcriptText: text,
             transcriptSegments: segments,
             transcriptWords,
+            transcriptVadIntervals,
             chapters: [],
             transcriptSource: 'transcribed',
             durationSec: derivedDur > 0 ? Math.round(derivedDur) : p.durationSec
           }));
-          toast('Transcribed ' + segments.length + ' segments', 'success');
+          toast('Transcribed ' + segments.length + ' segments' + (transcriptVadIntervals.length ? ' · ' + transcriptVadIntervals.length + ' speech intervals' : ''), 'success');
         } catch(e){
           const msg = (e && e.message) || 'unknown';
           toast('Transcription failed: ' + msg, 'error');
@@ -7556,7 +7613,11 @@ function RepurposeTab(){
               fetchSenseVoiceEvents(workerBase, audioMp3Blob).catch(() => []),
               fetchGeminiHighlights(workerBase, audioMp3Blob, target).catch(() => [])
             ]);
-            const signals = { scenes: sceneCuts, audioEvents, visualHighlights };
+            // x111c: include VAD intervals (from project state when present) so
+            // analyzeViaClaude's inline snapClipBoundaries call can trim dead
+            // air at the boundaries.
+            const vadFromState = Array.isArray(project.transcriptVadIntervals) ? project.transcriptVadIntervals : [];
+            const signals = { scenes: sceneCuts, audioEvents, visualHighlights, vadIntervals: vadFromState };
             const hasAnySignal = sceneCuts.length > 0 || audioEvents.length > 0 || visualHighlights.length > 0;
             setProject(p => ({ ...p, signals }));
             if(!hasAnySignal){ setProcessStatus(""); return; }
@@ -8144,9 +8205,10 @@ const removeClip = (clipId) => {
               <button className="chip" onClick={() => {
                 const segs = project.transcriptSegments || [];
                 if(segs.length === 0){ toast("No transcript segments to snap against", "warn"); return; }
+                const vadIntervals = Array.isArray(project.transcriptVadIntervals) ? project.transcriptVadIntervals : null;
                 let changed = 0;
                 const snapped = project.clips.map(c => {
-                  const s = snapClipBoundaries({ start: c.start, end: c.end }, segs, { maxExtendEnd: 30, maxBackStart: 15 });
+                  const s = snapClipBoundaries({ start: c.start, end: c.end }, segs, { maxExtendEnd: 30, maxBackStart: 15, vadIntervals });
                   if(Math.abs(s.start - c.start) > 0.05 || Math.abs(s.end - c.end) > 0.05){ changed++; return { ...c, start: s.start, end: s.end }; }
                   return c;
                 });
