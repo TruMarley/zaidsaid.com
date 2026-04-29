@@ -1,0 +1,40 @@
+{
+  "$schema": "https://hyperframes.heygen.com/schema/registry.json",
+  "name": "zaidsaid-liquid-glass",
+  "description": "iOS-26 liquid-glass beat plugins for the zaidsaid HyperFrames renderer. Mirrors the pipeline shown in https://www.youtube.com/watch?v=Aw3BkmhYu4I.",
+  "homepage": "https://github.com/TruMarley/zaidsaid.com/tree/main/hyperframes-renderer",
+  "items": [
+    {
+      "name": "liquid-glass-card",
+      "type": "block",
+      "title": "Liquid-glass beat card",
+      "description": "A 480×600 frosted-glass beat card with eyebrow, chrome-gradient title, and an optional karaoke caption run. Drop into a host composition via data-composition-src for one beat scene.",
+      "tags": ["beat", "card", "glass", "title", "karaoke"],
+      "files": ["liquid-glass-card.html", "registry-item.json"]
+    },
+    {
+      "name": "outro-split",
+      "type": "block",
+      "title": "Split-screen outro",
+      "description": "A 1080×1920 outro scene: dimmed gradient backdrop, face-cam crop on the right with rounded corners + drop shadow, headline text on the left.",
+      "tags": ["outro", "split", "endcard"],
+      "files": ["outro-split.html", "registry-item.json"]
+    },
+    {
+      "name": "karaoke-caption",
+      "type": "component",
+      "title": "Karaoke caption run",
+      "description": "Word-by-word highlight effect — each .word span flips from dim to lit with a 22 px glow when its data-word-start fires on the host timeline. Paste CSS + script into a host composition.",
+      "tags": ["caption", "karaoke", "text"],
+      "files": ["karaoke-caption.html", "registry-item.json"]
+    },
+    {
+      "name": "chrome-text",
+      "type": "component",
+      "title": "Chrome gradient text",
+      "description": "Silver-to-white gradient applied via background-clip:text. Use on titles and eyebrows for the iOS-26 look. Paste the .chrome-title / .chrome-eyebrow rules into your styles.",
+      "tags": ["text", "gradient", "title"],
+      "files": ["chrome-text.html", "registry-item.json"]
+    }
+  ]
+}

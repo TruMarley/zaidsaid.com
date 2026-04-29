@@ -1,0 +1,148 @@
+<!doctype html>
+<!--
+  liquid-glass-card — zaidsaid HF block
+  ─────────────────────────────────────
+  A standalone 480×600 sub-composition that renders one frosted iOS-26 beat
+  card with eyebrow, chrome-gradient title, and an optional karaoke run.
+
+  Wire into a host composition via:
+
+    <div
+      data-composition-id="liquid-glass-card"
+      data-composition-src="compositions/liquid-glass-card.html"
+      data-start="0.6" data-duration="4.0"
+      data-track-index="2" data-width="480" data-height="600"
+      data-eyebrow="Edit demo · Chapter 1"
+      data-title="The edit&#10;live"
+      data-karaoke='[{"text":"This","start":0.0,"end":0.16}, ...]'
+    ></div>
+
+  Host data-* attrs are read at mount-time by the inline <script> below.
+  Newlines in `data-title` (use &#10;) become <br>.
+-->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body {
+        width: 480px; height: 600px;
+        background: transparent;
+        font-family: inter, -apple-system, system-ui, sans-serif;
+        color: #fff;
+        overflow: hidden;
+      }
+      #card {
+        position: absolute; inset: 0;
+        padding: 56px 56px 64px;
+        border-radius: 44px;
+        background: linear-gradient(135deg, rgba(255,255,255,0.16), rgba(255,255,255,0.04));
+        backdrop-filter: blur(28px) saturate(140%);
+        -webkit-backdrop-filter: blur(28px) saturate(140%);
+        border: 1px solid rgba(255,255,255,0.22);
+        box-shadow:
+          inset 0 1px 0 rgba(255,255,255,0.35),
+          inset 0 -1px 0 rgba(0,0,0,0.25),
+          0 24px 80px rgba(0,0,0,0.55);
+        overflow: hidden;
+      }
+      #card::before {
+        content: "";
+        position: absolute; inset: 0;
+        background: linear-gradient(120deg, rgba(255,255,255,0.18) 0%, transparent 35%, transparent 65%, rgba(255,255,255,0.10) 100%);
+        pointer-events: none;
+        border-radius: inherit;
+      }
+      .eyebrow {
+        font-size: 28px; font-weight: 700; letter-spacing: 0.18em;
+        text-transform: uppercase;
+        background: linear-gradient(90deg, #b9c7d6, #ffffff 50%, #b9c7d6);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+        margin-bottom: 18px;
+        opacity: 0.95;
+      }
+      .title {
+        font-size: 96px; font-weight: 800; letter-spacing: -0.03em;
+        line-height: 1.02;
+        background: linear-gradient(180deg, #ffffff 0%, #c5cdd6 100%);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+        margin-bottom: 28px;
+      }
+      .karaoke {
+        font-size: 44px; font-weight: 700; line-height: 1.25;
+        color: rgba(255,255,255,0.55);
+      }
+      .karaoke .word {
+        display: inline-block;
+        margin-right: 14px;
+        transition: color 80ms linear, text-shadow 80ms linear;
+      }
+      .karaoke .word.lit {
+        color: #fff;
+        text-shadow: 0 0 22px rgba(180, 220, 255, 0.55);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"
+      data-composition-id="liquid-glass-card"
+      data-start="0"
+      data-duration="4"
+      data-width="480"
+      data-height="600">
+
+      <div id="card" class="clip" data-start="0" data-duration="4" data-track-index="0">
+        <div id="eyebrow" class="eyebrow"></div>
+        <div id="title" class="title"></div>
+        <div id="karaoke" class="karaoke"></div>
+      </div>
+    </div>
+
+    <script>
+      // Read host data-* overrides off the *outer* div if present (HF mounts
+      // the block inside its own iframe but exposes parent attrs via window
+      // name; fall back to inline defaults so the file previews standalone).
+      (function () {
+        let attrs = {};
+        try {
+          const params = new URLSearchParams((window.name || "").replace(/^.*?\?/, ""));
+          attrs.eyebrow = params.get("eyebrow") || "";
+          attrs.title = (params.get("title") || "").replace(/&#10;|\\n/g, "\n");
+          attrs.karaoke = params.get("karaoke") || "[]";
+        } catch { /* leave empty */ }
+
+        const escapeHtml = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+        const eb = document.getElementById("eyebrow");
+        const tt = document.getElementById("title");
+        const kk = document.getElementById("karaoke");
+        if (attrs.eyebrow) eb.textContent = attrs.eyebrow; else eb.style.display = "none";
+        if (attrs.title) tt.innerHTML = escapeHtml(attrs.title).replace(/\n/g, "<br>");
+        else tt.style.display = "none";
+        let words = [];
+        try { words = JSON.parse(attrs.karaoke); } catch { words = []; }
+        if (Array.isArray(words) && words.length) {
+          kk.innerHTML = words.map((w, i) => `<span class="word" data-word-index="${i}" data-word-start="${Number(w.start||0).toFixed(2)}" data-word-end="${Number(w.end||0).toFixed(2)}">${escapeHtml(w.text||"")}</span>`).join(" ");
+        } else {
+          kk.style.display = "none";
+        }
+
+        // Block timeline — slide in, optionally light up karaoke words.
+        window.__timelines = window.__timelines || {};
+        const tl = gsap.timeline({ paused: true });
+        tl.from("#card", { opacity: 0, x: -120, duration: 0.55, ease: "power3.out" }, 0);
+        if (Array.isArray(words)) {
+          words.forEach((w, i) => {
+            const at = Number(w.start || 0);
+            tl.add(() => document.querySelector(`#karaoke [data-word-index="${i}"]`)?.classList.add("lit"), at);
+          });
+        }
+        window.__timelines["liquid-glass-card"] = tl;
+      })();
+    </script>
+  </body>
+</html>

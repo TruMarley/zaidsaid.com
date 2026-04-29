@@ -1,0 +1,9 @@
+{
+  "$schema": "https://hyperframes.heygen.com/schema/registry-item.json",
+  "name": "chrome-text",
+  "type": "component",
+  "title": "Chrome gradient text",
+  "description": "Silver-to-white gradient applied via background-clip:text. Use on titles and eyebrows for the iOS-26 liquid-glass look.",
+  "tags": ["text", "gradient", "title"],
+  "files": ["chrome-text.html"]
+}

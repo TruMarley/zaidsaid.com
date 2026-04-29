@@ -1,0 +1,42 @@
+<!--
+  chrome-text — zaidsaid HF component
+  ───────────────────────────────────
+  Silver-to-white gradient applied via background-clip:text. Two variants:
+
+  - .chrome-title — vertical gradient (#fff → #c5cdd6) for headlines
+  - .chrome-eyebrow — horizontal triple-stop sweep for uppercase eyebrows
+
+  USAGE
+  =====
+  Paste the <style> block into your host composition. Then add the class to
+  any element you want to render in chrome:
+
+      <div class="chrome-eyebrow">EDIT DEMO · CHAPTER 1</div>
+      <div class="chrome-title">The edit<br>live</div>
+
+  Notes:
+  - Requires `color: transparent` (already in the rules) and a background
+    that the gradient can overlay against — works on any backdrop.
+  - Pairs well with the liquid-glass-card block, which uses these styles.
+-->
+
+<style>
+  .chrome-title {
+    background: linear-gradient(180deg, #ffffff 0%, #c5cdd6 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    line-height: 1.02;
+  }
+  .chrome-eyebrow {
+    background: linear-gradient(90deg, #b9c7d6, #ffffff 50%, #b9c7d6);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    font-weight: 700;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+  }
+</style>

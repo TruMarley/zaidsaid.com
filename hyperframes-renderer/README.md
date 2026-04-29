@@ -77,6 +77,28 @@ the backend dormant until the front-end is ready to call it.
 Add new styles by dropping a new `<style>.html` into `templates/` and posting
 with the matching `style` field.
 
+## Plugins (registry)
+
+Reusable HF blocks and components live in [`registry/`](registry/). They
+ship pre-installed in `projects/_template/compositions/` so a new clip
+already has the liquid-glass card, outro-split block, and karaoke /
+chrome-text components ready to use.
+
+```bash
+npm run plugins:list                            # show what's available
+node bin/install-plugin.mjs liquid-glass-card   # install one block
+node bin/install-plugin.mjs --all --project edit-demo
+```
+
+The install script is a local stand-in for `hyperframes add` — the pinned
+HF CLI (0.1.15) doesn't ship that command yet, but the registry shape is
+identical so the workflow is forward-compatible.
+
+At render time the server seeds the per-render workDir with all installed
+plugins from `projects/_template/compositions/`, so any host composition
+can `data-composition-src="compositions/<name>.html"` an installed block
+without an extra setup step.
+
 ## Per-project layout
 
 `projects/` mirrors the per-clip Claude-Code workspace from the demo video:

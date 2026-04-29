@@ -1,0 +1,9 @@
+{
+  "$schema": "https://hyperframes.heygen.com/schema/registry-item.json",
+  "name": "karaoke-caption",
+  "type": "component",
+  "title": "Karaoke caption run",
+  "description": "Word-by-word highlight effect — each .word span flips from dim to lit with a soft glow when its data-word-start fires on the host timeline.",
+  "tags": ["caption", "karaoke", "text"],
+  "files": ["karaoke-caption.html"]
+}

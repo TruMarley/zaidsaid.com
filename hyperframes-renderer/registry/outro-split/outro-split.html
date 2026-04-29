@@ -1,0 +1,98 @@
+<!doctype html>
+<!--
+  outro-split — zaidsaid HF block
+  ────────────────────────────────
+  Full 1080×1920 outro: dimmed bg, face-cam crop right, headline left.
+
+  Wire into a host composition via:
+
+    <div
+      data-composition-id="outro-split"
+      data-composition-src="compositions/outro-split.html"
+      data-start="22.5" data-duration="5.0"
+      data-track-index="5" data-width="1080" data-height="1920"
+      data-title="Thanks for&#10;watching"
+    ></div>
+-->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body {
+        width: 1080px; height: 1920px;
+        background: transparent;
+        font-family: inter, -apple-system, system-ui, sans-serif;
+        color: #fff;
+        overflow: hidden;
+      }
+      .clip { position: absolute; }
+      #bg {
+        inset: 0;
+        background:
+          radial-gradient(ellipse at 30% 30%, rgba(40,90,160,0.35), transparent 60%),
+          linear-gradient(180deg, #060810 0%, #0b1220 100%);
+      }
+      #facecam {
+        right: 60px; top: 80px; bottom: 80px;
+        width: 540px;
+        border-radius: 56px;
+        overflow: hidden;
+        box-shadow: 0 30px 90px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.08);
+      }
+      #facecam .placeholder {
+        position: absolute; inset: 0;
+        background: linear-gradient(180deg, #1a2030 0%, #0a0e18 100%);
+      }
+      #headline {
+        left: 80px; top: 50%; transform: translateY(-50%);
+        width: 460px;
+        font-size: 96px; font-weight: 800; letter-spacing: -0.03em;
+        line-height: 1.04;
+        background: linear-gradient(180deg, #ffffff 0%, #aab3bf 100%);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"
+      data-composition-id="outro-split"
+      data-start="0"
+      data-duration="5"
+      data-width="1080"
+      data-height="1920">
+
+      <div id="bg" class="clip" data-start="0" data-duration="5" data-track-index="0"></div>
+
+      <div id="facecam" class="clip" data-start="0" data-duration="5" data-track-index="1">
+        <!-- The renderer composes the actual face-cam over this slot at the host level. -->
+        <div class="placeholder"></div>
+      </div>
+
+      <div id="headline" class="clip" data-start="0" data-duration="5" data-track-index="2"></div>
+    </div>
+
+    <script>
+      (function () {
+        let title = "";
+        try {
+          const params = new URLSearchParams((window.name || "").replace(/^.*?\?/, ""));
+          title = (params.get("title") || "").replace(/&#10;|\\n/g, "\n");
+        } catch {}
+        const escapeHtml = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+        document.getElementById("headline").innerHTML =
+          escapeHtml(title || "Thanks for\nwatching").replace(/\n/g, "<br>");
+
+        window.__timelines = window.__timelines || {};
+        const tl = gsap.timeline({ paused: true });
+        tl.from("#bg", { opacity: 0, duration: 0.6, ease: "power3.out" }, 0);
+        tl.from("#headline", { opacity: 0, x: -60, duration: 0.7, ease: "power3.out" }, 0);
+        tl.from("#facecam", { opacity: 0, x: 80, duration: 0.6, ease: "power3.out" }, 0.05);
+        window.__timelines["outro-split"] = tl;
+      })();
+    </script>
+  </body>
+</html>
