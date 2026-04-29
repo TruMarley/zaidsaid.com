@@ -11603,11 +11603,20 @@ function HyperFramesTab() {
       } else {
         payload.clip_url = sourceUrl;
       }
-      const r = await fetch(hfBase.replace(/\/$/, '') + '/render', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
+      // x129: 4 min upper bound — Fly proxy gives up around 60-300s on idle
+      // and we'd rather surface a clear error than spin forever. The known
+      // production issue (issue #80) makes this timeout the common case.
+      const ctrl = new AbortController();
+      const tid = setTimeout(() => ctrl.abort(), 240_000);
+      let r;
+      try {
+        r = await fetch(hfBase.replace(/\/$/, '') + '/render', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+          signal: ctrl.signal,
+        });
+      } finally { clearTimeout(tid); }
       if (!r.ok) {
         const detail = await r.text().catch(() => '');
         throw new Error('HTTP ' + r.status + ' — ' + detail.slice(0, 200));
@@ -11619,7 +11628,15 @@ function HyperFramesTab() {
       setRenderedBlob(blob);
       setRenderedUrl(url);
     } catch (e) {
-      setRenderErr('Render failed: ' + e.message);
+      // x129: rephrase the "render endpoint hangs in prod" case so users know
+      // to check the known issue rather than think it's their input.
+      const isTimeout = e && (e.name === 'AbortError' || /aborted|timeout/i.test(String(e.message)));
+      const is5xx = /HTTP 5\d\d|HTTP 0/.test(String(e.message));
+      if (isTimeout || is5xx) {
+        setRenderErr('Renderer is currently offline (known issue) — see https://github.com/TruMarley/zaidsaid.com/issues/80. Editor flow up to here works; final MP4 export is the only blocked step.');
+      } else {
+        setRenderErr('Render failed: ' + e.message);
+      }
     } finally {
       setRenderBusy(false);
     }
