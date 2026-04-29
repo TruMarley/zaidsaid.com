@@ -413,9 +413,16 @@ function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
+// x127b: spawn the hyperframes binary by absolute path. The previous form
+// was `spawn("npx", ["hyperframes", ...], { cwd: workDir })`, which made
+// npx walk up from /tmp/hf-XXX looking for node_modules — never finding the
+// app's install at /app/node_modules — so every render shelled out to a
+// fresh npm download (slow at best, OOM/SIGKILL at worst on a small Fly
+// machine). Using the local binary skips npx entirely.
+const HF_BIN = path.join(__dirname, "node_modules", ".bin", "hyperframes");
 function runRender(cwd, outPath) {
   return new Promise((resolve, reject) => {
-    const child = spawn("npx", ["hyperframes", "render", "--output", outPath, "--quiet"], {
+    const child = spawn(HF_BIN, ["render", "--output", outPath, "--quiet"], {
       cwd, stdio: ["ignore", "inherit", "inherit"]
     });
     child.on("error", reject);
