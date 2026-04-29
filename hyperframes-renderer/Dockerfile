@@ -33,6 +33,9 @@ RUN npm install --omit=dev --no-audit --no-fund
 
 COPY server.mjs ./
 COPY templates/ ./templates/
+COPY bin/ ./bin/
+COPY registry/ ./registry/
+COPY projects/ ./projects/
 
 # Render output dir (ephemeral; per-request workdirs go through os.tmpdir())
 RUN mkdir -p renders

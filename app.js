@@ -11424,6 +11424,95 @@ function HyperFramesTab() {
 
   const setTR = (key, patch) => setToolResults(prev => ({ ...prev, [key]: { ...(prev[key]||{}), ...patch } }));
 
+  // x126: NLE state — playhead, video duration, overlays (beats[]), cuts.
+  const [duration,  setDuration]  = React.useState(0);
+  const [playhead,  setPlayhead]  = React.useState(0);
+  const [isPlaying, setIsPlaying] = React.useState(false);
+  const [overlays,  setOverlays]  = React.useState([]);   // [{id, kind, start, duration, side, eyebrow, title, karaokeFromTranscript}]
+  const [cuts,      setCuts]      = React.useState([]);   // [{start, end}]
+  const [autoCutThreshold, setAutoCutThreshold] = React.useState(0.4);
+  const videoRef = React.useRef(null);
+
+  // Sync the <video> currentTime with playhead state on seek; sync state from
+  // the video while playing so the timeline cursor stays glued to playback.
+  React.useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    const onTime = () => setPlayhead(v.currentTime);
+    const onMeta = () => setDuration(v.duration || 0);
+    const onPlay = () => setIsPlaying(true);
+    const onPause = () => setIsPlaying(false);
+    v.addEventListener('timeupdate', onTime);
+    v.addEventListener('loadedmetadata', onMeta);
+    v.addEventListener('play', onPlay);
+    v.addEventListener('pause', onPause);
+    return () => {
+      v.removeEventListener('timeupdate', onTime);
+      v.removeEventListener('loadedmetadata', onMeta);
+      v.removeEventListener('play', onPlay);
+      v.removeEventListener('pause', onPause);
+    };
+  }, [clipObjUrl, clipUrl]);
+
+  // Parsed transcript for the timeline + auto-edit. Cheap to recompute.
+  const transcriptParsed = React.useMemo(() => {
+    try { const a = JSON.parse(transcriptWords || '[]'); return Array.isArray(a) ? a : []; }
+    catch { return []; }
+  }, [transcriptWords]);
+
+  // Detect silence segments — gaps between consecutive words longer than
+  // `threshold`, plus head/tail silences before/after the first/last word.
+  const detectedSilences = React.useMemo(() => {
+    if (!duration || transcriptParsed.length === 0) return [];
+    const out = [];
+    const head = Number(transcriptParsed[0].start || 0);
+    if (head > autoCutThreshold) out.push({ start: 0, end: head - 0.05 });
+    for (let i = 0; i < transcriptParsed.length - 1; i++) {
+      const a = Number(transcriptParsed[i].end || 0);
+      const b = Number(transcriptParsed[i+1].start || 0);
+      if (b - a > autoCutThreshold) out.push({ start: a + 0.05, end: b - 0.05 });
+    }
+    const lastEnd = Number(transcriptParsed[transcriptParsed.length-1].end || 0);
+    if (duration - lastEnd > autoCutThreshold) out.push({ start: lastEnd + 0.05, end: duration });
+    return out.filter(s => s.end - s.start >= 0.15);
+  }, [transcriptParsed, duration, autoCutThreshold]);
+
+  const fmtTime = (t) => {
+    const s = Math.max(0, Number(t) || 0);
+    const m = Math.floor(s / 60);
+    const r = (s - m * 60).toFixed(1);
+    return `${m}:${r.padStart(4, '0')}`;
+  };
+
+  const seekTo = (t) => {
+    const v = videoRef.current;
+    const clamped = Math.max(0, Math.min(duration || 0, t));
+    if (v) v.currentTime = clamped;
+    setPlayhead(clamped);
+  };
+
+  // Add an overlay beat at the playhead. `kind` ∈ left | right | full | bottom | split.
+  const addOverlay = (kind) => {
+    const t = playhead;
+    const def = kind === 'split'
+      ? { duration: 5.0, title: 'Thanks for\nwatching' }
+      : kind === 'full'
+        ? { duration: 4.0, title: title || 'Watch this' }
+        : { duration: 4.0, eyebrow: handle || '@zaidsaid', title: title || 'Watch this' };
+    setOverlays(prev => [...prev, {
+      id: 'b_' + Math.random().toString(36).slice(2, 8),
+      kind,
+      start: t,
+      duration: def.duration,
+      side: kind,
+      eyebrow: def.eyebrow || '',
+      title: def.title || '',
+      karaokeFromTranscript: kind !== 'split' && kind !== 'full',
+    }]);
+  };
+  const removeOverlay = (id) => setOverlays(prev => prev.filter(o => o.id !== id));
+  const updateOverlay = (id, patch) => setOverlays(prev => prev.map(o => o.id === id ? { ...o, ...patch } : o));
+
   // ── file handling ─────────────────────────────────────────────────────────
   const onClipFile = (e) => {
     const f = e.target.files && e.target.files[0];
@@ -11467,12 +11556,32 @@ function HyperFramesTab() {
     try {
       let word_timings = [];
       try { word_timings = JSON.parse(transcriptWords || '[]'); } catch { word_timings = []; }
+      // x126: emit beats[] + cuts[] when the editor has them. Falls back to
+      // the basic clip-9x16 path when the user hasn't added any overlays.
+      const beats = overlays.map(o => ({
+        id: o.id,
+        side: o.side || o.kind,
+        start: Number(o.start) || 0,
+        duration: Number(o.duration) || 3,
+        eyebrow: o.eyebrow || '',
+        title: o.title || '',
+        karaoke_words: (o.karaokeFromTranscript && Array.isArray(word_timings))
+          ? word_timings
+              .filter(w => Number(w.start) >= Number(o.start) - 0.05 && Number(w.start) < Number(o.start) + Number(o.duration))
+              .slice(0, 8)
+              .map(w => ({ text: String(w.text || '').trim(), start: Number(w.start), end: Number(w.end) }))
+              .filter(w => w.text)
+          : []
+      }));
+      const effectiveStyle = beats.length ? 'clip-9x16-liquidglass' : style;
       let payload = {
         duration: 30,
         title: title || 'Untitled',
         handle: handle || '@zaidsaid',
         word_timings: Array.isArray(word_timings) ? word_timings : [],
-        style,
+        style: effectiveStyle,
+        beats,
+        cuts,
       };
       if (sourceBlob) {
         const b64 = await new Promise((res, rej) => {
@@ -11684,141 +11793,341 @@ function HyperFramesTab() {
 
   const missingBanner = (label) => React.createElement('div', { style:{ color:'#fbbf24', fontSize:12, marginTop:6 } }, label + ' URL not configured — add it in Settings → Providers.');
 
+  // x126: NLE-style track row helper. `segments` is an array of items with
+  // `start` and `duration` (or `end`); each renders as an absolutely-
+  // positioned colored block on the track. `onClick` fires on bar click.
+  const Track = ({ label, color, height, segments, onClick, children }) => (
+    React.createElement('div', { style:{ display:'flex', gap:8, alignItems:'center', marginBottom:6 } },
+      React.createElement('div', { style:{ width:80, fontSize:11, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'0.06em', fontWeight:700 } }, label),
+      React.createElement('div', {
+        style:{ flex:1, position:'relative', height, background:'rgba(255,255,255,0.03)', borderRadius:4, border:'1px solid rgba(255,255,255,0.06)', cursor: onClick ? 'pointer' : 'default', overflow:'hidden' },
+        onClick: onClick ? (e) => {
+          const rect = e.currentTarget.getBoundingClientRect();
+          const t = ((e.clientX - rect.left) / rect.width) * (duration || 1);
+          onClick(t, e);
+        } : undefined
+      },
+        children,
+        (segments || []).map((s, i) => {
+          const left = ((Number(s.start) / Math.max(0.01, duration)) * 100).toFixed(2) + '%';
+          const w = ((Number(s.duration ?? (s.end - s.start)) / Math.max(0.01, duration)) * 100).toFixed(2) + '%';
+          return React.createElement('div', {
+            key: s.id || i,
+            title: s.title || '',
+            onClick: s.onClick ? (e) => { e.stopPropagation(); s.onClick(); } : undefined,
+            style: {
+              position:'absolute', left, width:w, top:2, bottom:2,
+              background: s.bg || color,
+              borderRadius:3,
+              border: s.border || '1px solid rgba(255,255,255,0.18)',
+              fontSize:10, fontWeight:700, color:'#fff',
+              display:'flex', alignItems:'center', justifyContent:'center',
+              padding:'0 6px', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis',
+              boxShadow: s.selected ? '0 0 0 2px #ff3366' : 'none',
+              cursor: s.onClick ? 'pointer' : (onClick ? 'pointer' : 'default'),
+              opacity: s.opacity ?? 1,
+            },
+          }, s.label || '');
+        })
+      )
+    )
+  );
+
+  // Playhead overlay (stretches across all tracks).
+  const playheadStyle = {
+    position:'absolute', top:0, bottom:0,
+    left: ((playhead / Math.max(0.01, duration)) * 100).toFixed(2) + '%',
+    width:2, background:'#ff3366', pointerEvents:'none', zIndex:5,
+    boxShadow:'0 0 8px rgba(255,51,102,0.6)',
+  };
+
   return (
-    React.createElement('div', { style: { padding:'20px 24px', maxWidth:1400, margin:'0 auto' } },
+    React.createElement('div', { style: { padding:'20px 24px', maxWidth:1500, margin:'0 auto' } },
       /* ── page header ── */
-      React.createElement('div', { style:{ display:'flex', alignItems:'center', gap:12, marginBottom:20 } },
-        React.createElement('h1', { style:{ fontSize:22, fontWeight:700, margin:0 } }, 'HyperFrames Studio'),
-        React.createElement('span', { style:{ fontSize:12, color:'var(--muted)' } }, 'Manual renderer playground')
+      React.createElement('div', { style:{ display:'flex', alignItems:'center', gap:14, marginBottom:14, flexWrap:'wrap' } },
+        React.createElement('h1', { style:{ fontSize:22, fontWeight:700, margin:0 } }, 'HyperFrames Editor'),
+        React.createElement('span', { style:{ fontSize:12, color:'var(--muted)' } }, 'Drop a video → trim silences → add overlays → render'),
+        React.createElement('div', { style:{ flex:1 } }),
+        React.createElement('button', {
+          className:'btn btn-primary',
+          onClick: onRender,
+          disabled: renderBusy || !hfBase || (!clipFile && !clipUrl),
+          style:{ fontSize:13 }
+        }, renderBusy ? 'Rendering…' : (cuts.length ? `Render (${cuts.length} cut${cuts.length===1?'':'s'}, ${overlays.length} overlay${overlays.length===1?'':'s'})` : `Render MP4 (${overlays.length} overlay${overlays.length===1?'':'s'})`)),
+        React.createElement('button', { className:'btn', onClick: onThumb, disabled: thumbBusy || !hfBase, style:{ fontSize:13 } }, thumbBusy ? 'Thumbnail…' : 'Thumbnail'),
       ),
 
       /* ── health strip ── */
-      React.createElement('div', { style:{ display:'flex', gap:20, flexWrap:'wrap', marginBottom:20, padding:'8px 14px', background:'rgba(255,255,255,0.03)', borderRadius:8, border:'1px solid rgba(255,255,255,0.06)', fontSize:12 } },
+      React.createElement('div', { style:{ display:'flex', gap:18, flexWrap:'wrap', marginBottom:14, padding:'6px 12px', background:'rgba(255,255,255,0.03)', borderRadius:6, border:'1px solid rgba(255,255,255,0.06)', fontSize:11 } },
         React.createElement('span', null, PingDot({ok:pings.hf}),     'Renderer'),
         React.createElement('span', null, PingDot({ok:pings.audio}),  'audio-ai'),
         React.createElement('span', null, PingDot({ok:pings.vision}), 'vision-ai'),
         React.createElement('span', null, PingDot({ok:pings.tts}),    'tts'),
       ),
 
-      !hfBase && React.createElement('div', { style:{ background:'rgba(251,191,36,0.12)', border:'1px solid rgba(251,191,36,0.3)', color:'#fde68a', borderRadius:8, padding:'10px 14px', marginBottom:16, fontSize:13 } },
-        'HyperFrames renderer is disabled — enable it in Settings → Providers to use the Render and Thumbnail buttons.'
+      !hfBase && React.createElement('div', { style:{ background:'rgba(251,191,36,0.12)', border:'1px solid rgba(251,191,36,0.3)', color:'#fde68a', borderRadius:6, padding:'8px 12px', marginBottom:14, fontSize:12 } },
+        'HyperFrames renderer is disabled — enable it in Settings → Providers to use Render and Thumbnail.'
       ),
 
-      /* ── three-column layout ── */
-      React.createElement('div', { style:{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:20, alignItems:'start' } },
+      renderErr && React.createElement(ErrBanner, { msg: renderErr }),
 
-        /* ── LEFT: inputs ── */
-        React.createElement('div', { className:'card', style:{ padding:20 } },
-          React.createElement('h2', { style:{ fontSize:14, fontWeight:700, marginBottom:14 } }, 'Input'),
+      /* ── editor body: 2-col (preview + panels) ── */
+      React.createElement('div', { style:{ display:'grid', gridTemplateColumns:'minmax(0, 1fr) 380px', gap:16, marginBottom:16 } },
 
-          React.createElement('div', { style:{ marginBottom:14 } },
-            React.createElement('label', { style:{ fontSize:12, color:'var(--muted)', display:'block', marginBottom:4 } }, 'Clip URL (public MP4)'),
-            React.createElement('input', {
-              type:'url', placeholder:'https://…/clip.mp4',
-              value: clipUrl,
-              onChange: e => { setClipUrl(e.target.value); setClipFile(null); if(clipObjUrl) URL.revokeObjectURL(clipObjUrl); setClipObjUrl(''); },
-              style:{ width:'100%', boxSizing:'border-box', padding:'6px 8px', borderRadius:6, border:'1px solid rgba(255,255,255,0.12)', background:'rgba(0,0,0,0.25)', color:'inherit', fontSize:13 }
-            })
+        /* ── LEFT: preview ── */
+        React.createElement('div', { className:'card', style:{ padding:14 } },
+          React.createElement('div', { style:{ position:'relative', background:'#000', borderRadius:8, overflow:'hidden', aspectRatio:'9/16', maxHeight:520, margin:'0 auto', display:'flex', alignItems:'center', justifyContent:'center' } },
+            (clipObjUrl || clipUrl)
+              ? React.createElement('video', {
+                  ref: videoRef,
+                  src: clipObjUrl || clipUrl,
+                  controls: false, muted: false, playsInline: true,
+                  style:{ width:'100%', height:'100%', objectFit:'contain', background:'#000' }
+                })
+              : React.createElement('div', {
+                  style:{ color:'var(--muted)', fontSize:13, textAlign:'center', padding:24 },
+                }, 'Load a clip below to start editing.')
           ),
-
-          React.createElement('div', { style:{ marginBottom:14 } },
-            React.createElement('label', { style:{ fontSize:12, color:'var(--muted)', display:'block', marginBottom:4 } }, 'Or upload clip (MP4)'),
-            React.createElement('input', { type:'file', accept:'video/mp4,video/*', onChange: onClipFile }),
-            clipObjUrl && React.createElement('video', { src: clipObjUrl, controls: true, muted: true, style:{ width:'100%', borderRadius:6, marginTop:8, maxHeight:160, objectFit:'contain', background:'#000' } })
-          ),
-
-          React.createElement('div', { style:{ marginBottom:14 } },
-            React.createElement('label', { style:{ fontSize:12, color:'var(--muted)', display:'block', marginBottom:4 } }, 'Title'),
-            React.createElement('input', { type:'text', placeholder:'Hook copy…', value: title, onChange: e => setTitle(e.target.value), style:{ width:'100%', boxSizing:'border-box', padding:'6px 8px', borderRadius:6, border:'1px solid rgba(255,255,255,0.12)', background:'rgba(0,0,0,0.25)', color:'inherit', fontSize:13 } })
-          ),
-
-          React.createElement('div', { style:{ marginBottom:14 } },
-            React.createElement('label', { style:{ fontSize:12, color:'var(--muted)', display:'block', marginBottom:4 } }, 'Handle'),
-            React.createElement('input', { type:'text', placeholder:'@zaidsaid', value: handle, onChange: e => setHandle(e.target.value), style:{ width:'100%', boxSizing:'border-box', padding:'6px 8px', borderRadius:6, border:'1px solid rgba(255,255,255,0.12)', background:'rgba(0,0,0,0.25)', color:'inherit', fontSize:13 } })
-          ),
-
-          React.createElement('div', { style:{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:14 } },
-            React.createElement('div', null,
-              React.createElement('label', { style:{ fontSize:12, color:'var(--muted)', display:'block', marginBottom:4 } }, 'Style'),
-              React.createElement('select', { value: style, onChange: e => setStyle(e.target.value), style:{ width:'100%', padding:'6px 8px', borderRadius:6, border:'1px solid rgba(255,255,255,0.12)', background:'rgba(0,0,0,0.25)', color:'inherit', fontSize:13 } },
-                React.createElement('option', { value:'clip-9x16' }, 'clip-9x16 (default)'),
-              )
+          /* transport bar */
+          React.createElement('div', { style:{ display:'flex', alignItems:'center', gap:10, marginTop:12, fontSize:12 } },
+            React.createElement('button', {
+              className:'btn btn-ghost', style:{ minWidth:64, fontSize:13 },
+              disabled: !duration,
+              onClick: () => { const v = videoRef.current; if (!v) return; if (v.paused) v.play(); else v.pause(); }
+            }, isPlaying ? '⏸  Pause' : '▶  Play'),
+            React.createElement('button', { className:'btn btn-ghost', style:{ fontSize:12 }, disabled:!duration, onClick: () => seekTo(0) }, '⏮  Start'),
+            React.createElement('div', { style:{ flex:1, fontFamily:'monospace', color:'var(--muted)', textAlign:'center' } },
+              `${fmtTime(playhead)} / ${fmtTime(duration)}`
             ),
-            React.createElement('div', null,
-              React.createElement('label', { style:{ fontSize:12, color:'var(--muted)', display:'block', marginBottom:4 } }, 'Accent color'),
-              React.createElement('input', { type:'color', value: brandColor, onChange: e => setBrandColor(e.target.value), style:{ width:'100%', height:36, borderRadius:6, border:'1px solid rgba(255,255,255,0.12)', background:'rgba(0,0,0,0.25)', cursor:'pointer' } })
+            React.createElement('span', { style:{ fontSize:11, color:'var(--muted)' } },
+              transcriptParsed.length ? `${transcriptParsed.length} words` : 'no transcript'
             )
           ),
+        ),
 
-          React.createElement('div', { style:{ marginBottom:14 } },
-            React.createElement('label', { style:{ fontSize:12, color:'var(--muted)', display:'block', marginBottom:4 } }, 'Transcript words (JSON word_timings)'),
-            React.createElement('textarea', {
-              placeholder:'[{"text":"Hello","start":0.1,"end":0.4}, …] or click Auto-transcribe',
-              value: transcriptWords,
-              onChange: e => setTranscriptWords(e.target.value),
-              rows: 4,
-              style:{ width:'100%', boxSizing:'border-box', padding:'6px 8px', borderRadius:6, border:'1px solid rgba(255,255,255,0.12)', background:'rgba(0,0,0,0.25)', color:'inherit', fontSize:11, fontFamily:'monospace', resize:'vertical' }
+        /* ── RIGHT: panel stack ── */
+        React.createElement('div', { style:{ display:'flex', flexDirection:'column', gap:12, minWidth:0 } },
+
+          /* Source panel */
+          React.createElement('div', { className:'card', style:{ padding:14 } },
+            React.createElement('div', { style:{ fontSize:11, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.08em', color:'var(--muted)', marginBottom:10 } }, 'Source'),
+            React.createElement('input', {
+              type:'file', accept:'video/mp4,video/*', onChange: onClipFile,
+              style:{ fontSize:12, marginBottom:8, width:'100%' }
             }),
-            React.createElement('button', { className:'btn btn-ghost', style:{ marginTop:6, fontSize:12 }, onClick: onAutoTranscribe, disabled: !audioBase || renderBusy },
-              renderBusy ? 'Transcribing…' : 'Auto-transcribe via audio-ai'
+            React.createElement('input', {
+              type:'url', placeholder:'…or paste public MP4 URL',
+              value: clipUrl,
+              onChange: e => { setClipUrl(e.target.value); setClipFile(null); if(clipObjUrl) URL.revokeObjectURL(clipObjUrl); setClipObjUrl(''); },
+              style:{ width:'100%', boxSizing:'border-box', padding:'5px 7px', borderRadius:5, border:'1px solid rgba(255,255,255,0.12)', background:'rgba(0,0,0,0.25)', color:'inherit', fontSize:12, marginBottom:8 }
+            }),
+            React.createElement('button', {
+              className:'btn btn-ghost', style:{ fontSize:12, width:'100%' },
+              onClick: onAutoTranscribe,
+              disabled: !audioBase || renderBusy || !clipFile,
+            }, renderBusy ? 'Transcribing…' : (transcriptParsed.length ? 'Re-transcribe' : 'Auto-transcribe')),
+            !audioBase && missingBanner('audio-ai'),
+          ),
+
+          /* Properties panel */
+          React.createElement('div', { className:'card', style:{ padding:14 } },
+            React.createElement('div', { style:{ fontSize:11, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.08em', color:'var(--muted)', marginBottom:10 } }, 'Properties'),
+            React.createElement('label', { style:{ fontSize:11, color:'var(--muted)', display:'block', marginBottom:3 } }, 'Title'),
+            React.createElement('input', { type:'text', placeholder:'Hook copy…', value: title, onChange: e => setTitle(e.target.value),
+              style:{ width:'100%', boxSizing:'border-box', padding:'5px 7px', borderRadius:5, border:'1px solid rgba(255,255,255,0.12)', background:'rgba(0,0,0,0.25)', color:'inherit', fontSize:12, marginBottom:8 } }),
+            React.createElement('label', { style:{ fontSize:11, color:'var(--muted)', display:'block', marginBottom:3 } }, 'Handle'),
+            React.createElement('input', { type:'text', placeholder:'@zaidsaid', value: handle, onChange: e => setHandle(e.target.value),
+              style:{ width:'100%', boxSizing:'border-box', padding:'5px 7px', borderRadius:5, border:'1px solid rgba(255,255,255,0.12)', background:'rgba(0,0,0,0.25)', color:'inherit', fontSize:12, marginBottom:8 } }),
+            React.createElement('div', { style:{ display:'grid', gridTemplateColumns:'1fr 90px', gap:8 } },
+              React.createElement('div', null,
+                React.createElement('label', { style:{ fontSize:11, color:'var(--muted)', display:'block', marginBottom:3 } }, 'Style (when no overlays)'),
+                React.createElement('select', { value: style, onChange: e => setStyle(e.target.value),
+                  style:{ width:'100%', padding:'5px 7px', borderRadius:5, border:'1px solid rgba(255,255,255,0.12)', background:'rgba(0,0,0,0.25)', color:'inherit', fontSize:12 } },
+                  React.createElement('option', { value:'clip-9x16' }, 'clip-9x16 (basic captions)'),
+                )
+              ),
+              React.createElement('div', null,
+                React.createElement('label', { style:{ fontSize:11, color:'var(--muted)', display:'block', marginBottom:3 } }, 'Accent'),
+                React.createElement('input', { type:'color', value: brandColor, onChange: e => setBrandColor(e.target.value),
+                  style:{ width:'100%', height:30, borderRadius:5, border:'1px solid rgba(255,255,255,0.12)', background:'rgba(0,0,0,0.25)', cursor:'pointer' } })
+              ),
             ),
-            !audioBase && missingBanner('audio-ai')
+            overlays.length > 0 && React.createElement('div', { style:{ marginTop:8, fontSize:11, color:'#86efac' } },
+              `→ Render will use clip-9x16-liquidglass with ${overlays.length} overlay${overlays.length===1?'':'s'}.`
+            ),
+          ),
+
+          /* Auto-edit panel */
+          React.createElement('div', { className:'card', style:{ padding:14 } },
+            React.createElement('div', { style:{ fontSize:11, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.08em', color:'var(--muted)', marginBottom:10 } }, 'Auto-edit'),
+            React.createElement('div', { style:{ display:'flex', alignItems:'center', gap:8, marginBottom:8, fontSize:12 } },
+              React.createElement('span', { style:{ color:'var(--muted)' } }, 'Silence threshold'),
+              React.createElement('input', { type:'number', min:0.1, max:2, step:0.05, value: autoCutThreshold,
+                onChange: e => setAutoCutThreshold(Math.max(0.1, Math.min(2, Number(e.target.value) || 0.4))),
+                style:{ width:64, padding:'4px 6px', borderRadius:4, border:'1px solid rgba(255,255,255,0.12)', background:'rgba(0,0,0,0.25)', color:'inherit', fontSize:12 } }),
+              React.createElement('span', { style:{ color:'var(--muted)' } }, 's'),
+            ),
+            React.createElement('div', { style:{ fontSize:11, color:'var(--muted)', marginBottom:8 } },
+              transcriptParsed.length === 0
+                ? 'Transcribe first — silence detection uses word_timings.'
+                : `Detected ${detectedSilences.length} silence${detectedSilences.length===1?'':'s'} above threshold.`
+            ),
+            React.createElement('div', { style:{ display:'flex', gap:6, flexWrap:'wrap' } },
+              React.createElement('button', { className:'btn', style:{ fontSize:12, flex:1 }, disabled: detectedSilences.length === 0,
+                onClick: () => setCuts(detectedSilences.map(s => ({ start: s.start, end: s.end }))) },
+                `Trim silences (${detectedSilences.length})`),
+              React.createElement('button', { className:'btn btn-ghost', style:{ fontSize:12 }, disabled: cuts.length === 0,
+                onClick: () => setCuts([]) }, 'Clear cuts'),
+            ),
+            cuts.length > 0 && React.createElement('div', { style:{ marginTop:8, fontSize:11, color:'#86efac' } },
+              `→ ${cuts.length} cut${cuts.length===1?'':'s'}, ${(cuts.reduce((s,c)=>s+(c.end-c.start),0)).toFixed(1)}s removed at render.`
+            ),
+          ),
+
+          /* Overlays panel */
+          React.createElement('div', { className:'card', style:{ padding:14 } },
+            React.createElement('div', { style:{ fontSize:11, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.08em', color:'var(--muted)', marginBottom:10 } }, 'Overlays'),
+            React.createElement('div', { style:{ fontSize:11, color:'var(--muted)', marginBottom:8 } },
+              `Adds at playhead (${fmtTime(playhead)}). Drag the bar on the O1 track to edit.`),
+            React.createElement('div', { style:{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:6, marginBottom:6 } },
+              React.createElement('button', { className:'btn', style:{ fontSize:12 }, disabled: !duration, onClick: () => addOverlay('left') }, '+ Card LEFT'),
+              React.createElement('button', { className:'btn', style:{ fontSize:12 }, disabled: !duration, onClick: () => addOverlay('right') }, '+ Card RIGHT'),
+              React.createElement('button', { className:'btn', style:{ fontSize:12 }, disabled: !duration, onClick: () => addOverlay('full') }, '+ Banner FULL'),
+              React.createElement('button', { className:'btn', style:{ fontSize:12 }, disabled: !duration, onClick: () => addOverlay('split') }, '+ Outro SPLIT'),
+            ),
+            overlays.length > 0 && React.createElement('div', { style:{ marginTop:8, fontSize:11, color:'var(--muted)' } },
+              `${overlays.length} overlay${overlays.length===1?'':'s'} on timeline. Click a bar on O1 to remove.`
+            ),
+          ),
+
+          /* Output panel — rendered video preview */
+          renderedUrl && React.createElement('div', { className:'card', style:{ padding:14 } },
+            React.createElement('div', { style:{ fontSize:11, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.08em', color:'var(--muted)', marginBottom:8 } }, 'Rendered'),
+            React.createElement('video', { src: renderedUrl, controls: true, style:{ width:'100%', borderRadius:6, background:'#000', maxHeight:240 } }),
+            React.createElement('a', { href: renderedUrl, download:'hyperframes-render.mp4', className:'btn btn-ghost', style:{ marginTop:6, fontSize:12, display:'inline-block' } }, 'Download MP4'),
+          ),
+
+          thumbUrl && React.createElement('div', { className:'card', style:{ padding:14 } },
+            React.createElement('div', { style:{ fontSize:11, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.08em', color:'var(--muted)', marginBottom:8 } }, 'Thumbnail'),
+            React.createElement('img', { src: thumbUrl, alt:'thumbnail', style:{ width:'100%', borderRadius:6, objectFit:'contain', maxHeight:200 } }),
+            React.createElement('a', { href: thumbUrl, download:'hyperframes-thumb.png', className:'btn btn-ghost', style:{ marginTop:6, fontSize:12, display:'inline-block' } }, 'Download PNG')
+          ),
+        ),
+      ),
+
+      /* ── TIMELINE ── */
+      React.createElement('div', { className:'card', style:{ padding:14, position:'relative' } },
+        React.createElement('div', { style:{ display:'flex', alignItems:'center', gap:12, marginBottom:10 } },
+          React.createElement('div', { style:{ fontSize:11, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.08em', color:'var(--muted)' } }, 'Timeline'),
+          React.createElement('div', { style:{ fontSize:11, color:'var(--muted)' } },
+            duration ? `${fmtTime(duration)} total` : 'no clip loaded'
+          ),
+        ),
+        React.createElement('div', { style:{ position:'relative' } },
+          /* time ruler — clickable to seek */
+          React.createElement('div', {
+            style:{ display:'flex', gap:8, alignItems:'center', marginBottom:6 },
+          },
+            React.createElement('div', { style:{ width:80, fontSize:10, color:'var(--muted)' } }, '00:00'),
+            React.createElement('div', {
+              style:{ flex:1, position:'relative', height:18, background:'rgba(255,255,255,0.04)', borderRadius:3, cursor: duration ? 'pointer' : 'default', overflow:'hidden' },
+              onClick: (e) => {
+                if (!duration) return;
+                const rect = e.currentTarget.getBoundingClientRect();
+                const t = ((e.clientX - rect.left) / rect.width) * duration;
+                seekTo(t);
+              },
+            },
+              /* tick marks every ~10% */
+              [0, 0.25, 0.5, 0.75, 1].map((p, i) =>
+                React.createElement('div', { key:i, style:{ position:'absolute', left:(p*100)+'%', top:0, bottom:0, borderLeft:'1px solid rgba(255,255,255,0.12)', fontSize:9, color:'var(--muted)', paddingLeft:3 } },
+                  fmtTime((duration||0) * p)
+                )
+              ),
+            ),
+          ),
+          /* tracks (V1, A1, C1, O1, B1) */
+          React.createElement('div', { style:{ position:'relative' } },
+            /* V1 — video segments + cut overlays */
+            Track({
+              label:'V1', color:'rgba(60,140,200,0.6)', height:34,
+              onClick: (t) => seekTo(t),
+              segments: duration ? [
+                { id:'v', start:0, duration: duration, label: clipFile ? clipFile.name : (clipUrl ? 'clip' : 'video'), bg:'linear-gradient(180deg, rgba(60,140,200,0.5), rgba(40,90,160,0.5))', border:'1px solid rgba(120,180,220,0.3)' },
+                ...cuts.map((c, i) => ({ id:'cut'+i, start:c.start, duration:c.end-c.start, label:'CUT', bg:'repeating-linear-gradient(45deg, rgba(255,80,80,0.65) 0 4px, rgba(180,30,30,0.55) 4px 8px)', border:'1px solid rgba(255,120,120,0.6)' })),
+              ] : [],
+            }),
+            /* A1 — audio: word density bars (so user gets a sense of voiced/silent regions) */
+            Track({
+              label:'A1', color:'rgba(120,200,140,0.4)', height:34,
+              onClick: (t) => seekTo(t),
+              segments: duration ? transcriptParsed.map((w, i) => ({
+                id:'w'+i, start: Number(w.start)||0, duration: Math.max(0.05, (Number(w.end)||0) - (Number(w.start)||0)),
+                label:'', bg:'linear-gradient(180deg, rgba(120,200,140,0.7), rgba(60,140,90,0.6))', border:'none',
+              })) : [],
+            }),
+            /* C1 — captions: word_timings as text pills */
+            Track({
+              label:'C1', color:'rgba(180,140,220,0.4)', height:24,
+              onClick: (t) => seekTo(t),
+              segments: duration ? transcriptParsed
+                .filter((_, i) => i % 3 === 0)
+                .map((w, i) => ({
+                  id:'c'+i, start: Number(w.start)||0, duration: 0.6,
+                  label: String(w.text||'').slice(0, 12), bg:'rgba(180,140,220,0.5)', border:'1px solid rgba(180,140,220,0.5)',
+                })) : [],
+            }),
+            /* O1 — overlays */
+            Track({
+              label:'O1', color:'rgba(255,180,80,0.6)', height:36,
+              onClick: (t) => seekTo(t),
+              segments: overlays.map(o => ({
+                id: o.id, start: o.start, duration: o.duration,
+                label: `${(o.side||o.kind).toUpperCase()} · ${(o.title||'').replace(/\n/g,' ').slice(0,18)}`,
+                bg: o.side === 'split' ? 'rgba(80,140,255,0.65)' : 'rgba(255,180,80,0.65)',
+                border:'1px solid rgba(255,255,255,0.3)',
+                onClick: () => removeOverlay(o.id),
+              })),
+            }),
+            /* B1 — b-roll placeholder (visual only for now) */
+            Track({
+              label:'B1', color:'rgba(140,140,140,0.4)', height:30,
+              segments: [],
+              children: React.createElement('div', { style:{ position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center', color:'var(--muted)', fontSize:10, pointerEvents:'none' } },
+                'B-roll track — coming soon'
+              )
+            }),
+            /* playhead overlay */
+            duration > 0 && React.createElement('div', {
+              style:{
+                position:'absolute', top:-4, bottom:-4,
+                left: `calc(80px + 8px + (100% - 88px) * ${(playhead / Math.max(0.01, duration))})`,
+                width:2, background:'#ff3366', pointerEvents:'none',
+                boxShadow:'0 0 8px rgba(255,51,102,0.6)',
+              }
+            })
           ),
         ),
 
-        /* ── CENTER: outputs ── */
-        React.createElement('div', { className:'card', style:{ padding:20 } },
-          React.createElement('h2', { style:{ fontSize:14, fontWeight:700, marginBottom:14 } }, 'Output'),
-
-          React.createElement('div', { style:{ display:'flex', gap:8, marginBottom:16, flexWrap:'wrap' } },
-            React.createElement('button', {
-              className:'btn btn-primary',
-              onClick: onRender,
-              disabled: renderBusy || !hfBase,
-              style: !hfBase ? { opacity:0.4 } : {}
-            }, renderBusy ? 'Rendering…' : 'Render video'),
-            React.createElement('button', {
-              className:'btn',
-              onClick: onThumb,
-              disabled: thumbBusy || !hfBase,
-              style: !hfBase ? { opacity:0.4 } : {}
-            }, thumbBusy ? 'Generating…' : 'Generate thumbnail'),
-          ),
-
-          renderErr && React.createElement(ErrBanner, { msg: renderErr }),
-          thumbErr  && React.createElement(ErrBanner, { msg: thumbErr }),
-
-          renderedUrl && React.createElement('div', { style:{ marginBottom:16 } },
-            React.createElement('div', { style:{ fontSize:12, color:'var(--muted)', marginBottom:4 } }, 'Rendered video'),
-            React.createElement('video', { src: renderedUrl, controls: true, style:{ width:'100%', borderRadius:6, background:'#000', maxHeight:280 } }),
-            React.createElement('a', {
-              href: renderedUrl,
-              download: 'hyperframes-render.mp4',
-              className:'btn btn-ghost',
-              style:{ marginTop:6, fontSize:12, display:'inline-block' }
-            }, 'Download MP4')
-          ),
-
-          thumbUrl && React.createElement('div', null,
-            React.createElement('div', { style:{ fontSize:12, color:'var(--muted)', marginBottom:4 } }, 'Thumbnail'),
-            React.createElement('img', { src: thumbUrl, alt:'thumbnail', style:{ width:'100%', borderRadius:6, objectFit:'contain', maxHeight:240 } }),
-            React.createElement('a', {
-              href: thumbUrl,
-              download: 'hyperframes-thumb.png',
-              className:'btn btn-ghost',
-              style:{ marginTop:6, fontSize:12, display:'inline-block' }
-            }, 'Download PNG')
-          ),
-        ),
-
-        /* ── RIGHT: sidecar tools tray ── */
-        React.createElement('div', null,
-
-          ToolSection({ title: 'Tools', children:
-            React.createElement('div', { style:{ fontSize:11, color:'var(--muted)' } }, 'Upload a file below to use the audio-ai, vision-ai, and tts tools.')
+        /* transcript JSON expander (advanced) */
+        React.createElement('details', { style:{ marginTop:14 } },
+          React.createElement('summary', { style:{ fontSize:11, color:'var(--muted)', cursor:'pointer' } }, 'Edit transcript JSON (advanced)'),
+          React.createElement('textarea', {
+            placeholder:'[{"text":"Hello","start":0.1,"end":0.4}, …]',
+            value: transcriptWords,
+            onChange: e => setTranscriptWords(e.target.value),
+            rows: 5,
+            style:{ width:'100%', boxSizing:'border-box', marginTop:6, padding:'6px 8px', borderRadius:5, border:'1px solid rgba(255,255,255,0.12)', background:'rgba(0,0,0,0.25)', color:'inherit', fontSize:11, fontFamily:'monospace', resize:'vertical' }
           }),
+        ),
+      ),
 
-          /* shared file inputs */
+      /* ── advanced tools tray ── */
+      React.createElement('details', { style:{ marginTop:14 } },
+        React.createElement('summary', { style:{ fontSize:13, fontWeight:600, padding:'10px 14px', background:'rgba(255,255,255,0.03)', borderRadius:6, border:'1px solid rgba(255,255,255,0.06)', cursor:'pointer' } }, 'Sidecar tools (transcribe, captions burn-in, stems, vision, voice clone)'),
+        React.createElement('div', { style:{ marginTop:12, display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(280px, 1fr))', gap:12 } },
+
+        /* shared file inputs */
           ToolSection({ title: 'File inputs', children:
             React.createElement('div', null,
               React.createElement('div', { style:{ marginBottom:8 } },
@@ -11940,8 +12249,8 @@ function HyperFramesTab() {
             React.createElement('div', { style:{ fontSize:11, color:'var(--muted)' } }, 'POST /track-people — wired in Repurpose toolbar chip. Dedicated UI pending.')
           }),
 
-        ) /* end right column */
-      ) /* end 3-col grid */
+        ) /* end tools grid */
+      ) /* end advanced tools <details> */
     ) /* end outer div */
   );
 }

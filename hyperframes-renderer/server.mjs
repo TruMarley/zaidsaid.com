@@ -67,6 +67,11 @@ app.post("/render", async (req, res) => {
     // When present, BEAT_BLOCKS are emitted in addition to (or instead of)
     // the standard 3-word caption track. See templates/clip-9x16-liquidglass.html.
     beats = [],
+    // x126: silence/segment cuts to remove from the input clip BEFORE render.
+    // Each entry is [start, end] in the ORIGINAL clip timeline (seconds).
+    // Server uses ffmpeg to concat the kept ranges, remaps `beats[]` and
+    // `word_timings[]` to the trimmed timeline, and updates `duration`.
+    cuts = [],
   } = req.body || {};
   if (!duration) {
     return res.status(400).json({ error: "duration is required" });
@@ -84,6 +89,25 @@ app.post("/render", async (req, res) => {
       resolvedClipUrl = "clip.mp4";
     }
 
+    // x126: pre-trim the clip with ffmpeg if `cuts[]` was supplied. Returns
+    // the new clip path (relative), the trimmed duration, and the cut
+    // total so we can remap downstream timings.
+    const validCuts = normalizeCuts(cuts, duration);
+    let activeDuration = duration;
+    let beatsRemapped = beats;
+    let wordsRemapped = word_timings;
+    if (validCuts.length && clip_b64) {
+      const trimmedRel = await trimClip(workDir, resolvedClipUrl, duration, validCuts);
+      resolvedClipUrl = trimmedRel;
+      activeDuration = duration - sumCutLength(validCuts);
+      beatsRemapped = remapBeatsToTrimmed(beats, validCuts);
+      wordsRemapped = remapWordsToTrimmed(word_timings, validCuts);
+    } else if (validCuts.length) {
+      // We can only ffmpeg-trim when we have the bytes locally. If a clip_url
+      // was supplied, the server would need to download first — out of scope.
+      console.warn("[render] cuts provided with clip_url (not clip_b64) — cuts ignored. Pass clip_b64 to enable trim.");
+    }
+
     const templatePath = path.join(TEMPLATES, `${style}.html`);
     const template = await fs.readFile(templatePath, "utf8");
     const lottieStart = lottie_start != null ? Number(lottie_start) : Math.max(0, duration - 4);
@@ -91,15 +115,15 @@ app.post("/render", async (req, res) => {
     // x124: when beats[] is present, suppress the default caption track —
     // beats own the on-screen text and karaoke runs. word_timings are still
     // accepted so the front-end can pass them through unchanged.
-    const beatsActive = Array.isArray(beats) && beats.length > 0;
+    const beatsActive = Array.isArray(beatsRemapped) && beatsRemapped.length > 0;
     const html = renderTemplate(stripVideoIfMissing(template, resolvedClipUrl), {
       CLIP_URL: resolvedClipUrl,
-      DURATION: duration.toFixed(2),
+      DURATION: activeDuration.toFixed(2),
       TITLE: escapeHtml(title),
       HANDLE: escapeHtml(handle),
-      LOWER_THIRD_START: Math.max(0, duration - 3).toFixed(2),
-      CAPTION_BLOCKS: beatsActive ? "" : buildCaptionBlocks(word_timings),
-      BEAT_BLOCKS: beatsActive ? buildBeatBlocks(beats) : "",
+      LOWER_THIRD_START: Math.max(0, activeDuration - 3).toFixed(2),
+      CAPTION_BLOCKS: beatsActive ? "" : buildCaptionBlocks(wordsRemapped),
+      BEAT_BLOCKS: beatsActive ? buildBeatBlocks(beatsRemapped) : "",
       LOTTIE_URL: lottie_url,
       LOTTIE_START: lottieStart.toFixed(2),
       LOTTIE_DURATION: lottieDuration.toFixed(2),
@@ -107,8 +131,8 @@ app.post("/render", async (req, res) => {
 
     const indexPath = path.join(workDir, "index.html");
     const tweenedHtml = beatsActive
-      ? appendBeatTweens(html, beats)
-      : appendCaptionTweens(html, word_timings);
+      ? appendBeatTweens(html, beatsRemapped)
+      : appendCaptionTweens(html, wordsRemapped);
     await fs.writeFile(indexPath, tweenedHtml);
     await fs.writeFile(path.join(workDir, "meta.json"), JSON.stringify({ id, name: `clip-${id}` }));
     await fs.writeFile(path.join(workDir, "hyperframes.json"), JSON.stringify({
@@ -136,6 +160,124 @@ app.post("/render", async (req, res) => {
     fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
   }
 });
+
+// x126: cuts — segments of the input clip to remove before render. Sorts,
+// merges overlapping ranges, and clips to [0, duration].
+function normalizeCuts(cuts, duration) {
+  if (!Array.isArray(cuts)) return [];
+  const cleaned = cuts
+    .map(c => ({
+      start: Math.max(0, Number(c.start ?? c[0] ?? 0)),
+      end:   Math.min(duration, Number(c.end ?? c[1] ?? 0)),
+    }))
+    .filter(c => c.end > c.start)
+    .sort((a, b) => a.start - b.start);
+  // Merge overlapping/adjacent.
+  const merged = [];
+  for (const c of cleaned) {
+    if (merged.length && c.start <= merged[merged.length - 1].end) {
+      merged[merged.length - 1].end = Math.max(merged[merged.length - 1].end, c.end);
+    } else {
+      merged.push({ ...c });
+    }
+  }
+  return merged;
+}
+
+function sumCutLength(cuts) {
+  return cuts.reduce((s, c) => s + (c.end - c.start), 0);
+}
+
+// Map an original-timeline timestamp `t` to the trimmed timeline by
+// subtracting the total cut length BEFORE `t`. Anchors that fall inside
+// a cut are pulled to the cut's start.
+function remapTime(t, cuts) {
+  let removed = 0;
+  for (const c of cuts) {
+    if (t >= c.end) removed += c.end - c.start;
+    else if (t > c.start) { removed += t - c.start; t = c.start + removed; break; }
+    else break;
+  }
+  return t - removed;
+}
+
+function remapBeatsToTrimmed(beats, cuts) {
+  if (!Array.isArray(beats) || cuts.length === 0) return beats;
+  return beats.map(b => {
+    const start = Number(b.start || 0);
+    const dur = Number(b.duration || 0);
+    return {
+      ...b,
+      start: remapTime(start, cuts),
+      duration: Math.max(0.5, remapTime(start + dur, cuts) - remapTime(start, cuts)),
+      karaoke_words: Array.isArray(b.karaoke_words)
+        ? b.karaoke_words.map(w => ({
+            ...w,
+            start: remapTime(Number(w.start || 0), cuts),
+            end:   remapTime(Number(w.end   || 0), cuts),
+          })).filter(w => w.end > w.start)
+        : b.karaoke_words,
+    };
+  }).filter(b => b.duration > 0);
+}
+
+function remapWordsToTrimmed(words, cuts) {
+  if (!Array.isArray(words) || cuts.length === 0) return words;
+  return words.map(w => ({
+    ...w,
+    start: remapTime(Number(w.start || 0), cuts),
+    end:   remapTime(Number(w.end   || 0), cuts),
+  })).filter(w => w.end > w.start);
+}
+
+// Trim a clip on disk by writing a per-segment list and concat'ing with
+// ffmpeg. Each kept range becomes one ffmpeg trim; concat demuxer joins
+// them losslessly when the source is constant-FPS H.264 (re-encode if not).
+async function trimClip(workDir, clipRel, duration, cuts) {
+  const inputPath = path.join(workDir, clipRel);
+  // Build the kept-ranges list (the inverse of cuts).
+  const kept = [];
+  let cursor = 0;
+  for (const c of cuts) {
+    if (c.start > cursor) kept.push({ start: cursor, end: c.start });
+    cursor = Math.max(cursor, c.end);
+  }
+  if (cursor < duration) kept.push({ start: cursor, end: duration });
+  if (kept.length === 0) throw new Error("trimClip: cuts removed entire clip");
+
+  // Build a filter_complex to extract + concat the kept ranges in one pass.
+  // This re-encodes the video, which is unavoidable when input is AV1 (HF
+  // wants H.264 anyway for headless Chrome's <video>).
+  const filters = [];
+  const labels = [];
+  kept.forEach((k, i) => {
+    const s = k.start.toFixed(3), e = k.end.toFixed(3);
+    filters.push(`[0:v]trim=start=${s}:end=${e},setpts=PTS-STARTPTS[v${i}]`);
+    filters.push(`[0:a]atrim=start=${s}:end=${e},asetpts=PTS-STARTPTS[a${i}]`);
+    labels.push(`[v${i}][a${i}]`);
+  });
+  filters.push(`${labels.join("")}concat=n=${kept.length}:v=1:a=1[outv][outa]`);
+  const outRel = "clip.trimmed.mp4";
+  const outPath = path.join(workDir, outRel);
+  await runFfmpeg([
+    "-y", "-i", inputPath,
+    "-filter_complex", filters.join(";"),
+    "-map", "[outv]", "-map", "[outa]",
+    "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+    "-c:a", "aac", "-b:a", "128k",
+    "-movflags", "+faststart",
+    outPath
+  ]);
+  return outRel;
+}
+
+function runFfmpeg(args) {
+  return new Promise((resolve, reject) => {
+    const child = spawn("ffmpeg", args, { stdio: ["ignore", "ignore", "inherit"] });
+    child.on("error", reject);
+    child.on("exit", code => code === 0 ? resolve() : reject(new Error(`ffmpeg exited ${code}`)));
+  });
+}
 
 // x125: copy compositions/*.html (blocks) and compositions/components/*.html
 // (components) from a project template into a per-render workDir. Empty
