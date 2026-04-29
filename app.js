@@ -11400,8 +11400,25 @@ function HyperFramesTab() {
   const [title,     setTitle]     = React.useState('');
   const [handle,    setHandle]    = React.useState('@zaidsaid');
   const [style,     setStyle]     = React.useState('clip-9x16');
-  const [aspectRatio, setAspectRatio] = React.useState('9:16');
   const [brandColor, setBrandColor] = React.useState('#ff3366');
+  // x130: platform preset → output dimensions. Each preset maps to the
+  // canonical export size each platform recommends. Custom W/H is handled
+  // by setting `preset` to "custom" and using the explicit numeric inputs.
+  const PRESETS = [
+    { id: 'shorts',   label: 'YouTube Shorts',   w: 1080, h: 1920, ar: '9:16' },
+    { id: 'tiktok',   label: 'TikTok',           w: 1080, h: 1920, ar: '9:16' },
+    { id: 'reels',    label: 'Instagram Reels',  w: 1080, h: 1920, ar: '9:16' },
+    { id: 'igfeed',   label: 'Instagram Feed',   w: 1080, h: 1350, ar: '4:5'  },
+    { id: 'igsquare', label: 'Instagram Square', w: 1080, h: 1080, ar: '1:1'  },
+    { id: 'youtube',  label: 'YouTube (16:9)',   w: 1920, h: 1080, ar: '16:9' },
+    { id: 'custom',   label: 'Custom…',          w: 1080, h: 1920, ar: 'custom' },
+  ];
+  const [presetId, setPresetId] = React.useState('shorts');
+  const [customW,  setCustomW]  = React.useState(1080);
+  const [customH,  setCustomH]  = React.useState(1920);
+  const preset = PRESETS.find(p => p.id === presetId) || PRESETS[0];
+  const outW = presetId === 'custom' ? customW : preset.w;
+  const outH = presetId === 'custom' ? customH : preset.h;
 
   // ── output state ─────────────────────────────────────────────────────────
   const [renderedBlob,   setRenderedBlob]   = React.useState(null);
@@ -11582,6 +11599,9 @@ function HyperFramesTab() {
         style: effectiveStyle,
         beats,
         cuts,
+        // x130: platform-aware output dimensions.
+        width: Number(outW) || 1080,
+        height: Number(outH) || 1920,
       };
       if (sourceBlob) {
         const b64 = await new Promise((res, rej) => {
@@ -11893,7 +11913,7 @@ function HyperFramesTab() {
 
         /* ── LEFT: preview ── */
         React.createElement('div', { className:'card', style:{ padding:14 } },
-          React.createElement('div', { style:{ position:'relative', background:'#000', borderRadius:8, overflow:'hidden', aspectRatio:'9/16', maxHeight:520, margin:'0 auto', display:'flex', alignItems:'center', justifyContent:'center' } },
+          React.createElement('div', { style:{ position:'relative', background:'#000', borderRadius:8, overflow:'hidden', aspectRatio: outW + '/' + outH, maxHeight: outW > outH ? 360 : 520, margin:'0 auto', display:'flex', alignItems:'center', justifyContent:'center' } },
             (clipObjUrl || clipUrl)
               ? React.createElement('video', {
                   ref: videoRef,
@@ -11949,6 +11969,21 @@ function HyperFramesTab() {
           /* Properties panel */
           React.createElement('div', { className:'card', style:{ padding:14 } },
             React.createElement('div', { style:{ fontSize:11, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.08em', color:'var(--muted)', marginBottom:10 } }, 'Properties'),
+            /* x130: platform preset → output dimensions */
+            React.createElement('label', { style:{ fontSize:11, color:'var(--muted)', display:'block', marginBottom:3 } }, 'Output size'),
+            React.createElement('select', { value: presetId, onChange: e => setPresetId(e.target.value),
+              style:{ width:'100%', boxSizing:'border-box', padding:'5px 7px', borderRadius:5, border:'1px solid rgba(255,255,255,0.12)', background:'rgba(0,0,0,0.25)', color:'inherit', fontSize:12, marginBottom:8 } },
+              ...PRESETS.map(p => React.createElement('option', { key: p.id, value: p.id }, `${p.label} — ${p.w}×${p.h} (${p.ar})`))
+            ),
+            presetId === 'custom' && React.createElement('div', { style:{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:8 } },
+              React.createElement('input', { type:'number', placeholder:'Width', value: customW, min:160, max:3840,
+                onChange: e => setCustomW(Math.max(160, Math.min(3840, Number(e.target.value)||1080))),
+                style:{ width:'100%', boxSizing:'border-box', padding:'5px 7px', borderRadius:5, border:'1px solid rgba(255,255,255,0.12)', background:'rgba(0,0,0,0.25)', color:'inherit', fontSize:12 } }),
+              React.createElement('input', { type:'number', placeholder:'Height', value: customH, min:160, max:3840,
+                onChange: e => setCustomH(Math.max(160, Math.min(3840, Number(e.target.value)||1920))),
+                style:{ width:'100%', boxSizing:'border-box', padding:'5px 7px', borderRadius:5, border:'1px solid rgba(255,255,255,0.12)', background:'rgba(0,0,0,0.25)', color:'inherit', fontSize:12 } }),
+            ),
+            React.createElement('div', { style:{ fontSize:10, color:'var(--muted)', marginBottom:10 } }, `→ Renders at ${outW}×${outH}.`),
             React.createElement('label', { style:{ fontSize:11, color:'var(--muted)', display:'block', marginBottom:3 } }, 'Title'),
             React.createElement('input', { type:'text', placeholder:'Hook copy…', value: title, onChange: e => setTitle(e.target.value),
               style:{ width:'100%', boxSizing:'border-box', padding:'5px 7px', borderRadius:5, border:'1px solid rgba(255,255,255,0.12)', background:'rgba(0,0,0,0.25)', color:'inherit', fontSize:12, marginBottom:8 } }),

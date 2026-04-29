@@ -2,14 +2,14 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=1080, height=1920" />
+    <meta name="viewport" content="width={{WIDTH}}, height={{HEIGHT}}" />
     <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }
       html, body {
         margin: 0;
-        width: 1080px;
-        height: 1920px;
+        width: {{WIDTH}}px;
+        height: {{HEIGHT}}px;
         overflow: hidden;
         background: #000;
         font-family: inter, -apple-system, system-ui, sans-serif;
@@ -17,29 +17,31 @@
       .clip { position: absolute; }
       #bg-video {
         inset: 0;
-        width: 1080px;
-        height: 1920px;
+        width: {{WIDTH}}px;
+        height: {{HEIGHT}}px;
         object-fit: cover;
       }
+      /* x130: positioning is percentage-based so the same template works for
+         9:16 (Shorts/Reels/TikTok), 16:9 (YouTube), 1:1 / 4:5 (IG Feed). */
       #title {
-        top: 120px; left: 60px; right: 60px;
-        font-size: 72px; font-weight: 800; line-height: 1.05;
+        top: 6%; left: 5%; right: 5%;
+        font-size: 6.7vw; font-weight: 800; line-height: 1.05;
         color: #fff; text-align: center; letter-spacing: -0.02em;
         text-shadow: 0 4px 24px rgba(0,0,0,0.7);
       }
       .caption {
-        bottom: 360px; left: 48px; right: 48px;
-        font-size: 88px; font-weight: 800;
+        bottom: 19%; left: 4.5%; right: 4.5%;
+        font-size: 8.2vw; font-weight: 800;
         color: #fff; text-align: center;
         text-shadow: 0 6px 28px rgba(0,0,0,0.8);
         line-height: 1.1;
       }
       #lower-third {
-        bottom: 120px; left: 60px;
-        padding: 24px 40px;
+        bottom: 6.3%; left: 5.5%;
+        padding: 1.3vw 2.2vw;
         background: linear-gradient(90deg, #ff3366, #ff6b00);
-        color: #fff; font-size: 38px; font-weight: 700;
-        border-radius: 14px;
+        color: #fff; font-size: 3.5vw; font-weight: 700;
+        border-radius: 0.8vw;
         box-shadow: 0 8px 32px rgba(255, 51, 102, 0.4);
       }
     </style>
@@ -49,8 +51,8 @@
       data-composition-id="main"
       data-start="0"
       data-duration="{{DURATION}}"
-      data-width="1080"
-      data-height="1920">
+      data-width="{{WIDTH}}"
+      data-height="{{HEIGHT}}">
 
       <div id="bg-fallback" class="clip"
            data-start="0" data-duration="{{DURATION}}" data-track-index="0"
