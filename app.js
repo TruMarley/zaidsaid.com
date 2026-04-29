@@ -329,6 +329,7 @@ const idbDelBrollBlob = (key) => idbDelete(key);
 
 // x119: Pollinations image generation helper (returns { url: objectURL, blob, seed })
 // Separate from the existing generateImageViaPollinations which returns dataURL.
+// x123: throws with err.status=429 on rate-limit so callers can retry/fallback.
 const generatePollinationsImage = async (prompt, { width = 1024, height = 576, seed = null, model = 'flux' } = {}) => {
   const numSeed = seed != null ? Math.round(seed) : Math.floor(Math.random() * 99999999);
   const cleanPrompt = String(prompt || 'cinematic shot').replace(/\s+/g, ' ').trim().slice(0, 400);
@@ -338,13 +339,48 @@ const generatePollinationsImage = async (prompt, { width = 1024, height = 576, s
   const timer = setTimeout(() => controller.abort(), 30000);
   try {
     const res = await fetch(url, { signal: controller.signal });
-    if (!res.ok) throw new Error('Pollinations HTTP ' + res.status);
+    if (!res.ok) {
+      const err = new Error('Pollinations HTTP ' + res.status);
+      err.status = res.status;
+      throw err;
+    }
     const blob = await res.blob();
     const objUrl = URL.createObjectURL(blob);
     return { url: objUrl, blob, seed: numSeed };
   } finally {
     clearTimeout(timer);
   }
+};
+
+// x123: Pexels video search fallback. Returns { url: blobUrl, blob, videoFile } or throws.
+// workerBase should be the root of the Cloudflare Worker (e.g. https://zaidsaid-proxy.zaidsaid.workers.dev).
+const fetchPexelsVideoFallback = async (prompt, workerBase, orientation = 'landscape') => {
+  const q = String(prompt || '').slice(0, 200);
+  const res = await fetch(
+    workerBase.replace(/\/$/, '') + '/pexels/videos/search?q=' + encodeURIComponent(q) + '&per_page=3&orientation=' + orientation,
+    { headers: { 'Origin': window.location.origin } }
+  );
+  if (!res.ok) throw new Error('Pexels worker HTTP ' + res.status);
+  const data = await res.json();
+  if (data.needsKey) {
+    const err = new Error('PEXELS_KEY_MISSING');
+    err.needsKey = true;
+    throw err;
+  }
+  if (data.error) throw new Error(data.error);
+  const videos = (data.videos || []);
+  if (!videos.length) throw new Error('No Pexels results');
+  const firstVideo = videos[0];
+  const files = (firstVideo.video_files || []).filter(f => f.file_type === 'video/mp4');
+  // Prefer 720p or smallest file >= 720 width, else just first mp4.
+  files.sort((a, b) => a.width - b.width);
+  const pick = files.find(f => f.width >= 720) || files[0];
+  if (!pick || !pick.link) throw new Error('No suitable mp4 in Pexels result');
+  const vidRes = await fetch(pick.link);
+  if (!vidRes.ok) throw new Error('Pexels video download HTTP ' + vidRes.status);
+  const blob = await vidRes.blob();
+  const blobUrl = URL.createObjectURL(blob);
+  return { url: blobUrl, blob, videoFile: pick };
 };
 
 /* ---------------- God mode (admin / power-user surface toggle) ----------------
@@ -9953,10 +9989,22 @@ function ScriptsTab({ setTab }) {
   // brollErr: Map<idbKey, errorMessage>
   const [brollErr, setBrollErr] = React.useState(() => new Map());
   // top-level generate-all progress
-  const [brollAllProgress, setBrollAllProgress] = React.useState(null); // null | { done, total, chapter, cancelled }
+  // x123: extended with phase, succeeded, failed, fallbackStock, paused fields
+  const [brollAllProgress, setBrollAllProgress] = React.useState(null);
   const brollCancelRef = React.useRef(false);
+  // x123: pause/resume for queue (true = paused)
+  const brollPausedRef = React.useRef(false);
+  const [brollPaused, setBrollPaused] = React.useState(false);
+  // x123: consecutive 429 counter (ref so queue loop sees latest value)
+  const broll429ConsecRef = React.useRef(0);
+  // x123: Pexels key missing banner
+  const [brollPexelsKeyMissing, setBrollPexelsKeyMissing] = React.useState(false);
+  // x123: prompt enhance toggle (persisted)
+  const [brollEnhance, setBrollEnhance] = React.useState(() => {
+    try { return localStorage.getItem('zaidsaid.v2.brollEnhance') === '1'; } catch(_) { return false; }
+  });
   // lightbox state
-  const [brollLightbox, setBrollLightbox] = React.useState(null); // { url, prompt } | null
+  const [brollLightbox, setBrollLightbox] = React.useState(null); // { url, prompt, isVideo } | null
 
   const isLongForm = Number(duration) >= 300;
 
@@ -10465,10 +10513,35 @@ function ScriptsTab({ setTab }) {
     });
   };
 
+  // x123: enhance a broll prompt via Claude Haiku before Pollinations.
+  // Returns enhanced prompt string, or original prompt on failure.
+  const enhanceBrollPrompt = async (rawPrompt) => {
+    const anthropicPath = getAnthropicPath();
+    if (!anthropicPath) return rawPrompt;
+    try {
+      const url = anthropicPath.replace(/\/$/, '') + '/v1/messages';
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify({
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 200,
+          system: 'You rewrite short B-roll prompts for an image-generation model (FLUX). Add visual style cues that make the image look cinematic and professional: shot type (close-up/medium/wide), lighting (soft window light/dramatic/studio), depth (bokeh/depth of field), style (photorealistic/4k/cinematic), and mood. Keep under 60 words. Return ONLY the rewritten prompt, no preamble.',
+          messages: [{ role: 'user', content: rawPrompt }]
+        })
+      });
+      if (!res.ok) return rawPrompt;
+      const data = await res.json();
+      const text = ((data.content || [])[0] || {}).text || '';
+      return text.trim() || rawPrompt;
+    } catch(_) { return rawPrompt; }
+  };
+
   // x119: generate one broll image for a beat's prompt
-  const generateBrollImage = async (beat, promptIdx) => {
-    const prompt = (beat.broll || [])[promptIdx];
-    if (!prompt) return;
+  // x123: added prompt enhancement, 429 retry (15s), Pexels fallback, phase state updates
+  const generateBrollImage = async (beat, promptIdx, { onPhase } = {}) => {
+    const rawPrompt = (beat.broll || [])[promptIdx];
+    if (!rawPrompt) return;
     const beatId = beat.id || ('b_' + promptIdx);
     // Find next variant index for this prompt
     const existingVariants = (beat.brollAssets || []).filter(a => a.promptIdx === promptIdx);
@@ -10478,12 +10551,89 @@ function ScriptsTab({ setTab }) {
     setBrollBusy(prev => { const s = new Set(prev); s.add(idbKey); return s; });
     setBrollErr(prev => { const m = new Map(prev); m.delete(idbKey); return m; });
     try {
-      const { url, blob, seed } = await generatePollinationsImage(prompt, { width: 1024, height: 576, model: 'flux' });
-      await idbSetBrollBlob(idbKey, blob);
-      setBrollBlobUrls(prev => { const m = new Map(prev); m.set(idbKey, url); return m; });
-      const asset = { prompt, promptIdx, url: idbKey, idbKey, seed, model: 'flux', generatedAt: Date.now() };
-      updateBeatBrollAssets(beatId, prev => [...prev, asset]);
+      // Step 1: optionally enhance prompt via Claude Haiku
+      let prompt = rawPrompt;
+      if (brollEnhance) {
+        // Cache enhanced prompt on beat asset metadata to avoid re-paying per regen
+        const cachedEnhanced = (beat._enhancedPrompts || {})[rawPrompt];
+        if (cachedEnhanced) {
+          prompt = cachedEnhanced;
+        } else {
+          onPhase && onPhase('Enhancing prompt via Claude');
+          prompt = await enhanceBrollPrompt(rawPrompt);
+        }
+      }
+
+      // Step 2: try Pollinations once
+      let pollinationsOk = false;
+      try {
+        onPhase && onPhase('Generating with Pollinations');
+        const { url, blob, seed } = await generatePollinationsImage(prompt, { width: 1024, height: 576, model: 'flux' });
+        await idbSetBrollBlob(idbKey, blob);
+        setBrollBlobUrls(prev => { const m = new Map(prev); m.set(idbKey, url); return m; });
+        const asset = { prompt, rawPrompt, promptIdx, url: idbKey, idbKey, seed, model: 'flux', generatedAt: Date.now() };
+        updateBeatBrollAssets(beatId, prev => [...prev, asset]);
+        pollinationsOk = true;
+        broll429ConsecRef.current = 0;
+        setBrollAllProgress(p => p ? { ...p, succeeded: (p.succeeded || 0) + 1 } : p);
+      } catch(e) {
+        if (e && e.status === 429) {
+          // 429 retry once after 15s
+          onPhase && onPhase('Rate-limited — retrying in 15s');
+          await new Promise(r => setTimeout(r, 15000));
+          try {
+            const { url, blob, seed } = await generatePollinationsImage(prompt, { width: 1024, height: 576, model: 'flux' });
+            await idbSetBrollBlob(idbKey, blob);
+            setBrollBlobUrls(prev => { const m = new Map(prev); m.set(idbKey, url); return m; });
+            const asset = { prompt, rawPrompt, promptIdx, url: idbKey, idbKey, seed, model: 'flux', generatedAt: Date.now() };
+            updateBeatBrollAssets(beatId, prev => [...prev, asset]);
+            pollinationsOk = true;
+            broll429ConsecRef.current = 0;
+            setBrollAllProgress(p => p ? { ...p, succeeded: (p.succeeded || 0) + 1 } : p);
+          } catch(e2) {
+            if (e2 && e2.status === 429) {
+              broll429ConsecRef.current = (broll429ConsecRef.current || 0) + 1;
+            } else {
+              broll429ConsecRef.current = 0;
+            }
+          }
+        } else {
+          broll429ConsecRef.current = 0;
+          throw e;
+        }
+      }
+
+      // Step 3: if Pollinations failed with 429 (after retry), try Pexels fallback
+      if (!pollinationsOk) {
+        onPhase && onPhase('Falling back to Pexels stock');
+        const workerBase = (() => {
+          try {
+            const p = getAnthropicPath();
+            return p ? p.replace(/\/anthropic\/?$/, '').replace(/\/v1\/?$/, '') : '';
+          } catch(_) { return ''; }
+        })();
+        if (!workerBase) {
+          setBrollAllProgress(p => p ? { ...p, failed: (p.failed || 0) + 1 } : p);
+          setBrollErr(prev => { const m = new Map(prev); m.set(idbKey, '429 from Pollinations (no fallback configured)'); return m; });
+          return;
+        }
+        try {
+          const { url, blob } = await fetchPexelsVideoFallback(rawPrompt, workerBase, 'landscape');
+          await idbSetBrollBlob(idbKey, blob);
+          setBrollBlobUrls(prev => { const m = new Map(prev); m.set(idbKey, url); return m; });
+          const asset = { prompt: rawPrompt, rawPrompt, promptIdx, url: idbKey, idbKey, seed: null, model: 'pexels-video', generatedAt: Date.now() };
+          updateBeatBrollAssets(beatId, prev => [...prev, asset]);
+          setBrollAllProgress(p => p ? { ...p, fallbackStock: (p.fallbackStock || 0) + 1 } : p);
+        } catch(pexErr) {
+          if (pexErr && pexErr.needsKey) {
+            setBrollPexelsKeyMissing(true);
+          }
+          setBrollAllProgress(p => p ? { ...p, failed: (p.failed || 0) + 1 } : p);
+          setBrollErr(prev => { const m = new Map(prev); m.set(idbKey, '429 + Pexels unavailable'); return m; });
+        }
+      }
     } catch(e) {
+      setBrollAllProgress(p => p ? { ...p, failed: (p.failed || 0) + 1 } : p);
       setBrollErr(prev => { const m = new Map(prev); m.set(idbKey, (e && e.message) || String(e)); return m; });
     } finally {
       setBrollBusy(prev => { const s = new Set(prev); s.delete(idbKey); return s; });
@@ -10500,7 +10650,17 @@ function ScriptsTab({ setTab }) {
     updateBeatBrollAssets(beatId, prev => prev.filter(a => a.idbKey !== asset.idbKey));
   };
 
+  // x123: wait helper that checks pause/cancel every 500ms
+  const brollWait = async (ms) => {
+    const start = Date.now();
+    while (Date.now() - start < ms) {
+      if (brollCancelRef.current) return;
+      await new Promise(r => setTimeout(r, Math.min(500, ms - (Date.now() - start))));
+    }
+  };
+
   // x119: generate all broll for a single beat (sequential, respects cancel ref)
+  // x123: 5s inter-request gap (was 500ms); pause/cascade-brake handled in generateAllBroll
   const generateBrollForBeat = async (beat) => {
     const prompts = Array.isArray(beat.broll) ? beat.broll : [];
     for (let pi = 0; pi < prompts.length; pi++) {
@@ -10508,7 +10668,7 @@ function ScriptsTab({ setTab }) {
       const hasImage = (beat.brollAssets || []).some(a => a.promptIdx === pi);
       if (!hasImage) {
         await generateBrollImage(beat, pi);
-        if (pi < prompts.length - 1) await new Promise(r => setTimeout(r, 500));
+        if (pi < prompts.length - 1) await brollWait(5000);
       }
     }
   };
@@ -10529,9 +10689,15 @@ function ScriptsTab({ setTab }) {
   };
 
   // x119: generate all broll for entire script (sequential)
+  // x123: 5s inter-request gap; 15s retry on 429; 60s pause when 3 consecutive 429s;
+  //        pause/resume toggle; phase + counter display.
   const generateAllBroll = async () => {
     if (brollAllProgress && !brollAllProgress.cancelled) return;
     brollCancelRef.current = false;
+    brollPausedRef.current = false;
+    setBrollPaused(false);
+    broll429ConsecRef.current = 0;
+    setBrollPexelsKeyMissing(false);
     const beats = script._longForm
       ? (script.chapters || []).flatMap((ch, ci) => (ch.beats || []).map(b => ({ ...b, _ci: ci })))
       : (script.beats || []).map(b => ({ ...b, _ci: null }));
@@ -10539,7 +10705,7 @@ function ScriptsTab({ setTab }) {
       const seen = new Set(); return arr.filter(x => !seen.has(x.promptIdx) && seen.add(x.promptIdx)).includes(a);
     }).length), 0);
     let done = 0;
-    setBrollAllProgress({ done: 0, total, chapter: null, cancelled: false });
+    setBrollAllProgress({ done: 0, total, chapter: null, cancelled: false, phase: 'Generating with Pollinations', succeeded: 0, failed: 0, fallbackStock: 0 });
     for (let bi = 0; bi < beats.length; bi++) {
       if (brollCancelRef.current) { setBrollAllProgress(p => p ? { ...p, cancelled: true } : p); break; }
       const beat = beats[bi];
@@ -10548,14 +10714,30 @@ function ScriptsTab({ setTab }) {
       const prompts = Array.isArray(beat.broll) ? beat.broll : [];
       for (let pi = 0; pi < prompts.length; pi++) {
         if (brollCancelRef.current) break;
+        // Respect manual pause
+        while (brollPausedRef.current && !brollCancelRef.current) {
+          await new Promise(r => setTimeout(r, 500));
+        }
+        if (brollCancelRef.current) break;
         const hasImage = (beat.brollAssets || []).some(a => a.promptIdx === pi);
         if (!hasImage) {
-          await generateBrollImage(beat, pi);
+          await generateBrollImage(beat, pi, {
+            onPhase: (phase) => setBrollAllProgress(p => p ? { ...p, phase } : p)
+          });
           done++;
           setBrollAllProgress(p => p ? { ...p, done, chapter: chLabel } : p);
-          if (pi < prompts.length - 1) await new Promise(r => setTimeout(r, 500));
+          // Cascade brake: 3 consecutive 429s → pause 60s
+          if (broll429ConsecRef.current >= 3) {
+            broll429ConsecRef.current = 0;
+            setBrollAllProgress(p => p ? { ...p, phase: 'Rate-limited — paused 60s. Resuming…' } : p);
+            await brollWait(60000);
+            setBrollAllProgress(p => p ? { ...p, phase: 'Generating with Pollinations' } : p);
+          }
+          if (pi < prompts.length - 1) await brollWait(5000);
         }
       }
+      // 5s gap between beats (not just within a beat) when not last beat
+      if (bi < beats.length - 1 && !brollCancelRef.current) await brollWait(5000);
     }
     if (!brollCancelRef.current) setBrollAllProgress(null);
   };
@@ -10595,20 +10777,38 @@ function ScriptsTab({ setTab }) {
 
             return (
               <div key={pi} className="flex flex-col gap-1">
-                {/* Rendered variants for this prompt */}
+                {/* Rendered variants for this prompt — x123: video for pexels-video model */}
                 {promptAssets.map((asset, vi) => {
                   const blobUrl = brollBlobUrls.get(asset.idbKey);
                   if (!blobUrl) return null;
+                  const isPexelsVideo = asset.model === 'pexels-video';
                   return (
                     <div key={vi} className="relative group" style={{ width: 128, height: 72 }}>
-                      <img
-                        src={blobUrl}
-                        alt={prompt}
-                        className="w-full h-full object-cover rounded-lg cursor-pointer border border-white/10 hover:border-white/30 transition-colors"
-                        style={{ width: 128, height: 72 }}
-                        onClick={() => setBrollLightbox({ url: blobUrl, prompt })}
-                        title={prompt}
-                      />
+                      {isPexelsVideo ? (
+                        <video
+                          src={blobUrl}
+                          className="w-full h-full object-cover rounded-lg cursor-pointer border border-fuchsia-400/30 hover:border-fuchsia-400/60 transition-colors"
+                          style={{ width: 128, height: 72 }}
+                          muted
+                          loop
+                          playsInline
+                          autoPlay
+                          onClick={() => setBrollLightbox({ url: blobUrl, prompt, isVideo: true })}
+                          title={prompt + ' (Pexels stock video)'}
+                        />
+                      ) : (
+                        <img
+                          src={blobUrl}
+                          alt={prompt}
+                          className="w-full h-full object-cover rounded-lg cursor-pointer border border-white/10 hover:border-white/30 transition-colors"
+                          style={{ width: 128, height: 72 }}
+                          onClick={() => setBrollLightbox({ url: blobUrl, prompt, isVideo: false })}
+                          title={prompt}
+                        />
+                      )}
+                      {isPexelsVideo && (
+                        <div className="absolute bottom-1 left-1 text-[8px] bg-fuchsia-500/80 text-white rounded px-1 pointer-events-none">Pexels</div>
+                      )}
                       <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 rounded-lg transition-colors flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100">
                         <button
                           className="text-[9px] bg-white/20 hover:bg-white/40 rounded px-1 py-0.5 text-white"
@@ -10759,15 +10959,29 @@ function ScriptsTab({ setTab }) {
 
   return (
     <div className="max-w-[1100px] mx-auto px-5 py-8 space-y-6">
-      {/* x119: Lightbox modal */}
+      {/* x119: Lightbox modal — x123: supports video for pexels-video assets */}
       {brollLightbox && (
         <div
           className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
           onClick={() => setBrollLightbox(null)}
         >
           <div className="relative max-w-3xl w-full" onClick={e => e.stopPropagation()}>
-            <img src={brollLightbox.url} alt={brollLightbox.prompt} className="w-full rounded-xl" />
-            <div className="mt-2 text-[12px] text-white/70 text-center">{brollLightbox.prompt}</div>
+            {brollLightbox.isVideo ? (
+              <video
+                src={brollLightbox.url}
+                className="w-full rounded-xl"
+                controls
+                autoPlay
+                loop
+                playsInline
+              />
+            ) : (
+              <img src={brollLightbox.url} alt={brollLightbox.prompt} className="w-full rounded-xl" />
+            )}
+            <div className="mt-2 text-[12px] text-white/70 text-center">
+              {brollLightbox.isVideo && <span className="mr-2 text-fuchsia-300 text-[10px] uppercase tracking-wider">Pexels stock video</span>}
+              {brollLightbox.prompt}
+            </div>
             <button
               className="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/60 hover:bg-black/80 flex items-center justify-center text-white text-sm"
               onClick={() => setBrollLightbox(null)}
@@ -10776,24 +10990,60 @@ function ScriptsTab({ setTab }) {
         </div>
       )}
 
-      {/* x119: Global broll generation progress banner */}
-      {brollAllProgress && (
-        <div className="rounded-xl border border-indigo-400/30 bg-indigo-500/10 p-3 flex items-center justify-between gap-3">
-          <div className="text-[12px] text-indigo-200">
-            {brollAllProgress.cancelled
-              ? 'B-roll generation cancelled.'
-              : ('Generating B-roll: ' + brollAllProgress.done + ' / ' + brollAllProgress.total +
-                (brollAllProgress.chapter ? (' (' + brollAllProgress.chapter + ')') : '') + '…')}
+      {/* x123: Pexels key missing banner */}
+      {brollPexelsKeyMissing && (
+        <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 p-3 flex items-center justify-between gap-3">
+          <div className="text-[12px] text-amber-200">
+            Pexels key not configured — add it via <code className="text-[11px] bg-white/10 px-1 rounded">wrangler secret put PEXELS_KEY</code> to enable stock-footage fallback.
+            {' '}<a href="https://www.pexels.com/api/" target="_blank" rel="noopener noreferrer" className="underline text-amber-100 hover:text-white">pexels.com/api</a>
           </div>
-          {!brollAllProgress.cancelled && (
-            <button
-              className="chip text-[10px] text-rose-300 border-rose-400/30 bg-rose-500/10"
-              onClick={() => { brollCancelRef.current = true; setBrollAllProgress(p => p ? { ...p, cancelled: true } : p); }}
-            >Cancel</button>
-          )}
-          {brollAllProgress.cancelled && (
-            <button className="chip text-[10px]" onClick={() => setBrollAllProgress(null)}>Dismiss</button>
-          )}
+          <button className="chip text-[10px]" onClick={() => setBrollPexelsKeyMissing(false)}>Dismiss</button>
+        </div>
+      )}
+
+      {/* x119: Global broll generation progress banner — x123: phase + counters + pause/resume */}
+      {brollAllProgress && (
+        <div className="rounded-xl border border-indigo-400/30 bg-indigo-500/10 p-3 flex items-start justify-between gap-3 flex-wrap">
+          <div className="flex flex-col gap-1 min-w-0">
+            <div className="text-[12px] text-indigo-200">
+              {brollAllProgress.cancelled
+                ? 'B-roll generation cancelled.'
+                : ('Generating B-roll: ' + brollAllProgress.done + ' / ' + brollAllProgress.total +
+                  (brollAllProgress.chapter ? (' (' + brollAllProgress.chapter + ')') : '') + '…')}
+            </div>
+            {!brollAllProgress.cancelled && brollAllProgress.phase && (
+              <div className="text-[11px] text-indigo-300/80">{brollAllProgress.phase}</div>
+            )}
+            {!brollAllProgress.cancelled && (brollAllProgress.succeeded > 0 || brollAllProgress.failed > 0 || brollAllProgress.fallbackStock > 0) && (
+              <div className="text-[10px] text-indigo-300/60 flex gap-3">
+                {brollAllProgress.succeeded > 0 && <span className="text-emerald-300">{brollAllProgress.succeeded} ok</span>}
+                {brollAllProgress.fallbackStock > 0 && <span className="text-fuchsia-300">{brollAllProgress.fallbackStock} Pexels</span>}
+                {brollAllProgress.failed > 0 && <span className="text-rose-300">{brollAllProgress.failed} failed</span>}
+              </div>
+            )}
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {!brollAllProgress.cancelled && (
+              <button
+                className={"chip text-[10px] " + (brollPaused ? "text-emerald-300 border-emerald-400/30 bg-emerald-500/10" : "text-amber-300 border-amber-400/30 bg-amber-500/10")}
+                onClick={() => {
+                  const next = !brollPausedRef.current;
+                  brollPausedRef.current = next;
+                  setBrollPaused(next);
+                  setBrollAllProgress(p => p ? { ...p, phase: next ? 'Paused — click Resume to continue' : 'Generating with Pollinations' } : p);
+                }}
+              >{brollPaused ? 'Resume' : 'Pause'}</button>
+            )}
+            {!brollAllProgress.cancelled && (
+              <button
+                className="chip text-[10px] text-rose-300 border-rose-400/30 bg-rose-500/10"
+                onClick={() => { brollCancelRef.current = true; setBrollAllProgress(p => p ? { ...p, cancelled: true } : p); }}
+              >Cancel</button>
+            )}
+            {brollAllProgress.cancelled && (
+              <button className="chip text-[10px]" onClick={() => setBrollAllProgress(null)}>Dismiss</button>
+            )}
+          </div>
         </div>
       )}
 
@@ -11085,12 +11335,24 @@ function ScriptsTab({ setTab }) {
           <div className="flex items-center gap-2 flex-wrap">
             <button className="btn btn-primary" onClick={sendToStudio}>{I.studio({size:14})} Send to Studio</button>
             <button className="btn" onClick={sendToHyperFrames}>{I.film({size:12})} Send to HyperFrames</button>
+            {/* x123: Enhance prompts toggle */}
+            <button
+              className={"chip text-[10px] " + (brollEnhance ? "text-indigo-200 !border-indigo-400/30 bg-indigo-500/10" : "")}
+              title="When ON, rewrites each B-roll prompt via Claude Haiku before Pollinations (adds cinematic style cues)"
+              onClick={() => {
+                const next = !brollEnhance;
+                setBrollEnhance(next);
+                try { localStorage.setItem('zaidsaid.v2.brollEnhance', next ? '1' : '0'); } catch(_){}
+              }}
+            >
+              {brollEnhance ? '✨ Enhance ON' : '✨ Enhance prompts via Claude'}
+            </button>
             {/* x119: Generate all B-roll */}
             <button
               className="btn"
               onClick={generateAllBroll}
               disabled={!!(brollAllProgress && !brollAllProgress.cancelled)}
-              title="Generate images for all B-roll prompts across the entire script (sequential)"
+              title="Generate images for all B-roll prompts across the entire script (sequential, 5s gap)"
             >
               {(brollAllProgress && !brollAllProgress.cancelled) ? 'Generating B-roll…' : 'Generate all B-roll'}
             </button>

@@ -979,6 +979,49 @@ export default {
       }
     }
 
+    // x123: /pexels/videos/search — stock-footage fallback for B-roll 429s.
+    // Requires wrangler secret put PEXELS_KEY (free at pexels.com/api).
+    // Origin-restricted to ALLOWED_ORIGINS (same allowlist as paid vendors).
+    if (url.pathname === "/pexels/videos/search") {
+      const origin = req.headers.get("origin");
+      if (!origin || !ALLOWED_ORIGINS.includes(origin)) {
+        return new Response(JSON.stringify({ error: "unauthorized origin", origin: origin || "" }), {
+          status: 403, headers: { ...cors, "Content-Type": "application/json" }
+        });
+      }
+      const q = (url.searchParams.get("q") || "").trim();
+      if (!q) {
+        return new Response(JSON.stringify({ error: "q param required" }), {
+          status: 400, headers: { ...cors, "Content-Type": "application/json" }
+        });
+      }
+      if (!env.PEXELS_KEY) {
+        return new Response(JSON.stringify({
+          error: "PEXELS_KEY not configured",
+          needsKey: true,
+          signupUrl: "https://www.pexels.com/api/"
+        }), { status: 200, headers: { ...cors, "Content-Type": "application/json" } });
+      }
+      const perPage = Math.min(10, Math.max(1, Number(url.searchParams.get("per_page") || "3")));
+      const orientation = ["portrait", "landscape", "square"].includes(url.searchParams.get("orientation"))
+        ? url.searchParams.get("orientation") : "landscape";
+      try {
+        const pexelsRes = await fetch(
+          "https://api.pexels.com/videos/search?query=" + encodeURIComponent(q) +
+          "&per_page=" + perPage + "&orientation=" + orientation,
+          { headers: { "Authorization": env.PEXELS_KEY } }
+        );
+        const responseHeaders = new Headers(cors);
+        const ct = pexelsRes.headers.get("content-type");
+        if (ct) responseHeaders.set("Content-Type", ct);
+        return new Response(pexelsRes.body, { status: pexelsRes.status, headers: responseHeaders });
+      } catch (err) {
+        return new Response(JSON.stringify({ error: "pexels_unreachable", detail: String(err) }), {
+          status: 502, headers: { ...cors, "Content-Type": "application/json" }
+        });
+      }
+    }
+
     // Sidecar forward routes — each points at an env secret and returns 503
     // when unset so the front-end can detect "feature not deployed".
     //   x110: hyperframes — Node sidecar running `hyperframes render`
