@@ -429,8 +429,12 @@ function runRender(cwd, outPath) {
   return new Promise((resolve, reject) => {
     // x128e: capture stderr so when HF exits non-zero the surfaced 500
     // response carries the real reason instead of a bare exit code.
+    // x128g: --quality draft drops the encoding bitrate ceiling; on the
+    // 4 GB Fly machine this keeps the Chromium + libx264 footprint in a
+    // place where we don't crash mid-render. Override via HF_QUALITY env.
+    const quality = process.env.HF_QUALITY || "draft";
     const child = spawn(HF_BIN, [
-      "render", "--output", outPath, "--workers", HF_WORKERS
+      "render", "--output", outPath, "--workers", HF_WORKERS, "--quality", quality
     ], {
       cwd, stdio: ["ignore", "pipe", "pipe"]
     });
