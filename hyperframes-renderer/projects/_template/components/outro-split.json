@@ -1,0 +1,6 @@
+{
+  "_comment": "Outro split-screen beat. Reusable across projects — face-cam crops to right half, headline lands on left. Anchor `start` to your final 5 seconds.",
+  "side": "split",
+  "duration": 5.0,
+  "title": "Thanks for\nwatching"
+}

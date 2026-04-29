@@ -1,0 +1,18 @@
+{
+  "_comment": "Example liquid-glass beat. POST an array like this as `beats[]` to /render with style=clip-9x16-liquidglass. Word timings come from assets/transcripts/words.json.",
+  "id": "A",
+  "side": "left",
+  "start": 0.6,
+  "duration": 4.0,
+  "eyebrow": "Edit demo · Chapter 1",
+  "title": "The edit\nlive",
+  "karaoke_words": [
+    { "text": "This",    "start": 0.62, "end": 0.78 },
+    { "text": "is",      "start": 0.78, "end": 0.92 },
+    { "text": "going",   "start": 0.92, "end": 1.18 },
+    { "text": "to",      "start": 1.18, "end": 1.30 },
+    { "text": "be",      "start": 1.30, "end": 1.46 },
+    { "text": "the",     "start": 1.46, "end": 1.58 },
+    { "text": "example", "start": 1.58, "end": 2.10 }
+  ]
+}

@@ -59,6 +59,10 @@ app.post("/render", async (req, res) => {
     style = "clip-9x16",
     // x114: extension-template fields, ignored by clip-9x16.
     lottie_url = "", lottie_start = null, lottie_duration = null,
+    // x124: beat-driven liquid-glass scenes for clip-9x16-liquidglass.
+    // When present, BEAT_BLOCKS are emitted in addition to (or instead of)
+    // the standard 3-word caption track. See templates/clip-9x16-liquidglass.html.
+    beats = [],
   } = req.body || {};
   if (!duration) {
     return res.status(400).json({ error: "duration is required" });
@@ -80,20 +84,28 @@ app.post("/render", async (req, res) => {
     const template = await fs.readFile(templatePath, "utf8");
     const lottieStart = lottie_start != null ? Number(lottie_start) : Math.max(0, duration - 4);
     const lottieDuration = lottie_duration != null ? Number(lottie_duration) : 2.5;
+    // x124: when beats[] is present, suppress the default caption track —
+    // beats own the on-screen text and karaoke runs. word_timings are still
+    // accepted so the front-end can pass them through unchanged.
+    const beatsActive = Array.isArray(beats) && beats.length > 0;
     const html = renderTemplate(stripVideoIfMissing(template, resolvedClipUrl), {
       CLIP_URL: resolvedClipUrl,
       DURATION: duration.toFixed(2),
       TITLE: escapeHtml(title),
       HANDLE: escapeHtml(handle),
       LOWER_THIRD_START: Math.max(0, duration - 3).toFixed(2),
-      CAPTION_BLOCKS: buildCaptionBlocks(word_timings),
+      CAPTION_BLOCKS: beatsActive ? "" : buildCaptionBlocks(word_timings),
+      BEAT_BLOCKS: beatsActive ? buildBeatBlocks(beats) : "",
       LOTTIE_URL: lottie_url,
       LOTTIE_START: lottieStart.toFixed(2),
       LOTTIE_DURATION: lottieDuration.toFixed(2),
     });
 
     const indexPath = path.join(workDir, "index.html");
-    await fs.writeFile(indexPath, appendCaptionTweens(html, word_timings));
+    const tweenedHtml = beatsActive
+      ? appendBeatTweens(html, beats)
+      : appendCaptionTweens(html, word_timings);
+    await fs.writeFile(indexPath, tweenedHtml);
     await fs.writeFile(path.join(workDir, "meta.json"), JSON.stringify({ id, name: `clip-${id}` }));
     await fs.writeFile(path.join(workDir, "hyperframes.json"), JSON.stringify({
       $schema: "https://hyperframes.heygen.com/schema/hyperframes.json",
@@ -140,13 +152,81 @@ function groupWordsIntoLines(words, perLine) {
   return out;
 }
 
+// x124: beats — per-scene liquid-glass cards anchored to spoken-word
+// timestamps. Each beat is independently positioned (left | right | full |
+// bottom | split) and may carry an eyebrow line, a title, and a karaoke run.
+//
+// See templates/clip-9x16-liquidglass.html and styles/motion-philosophy.md
+// for the aesthetic this matches.
+function buildBeatBlocks(beats) {
+  return beats.map((b, i) => {
+    const id = `beat${i}`;
+    const start = Number(b.start || 0).toFixed(2);
+    const dur = Number(b.duration || 3).toFixed(2);
+    const side = b.side || "left";
+    const trackIndex = 2 + (i % 6); // keep beats out of the bg/vignette tracks
+    if (side === "split") {
+      // Outro split: dimmed bg + face-cam crop on right + headline on left.
+      const text = escapeHtml(b.title || "Thanks for watching");
+      return `
+      <div id="${id}-bg" class="clip split-bg" data-start="${start}" data-duration="${dur}" data-track-index="${trackIndex}"></div>
+      <div id="${id}-text" class="clip split-text" data-start="${start}" data-duration="${dur}" data-track-index="${trackIndex + 1}">${text}</div>`;
+    }
+    const eyebrow = b.eyebrow ? `<div class="eyebrow">${escapeHtml(b.eyebrow)}</div>` : "";
+    const title = b.title ? `<div class="title">${escapeHtml(b.title)}</div>` : "";
+    const karaoke = Array.isArray(b.karaoke_words) && b.karaoke_words.length
+      ? `<div class="karaoke">${b.karaoke_words.map((w, wi) => {
+          const ws = Number(w.start || 0).toFixed(2);
+          const we = Number(w.end || (w.start || 0) + 0.2).toFixed(2);
+          return `<span class="word" data-word-index="${wi}" data-word-start="${ws}" data-word-end="${we}">${escapeHtml(w.text || "")}</span>`;
+        }).join(" ")}</div>`
+      : "";
+    return `<div id="${id}" class="clip beat" data-side="${escapeHtml(side)}" data-start="${start}" data-duration="${dur}" data-track-index="${trackIndex}">
+        ${eyebrow}
+        ${title}
+        ${karaoke}
+      </div>`;
+  }).join("\n      ");
+}
+
+function appendBeatTweens(html, beats) {
+  const lines = [];
+  beats.forEach((b, i) => {
+    const id = `beat${i}`;
+    const start = Number(b.start || 0).toFixed(2);
+    const side = b.side || "left";
+    if (side === "split") {
+      lines.push(`tl.from("#${id}-bg", { opacity: 0, duration: 0.6, ease: "power3.out" }, ${start});`);
+      lines.push(`tl.from("#${id}-text", { opacity: 0, x: -60, duration: 0.7, ease: "power3.out" }, ${start});`);
+      return;
+    }
+    // Card slides in from its own side — left from -120, right from +120, bottom from +160, full fades.
+    const fromVars = side === "right" ? "{ opacity: 0, x: 120, duration: 0.55, ease: \"power3.out\" }"
+      : side === "bottom" ? "{ opacity: 0, y: 160, duration: 0.55, ease: \"power3.out\" }"
+      : side === "full" ? "{ opacity: 0, duration: 0.45, ease: \"power2.out\" }"
+      : "{ opacity: 0, x: -120, duration: 0.55, ease: \"power3.out\" }";
+    lines.push(`tl.from("#${id}", ${fromVars}, ${start});`);
+    if (Array.isArray(b.karaoke_words)) {
+      b.karaoke_words.forEach((w, wi) => {
+        const ws = Number(w.start || 0).toFixed(2);
+        lines.push(`tl.add(()=>document.querySelector("#${id} [data-word-index=\\"${wi}\\"]")?.classList.add("lit"), ${ws});`);
+      });
+    }
+  });
+  return html.replace("// __TWEENS__", lines.join("\n      "));
+}
+
 function appendCaptionTweens(html, words) {
   const groups = groupWordsIntoLines(words, 3);
   const tweens = groups.map((g, i) => {
     const start = g[0].start.toFixed(2);
     return `tl.from("#cap${i}", { opacity: 0, scale: 0.85, duration: 0.22, ease: "back.out(2)" }, ${start});`;
   }).join("\n      ");
-  return html.replace("// Per-caption tweens are appended by server.mjs from word_timings.", tweens);
+  // clip-9x16 uses the literal sentinel; clip-9x16-liquidglass uses // __TWEENS__.
+  // Replace whichever the active template carries.
+  return html
+    .replace("// Per-caption tweens are appended by server.mjs from word_timings.", tweens)
+    .replace("// __TWEENS__", tweens);
 }
 
 function escapeHtml(s) {

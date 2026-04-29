@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1080, height=1920" />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body {
+        margin: 0;
+        width: 1080px;
+        height: 1920px;
+        overflow: hidden;
+        background: #050608;
+        font-family: inter, -apple-system, system-ui, sans-serif;
+        color: #fff;
+      }
+      .clip { position: absolute; }
+      #bg-video {
+        inset: 0;
+        width: 1080px;
+        height: 1920px;
+        object-fit: cover;
+      }
+      /* Subtle vignette so liquid glass cards always read on busy backgrounds. */
+      #vignette {
+        inset: 0;
+        background: radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.55) 100%);
+        pointer-events: none;
+      }
+
+      /* iOS-26 liquid glass beat card.
+         Two-layer: a frosted backdrop + a chrome gradient title.
+         Each beat is positioned by side (left | right | full | split). */
+      .beat {
+        padding: 56px 56px 64px;
+        border-radius: 44px;
+        background: linear-gradient(135deg, rgba(255,255,255,0.16), rgba(255,255,255,0.04));
+        backdrop-filter: blur(28px) saturate(140%);
+        -webkit-backdrop-filter: blur(28px) saturate(140%);
+        border: 1px solid rgba(255,255,255,0.22);
+        box-shadow:
+          inset 0 1px 0 rgba(255,255,255,0.35),
+          inset 0 -1px 0 rgba(0,0,0,0.25),
+          0 24px 80px rgba(0,0,0,0.55);
+        overflow: hidden;
+      }
+      .beat::before {
+        content: "";
+        position: absolute; inset: 0;
+        background: linear-gradient(120deg, rgba(255,255,255,0.18) 0%, transparent 35%, transparent 65%, rgba(255,255,255,0.10) 100%);
+        pointer-events: none;
+        border-radius: inherit;
+      }
+      .beat[data-side="left"]   { left: 60px;  width: 920px; max-width: 50vw; top: 50%; transform: translateY(-50%); }
+      .beat[data-side="right"]  { right: 60px; width: 920px; max-width: 50vw; top: 50%; transform: translateY(-50%); }
+      .beat[data-side="full"]   { left: 80px;  right: 80px; top: 280px; }
+      .beat[data-side="bottom"] { left: 80px;  right: 80px; bottom: 220px; }
+
+      .beat .eyebrow {
+        font-size: 28px; font-weight: 700; letter-spacing: 0.18em;
+        text-transform: uppercase;
+        background: linear-gradient(90deg, #b9c7d6, #ffffff 50%, #b9c7d6);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+        margin-bottom: 18px;
+        opacity: 0.95;
+      }
+      .beat .title {
+        font-size: 96px; font-weight: 800; letter-spacing: -0.03em;
+        line-height: 1.02;
+        background: linear-gradient(180deg, #ffffff 0%, #c5cdd6 100%);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+        margin-bottom: 28px;
+      }
+      .beat .karaoke {
+        font-size: 44px; font-weight: 700; line-height: 1.25;
+        color: rgba(255,255,255,0.55);
+      }
+      .beat .karaoke .word {
+        display: inline-block;
+        margin-right: 14px;
+        transition: color 80ms linear, text-shadow 80ms linear;
+      }
+      .beat .karaoke .word.lit {
+        color: #fff;
+        text-shadow: 0 0 22px rgba(180, 220, 255, 0.55);
+      }
+
+      /* Outro split-screen: face-cam right with rounded corners + drop shadow,
+         left half holds outro text. Toggled by a beat with side="split". */
+      .split-bg {
+        inset: 0;
+        background:
+          radial-gradient(ellipse at 30% 30%, rgba(40,90,160,0.35), transparent 60%),
+          linear-gradient(180deg, #060810 0%, #0b1220 100%);
+      }
+      .split-facecam {
+        right: 60px; top: 80px; bottom: 80px;
+        width: 540px;
+        border-radius: 56px;
+        overflow: hidden;
+        box-shadow: 0 30px 90px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.08);
+      }
+      .split-text {
+        left: 80px; top: 50%; transform: translateY(-50%);
+        width: 460px;
+        font-size: 96px; font-weight: 800; letter-spacing: -0.03em;
+        line-height: 1.04;
+        background: linear-gradient(180deg, #ffffff 0%, #aab3bf 100%);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+      }
+
+      /* Default talking-head caption track (renders when beats[] is empty
+         and falls back to the same word_timings → 3-word groups behavior
+         the basic clip-9x16 template uses). */
+      .caption {
+        bottom: 240px; left: 60px; right: 60px;
+        font-size: 88px; font-weight: 800;
+        color: #fff; text-align: center;
+        text-shadow: 0 6px 28px rgba(0,0,0,0.85);
+        line-height: 1.1;
+      }
+      #lower-third {
+        bottom: 120px; left: 60px;
+        padding: 24px 40px;
+        background: linear-gradient(90deg, rgba(255,255,255,0.16), rgba(255,255,255,0.06));
+        backdrop-filter: blur(20px) saturate(140%);
+        -webkit-backdrop-filter: blur(20px) saturate(140%);
+        border: 1px solid rgba(255,255,255,0.22);
+        color: #fff; font-size: 38px; font-weight: 700;
+        border-radius: 999px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"
+      data-composition-id="main"
+      data-start="0"
+      data-duration="{{DURATION}}"
+      data-width="1080"
+      data-height="1920">
+
+      <div id="bg-fallback" class="clip"
+           data-start="0" data-duration="{{DURATION}}" data-track-index="0"
+           style="inset:0; background:#050608;"></div>
+
+      <video id="bg-video" class="clip"
+             data-start="0" data-duration="{{DURATION}}" data-track-index="0"
+             src="{{CLIP_URL}}" muted playsinline crossorigin="anonymous" preload="auto"></video>
+
+      <div id="vignette" class="clip"
+           data-start="0" data-duration="{{DURATION}}" data-track-index="1"></div>
+
+      {{BEAT_BLOCKS}}
+
+      {{CAPTION_BLOCKS}}
+
+      <div id="lower-third" class="clip"
+           data-start="{{LOWER_THIRD_START}}" data-duration="2" data-track-index="9">
+        {{HANDLE}}
+      </div>
+    </div>
+
+    <script>
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true });
+
+      // Lower-third pill animates in near the end of the clip.
+      tl.from("#lower-third", { opacity: 0, x: -120, duration: 0.5, ease: "power3.out" }, {{LOWER_THIRD_START}});
+
+      // Per-beat tweens (cards in/out) and per-caption tweens are appended
+      // by server.mjs at compile time, after this comment.
+      // __TWEENS__
+
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>
