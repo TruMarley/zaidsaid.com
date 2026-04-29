@@ -65,6 +65,34 @@ the backend dormant until the front-end is ready to call it.
 
 - `templates/clip-9x16.html` — vertical clip with title in, captions every ~3
   words, lower-third on the final 2 seconds.
+- `templates/clip-9x16-lottie.html` — same, plus a Lottie animation slot.
+- `templates/clip-9x16-three.html` — same, plus a Three.js wireframe intro card.
+- `templates/clip-9x16-liquidglass.html` — beat-driven iOS-26 liquid-glass
+  scenes (left/right cards, karaoke runs, outro split-screen). Mirrors the
+  end-to-end editing pipeline shown in
+  [this HyperFrames demo](https://www.youtube.com/watch?v=Aw3BkmhYu4I).
+  Spec lives in `templates/README.md` and the rules in
+  `projects/_template/motion-philosophy.md`.
 
 Add new styles by dropping a new `<style>.html` into `templates/` and posting
 with the matching `style` field.
+
+## Per-project layout
+
+`projects/` mirrors the per-clip Claude-Code workspace from the demo video:
+
+```text
+projects/
+  _template/
+    assets/
+      clips/                # raw + edited MP4s
+      transcripts/          # word-level timestamps (JSON)
+    compositions/           # one HTML/JSON per beat
+    components/             # reusable beat fragments
+    renders/                # final MP4 outputs (gitignored — created on first render)
+    screenshots/            # frame captures Claude uses to self-verify
+    motion-philosophy.md    # style doc re-read on every render
+```
+
+Copy `_template/` to `projects/<slug>/`, drop `raw.mp4` into `assets/clips/`,
+and POST `beats[]` describing the scenes. See `projects/README.md`.
