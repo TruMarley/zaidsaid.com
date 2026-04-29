@@ -32,5 +32,6 @@ primary_region = "iad"
     hard_limit = 4
 
 [[vm]]
-  size = "shared-cpu-2x"          # 2 shared vCPU
-  memory = "4gb"                  # headless Chrome + ffmpeg encoding need ~1.5-2 GB during render
+  size = "shared-cpu-4x"          # 4 shared vCPU — needed for parallel HF workers + Chrome + ffmpeg
+  memory = "8gb"                  # x128b: 4 GB OOM'd headless Chrome+ffmpeg+libx264 during real renders
+                                  # (thumbnail-only path was fine; full /render path needs more headroom)
