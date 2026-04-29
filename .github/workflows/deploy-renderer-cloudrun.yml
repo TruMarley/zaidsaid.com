@@ -1,0 +1,78 @@
+name: Deploy HyperFrames Renderer (Cloud Run)
+
+# Cloud Run alternative to deploy-renderer.yml. Activated when the user
+# moves off Fly (e.g. trial ended, org caps too tight). Free tier covers
+# typical zaidsaid traffic: 2 M requests/mo, 360k GB-sec memory, 180k
+# vCPU-sec. Memory ceiling 8 GB out of the box (no quota request).
+#
+# REQUIRED SECRETS
+#   GCP_PROJECT_ID  — gcloud project ID (e.g. "zaidsaid-renderer")
+#   GCP_SA_KEY      — service-account JSON with roles:
+#                       roles/run.admin
+#                       roles/iam.serviceAccountUser
+#                       roles/storage.admin (for Cloud Build artifacts)
+#                     stored as the entire JSON blob in the secret value
+#
+# REQUIRED PROJECT SETUP (one-time, manual)
+#   gcloud projects create $PROJECT_ID
+#   gcloud config set project $PROJECT_ID
+#   gcloud services enable run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com
+#   gcloud iam service-accounts create gh-deploy --display-name="GitHub deploy"
+#   gcloud projects add-iam-policy-binding $PROJECT_ID \
+#       --member=serviceAccount:gh-deploy@$PROJECT_ID.iam.gserviceaccount.com \
+#       --role=roles/run.admin
+#   gcloud projects add-iam-policy-binding $PROJECT_ID \
+#       --member=serviceAccount:gh-deploy@$PROJECT_ID.iam.gserviceaccount.com \
+#       --role=roles/iam.serviceAccountUser
+#   gcloud projects add-iam-policy-binding $PROJECT_ID \
+#       --member=serviceAccount:gh-deploy@$PROJECT_ID.iam.gserviceaccount.com \
+#       --role=roles/storage.admin
+#   gcloud iam service-accounts keys create gh-deploy.json \
+#       --iam-account=gh-deploy@$PROJECT_ID.iam.gserviceaccount.com
+#   gh secret set GCP_SA_KEY < gh-deploy.json
+#   gh secret set GCP_PROJECT_ID --body "$PROJECT_ID"
+#
+# After secrets exist, the next push to hyperframes-renderer/** auto-deploys.
+# Trigger manually with: gh workflow run deploy-renderer-cloudrun.yml
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "hyperframes-renderer/**"
+      - ".github/workflows/deploy-renderer-cloudrun.yml"
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Deploy to Cloud Run
+        # `--source` triggers a Cloud Build from the Dockerfile. Memory 4 GiB
+        # matches the existing Fly fly.toml; bumpable up to 8 GiB if needed.
+        # CPU 2 because HF spawns 1 worker (HF_WORKERS=1 in server.mjs).
+        # Concurrency 4 allows multiple in-flight requests on the same
+        # instance; auto-scales to zero on idle.
+        run: |
+          gcloud run deploy zaidsaid-hf-renderer \
+            --source hyperframes-renderer \
+            --project ${{ secrets.GCP_PROJECT_ID }} \
+            --region us-central1 \
+            --memory 4Gi \
+            --cpu 2 \
+            --concurrency 4 \
+            --timeout 600 \
+            --max-instances 5 \
+            --min-instances 0 \
+            --allow-unauthenticated \
+            --port 8788 \
+            --set-env-vars HF_CORS_ORIGIN=https://zaidsaid.com,HF_WORKERS=1
