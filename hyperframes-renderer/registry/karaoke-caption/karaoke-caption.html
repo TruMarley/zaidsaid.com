@@ -1,0 +1,63 @@
+<!--
+  karaoke-caption — zaidsaid HF component
+  ───────────────────────────────────────
+  A word-by-word highlight snippet. Each .word span flips from dim to lit
+  with a soft glow when its data-word-start fires.
+
+  USAGE
+  =====
+
+  1. Paste the <style> rules into your host composition's <style>.
+  2. Paste a <div class="karaoke">…</div> with one .word per word into
+     your composition's markup. Each .word needs:
+
+       data-word-index="0"
+       data-word-start="0.62"   (seconds, host-timeline)
+       data-word-end="0.78"
+
+  3. Paste the timeline-integration block from the <script> below into
+     your composition's timeline setup, AFTER `tl` is defined.
+
+  HOST TIMELINE INTEGRATION
+  =========================
+
+  In your host script, where you build the gsap timeline:
+
+      document.querySelectorAll(".karaoke .word").forEach(w => {
+        const at = Number(w.dataset.wordStart || 0);
+        tl.add(() => w.classList.add("lit"), at);
+      });
+-->
+
+<style>
+  .karaoke {
+    font-size: 44px; font-weight: 700; line-height: 1.25;
+    color: rgba(255,255,255,0.55);
+    font-family: inter, -apple-system, system-ui, sans-serif;
+  }
+  .karaoke .word {
+    display: inline-block;
+    margin-right: 14px;
+    transition: color 80ms linear, text-shadow 80ms linear;
+  }
+  .karaoke .word.lit {
+    color: #fff;
+    text-shadow: 0 0 22px rgba(180, 220, 255, 0.55);
+  }
+</style>
+
+<!-- Markup example: -->
+<div class="karaoke">
+  <span class="word" data-word-index="0" data-word-start="0.62" data-word-end="0.78">This</span>
+  <span class="word" data-word-index="1" data-word-start="0.78" data-word-end="0.92">is</span>
+  <span class="word" data-word-index="2" data-word-start="0.92" data-word-end="1.10">the</span>
+  <span class="word" data-word-index="3" data-word-start="1.10" data-word-end="1.62">example</span>
+</div>
+
+<script>
+  // Drop this inside your host composition's gsap script, AFTER `tl` exists:
+  document.querySelectorAll(".karaoke .word").forEach(w => {
+    const at = Number(w.dataset.wordStart || 0);
+    tl.add(() => w.classList.add("lit"), at);
+  });
+</script>

@@ -1,0 +1,11 @@
+{
+  "$schema": "https://hyperframes.heygen.com/schema/registry-item.json",
+  "name": "liquid-glass-card",
+  "type": "block",
+  "title": "Liquid-glass beat card",
+  "description": "Frosted-glass beat card (480×600) with eyebrow, chrome-gradient title, and optional karaoke run. One scene = one card.",
+  "tags": ["beat", "card", "glass", "title", "karaoke"],
+  "dimensions": { "width": 480, "height": 600 },
+  "duration": 4,
+  "files": ["liquid-glass-card.html"]
+}

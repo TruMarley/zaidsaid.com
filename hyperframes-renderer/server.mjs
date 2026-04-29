@@ -33,6 +33,10 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 8788;
 const TEMPLATES = path.join(__dirname, "templates");
+// x125: project scaffold whose compositions/ + components/ get seeded into
+// the per-render workDir so HF blocks installed there (via bin/install-plugin.mjs
+// or future `hyperframes add`) become available via data-composition-src.
+const PROJECT_TEMPLATE = path.join(__dirname, "projects", "_template");
 
 const app = express();
 
@@ -112,6 +116,13 @@ app.post("/render", async (req, res) => {
       paths: { blocks: "compositions", components: "compositions/components", assets: "assets" }
     }));
 
+    // x125: seed the workDir's compositions/ from the project template so any
+    // installed HF block (e.g. liquid-glass-card.html) referenced via
+    // data-composition-src in the host index.html resolves at render time.
+    if (beatsActive) {
+      await seedCompositions(PROJECT_TEMPLATE, workDir);
+    }
+
     const outPath = path.join(workDir, `out-${id}.mp4`);
     await runRender(workDir, outPath);
     res.setHeader("Content-Type", "video/mp4");
@@ -125,6 +136,31 @@ app.post("/render", async (req, res) => {
     fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
   }
 });
+
+// x125: copy compositions/*.html (blocks) and compositions/components/*.html
+// (components) from a project template into a per-render workDir. Empty
+// .gitkeep, .json, and README files are skipped so the workDir only ends up
+// with HF-relevant artifacts.
+async function seedCompositions(srcProjectDir, destWorkDir) {
+  const srcCompDir = path.join(srcProjectDir, "compositions");
+  const destCompDir = path.join(destWorkDir, "compositions");
+  try { await fs.access(srcCompDir); } catch { return; }
+  await fs.mkdir(path.join(destCompDir, "components"), { recursive: true });
+  const blocks = await fs.readdir(srcCompDir, { withFileTypes: true });
+  for (const ent of blocks) {
+    if (ent.isFile() && ent.name.endsWith(".html")) {
+      await fs.copyFile(path.join(srcCompDir, ent.name), path.join(destCompDir, ent.name));
+    }
+  }
+  const componentsDir = path.join(srcCompDir, "components");
+  try { await fs.access(componentsDir); } catch { return; }
+  const comps = await fs.readdir(componentsDir, { withFileTypes: true });
+  for (const ent of comps) {
+    if (ent.isFile() && ent.name.endsWith(".html")) {
+      await fs.copyFile(path.join(componentsDir, ent.name), path.join(destCompDir, "components", ent.name));
+    }
+  }
+}
 
 function stripVideoIfMissing(tpl, clipUrl) {
   if (clipUrl) return tpl;

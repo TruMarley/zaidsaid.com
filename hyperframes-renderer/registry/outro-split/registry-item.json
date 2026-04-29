@@ -1,0 +1,11 @@
+{
+  "$schema": "https://hyperframes.heygen.com/schema/registry-item.json",
+  "name": "outro-split",
+  "type": "block",
+  "title": "Split-screen outro",
+  "description": "Outro scene: dimmed gradient backdrop + face-cam crop on the right with rounded corners + headline on the left half. Drop on the last 3-5 seconds of a clip.",
+  "tags": ["outro", "split", "endcard"],
+  "dimensions": { "width": 1080, "height": 1920 },
+  "duration": 5,
+  "files": ["outro-split.html"]
+}

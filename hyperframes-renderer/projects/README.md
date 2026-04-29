@@ -13,8 +13,8 @@ projects/
     assets/
       clips/                # raw + edited MP4s
       transcripts/          # JSON word-level timestamps
-    compositions/           # per-beat HTML (one file per scene)
-    components/             # reusable beat fragments
+    compositions/           # HF blocks — per-beat HTML, one file per scene
+      components/           # HF components — paste-snippet effects (HF convention)
     renders/                # final MP4 outputs (created on first render — gitignored)
     screenshots/            # frame captures Claude uses to self-verify
     motion-philosophy.md    # the style doc Claude re-reads on every render
@@ -29,11 +29,11 @@ reads `motion-philosophy.md` first, then the `beats[]` from the request body.
 
 - **`assets/transcripts/`** keeps word-level timing colocated with the clip
   it came from. Beats anchor to entries here, not to free-floating numbers.
-- **`compositions/`** is one HTML file per beat so a single beat can be
+- **`compositions/`** is one HTML file per beat — HF blocks. Each can be
   re-rendered, swapped, or hand-tweaked without touching the rest.
-- **`components/`** holds beat fragments shared across clips (e.g. the outro
-  split-screen, the lower-third pill). Promoted out of `compositions/` once
-  used in 2+ projects.
+- **`compositions/components/`** holds HF components — CSS/JS snippets pasted
+  into a host composition (karaoke caption, chrome-gradient text, etc.).
+  Path matches the HF registry convention (`paths.components` default).
 - **`screenshots/`** is the verification surface: Claude is told to render a
   frame at `beat.start + 0.4s`, save a PNG here, and only ship if the frame
   matches the description it claimed it would produce.
@@ -48,3 +48,24 @@ reads `motion-philosophy.md` first, then the `beats[]` from the request body.
    `/render` with the project slug; the renderer reads `motion-philosophy.md`
    for that slug to keep the style consistent.
 5. Final MP4 lands in `<slug>/renders/`.
+
+## Installing plugins
+
+Reusable blocks and components live in [`../registry/`](../registry/). They
+are HyperFrames-registry-format files (one folder per plugin with a
+`registry-item.json` + `<name>.html`). Install them into a project with:
+
+```bash
+./bin/install-plugin.mjs --list                       # show what's available
+./bin/install-plugin.mjs liquid-glass-card            # install one (default project: _template)
+./bin/install-plugin.mjs --all --project edit-demo    # install all into a specific project
+```
+
+The script is a local stand-in for `hyperframes add` — the pinned HF CLI
+(0.1.15) does not yet ship that command. When the CLI version bumps, the
+registry can be hosted at a public URL and `hyperframes add <name>` will
+work directly against it; the file layout is identical.
+
+`_template` ships with all four registry plugins pre-installed so a fresh
+project copy already has the liquid-glass card, the outro split block, and
+the karaoke / chrome-text components ready to use.

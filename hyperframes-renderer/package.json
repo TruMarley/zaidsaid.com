@@ -8,7 +8,9 @@
   },
   "scripts": {
     "start": "node server.mjs",
-    "render:demo": "hyperframes render --entry templates/clip-9x16.html"
+    "render:demo": "hyperframes render --entry templates/clip-9x16.html",
+    "plugins:list": "node bin/install-plugin.mjs --list",
+    "plugins:install": "node bin/install-plugin.mjs --all"
   },
   "dependencies": {
     "@resvg/resvg-js": "^2.6.2",
