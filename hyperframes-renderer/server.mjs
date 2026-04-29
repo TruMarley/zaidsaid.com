@@ -72,6 +72,12 @@ app.post("/render", async (req, res) => {
     // Server uses ffmpeg to concat the kept ranges, remaps `beats[]` and
     // `word_timings[]` to the trimmed timeline, and updates `duration`.
     cuts = [],
+    // x130: platform-aware output dimensions. Defaults to 1080×1920 (9:16)
+    // so existing callers keep working. Templates substitute {{WIDTH}} and
+    // {{HEIGHT}} into both the HF root data-width/data-height and the body
+    // sizing rules, so a 16:9 (1920×1080) call uses the same template.
+    width = 1080,
+    height = 1920,
   } = req.body || {};
   if (!duration) {
     return res.status(400).json({ error: "duration is required" });
@@ -116,6 +122,8 @@ app.post("/render", async (req, res) => {
     // beats own the on-screen text and karaoke runs. word_timings are still
     // accepted so the front-end can pass them through unchanged.
     const beatsActive = Array.isArray(beatsRemapped) && beatsRemapped.length > 0;
+    const W = Math.max(160, Math.min(3840, Number(width)  || 1080));
+    const H = Math.max(160, Math.min(3840, Number(height) || 1920));
     const html = renderTemplate(stripVideoIfMissing(template, resolvedClipUrl), {
       CLIP_URL: resolvedClipUrl,
       DURATION: activeDuration.toFixed(2),
@@ -127,6 +135,10 @@ app.post("/render", async (req, res) => {
       LOTTIE_URL: lottie_url,
       LOTTIE_START: lottieStart.toFixed(2),
       LOTTIE_DURATION: lottieDuration.toFixed(2),
+      // x130: dimension placeholders — templates use these for both the HF
+      // root data-* attrs and inline body sizing.
+      WIDTH:  String(W),
+      HEIGHT: String(H),
     });
 
     const indexPath = path.join(workDir, "index.html");
