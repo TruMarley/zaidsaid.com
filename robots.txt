@@ -1,0 +1,33 @@
+# zaidsaid.com — robots policy
+# Search + answer engines welcome (they drive traffic back).
+# Training-only crawlers are disallowed.
+
+# --- explicit blocks: training scrapers ---
+
+User-agent: GPTBot
+Disallow: /
+
+User-agent: CCBot
+Disallow: /
+
+User-agent: Google-Extended
+Disallow: /
+
+User-agent: anthropic-ai
+Disallow: /
+
+User-agent: Bytespider
+Disallow: /
+
+User-agent: FacebookBot
+Disallow: /
+
+User-agent: Amazonbot
+Disallow: /
+
+# --- everyone else: allowed ---
+
+User-agent: *
+Allow: /
+
+Sitemap: https://zaidsaid.com/sitemap.xml
