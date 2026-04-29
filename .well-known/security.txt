@@ -1,0 +1,4 @@
+Contact: mailto:trumarley1@gmail.com
+Expires: 2027-04-29T00:00:00Z
+Preferred-Languages: en
+Canonical: https://zaidsaid.com/.well-known/security.txt
