@@ -67,6 +67,156 @@ function useLocalState(key, initial){
 }
 try { if (safeGet("__schema", 0) !== SCHEMA_VERSION) safeSet("__schema", SCHEMA_VERSION); } catch(e){}
 
+/* ---------------- x122: Profile system ----------------
+ * zaidsaid.v2.profile — local identity, no auth, no password.
+ * Used only for export-file metadata + UI personalization.
+ */
+const PROFILE_KEY = "profile";
+const getProfile = () => safeGet(PROFILE_KEY, null);
+const saveProfile = (p) => safeSet(PROFILE_KEY, p);
+const makeProfileId = () => "p_" + Math.random().toString(36).slice(2, 10);
+
+// ─── .zsproj helpers ──────────────────────────────────────────────────────────
+const slugify = (s) => String(s || "project").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "project";
+const datestamp = () => {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return "" + y + m + day;
+};
+
+const buildZsproj = (kind, projectObj) => {
+  const prof = getProfile();
+  return {
+    format: "zsproj",
+    version: 1,
+    exportedAt: Date.now(),
+    exportedBy: prof ? { id: prof.id, name: prof.name, email: prof.email || "" } : { id: "", name: "", email: "" },
+    kind,
+    project: projectObj,
+  };
+};
+
+const downloadZsproj = (kind, projectObj) => {
+  const data = buildZsproj(kind, projectObj);
+  const name = slugify(projectObj && (projectObj.name || projectObj.source));
+  const filename = name + "-" + datestamp() + ".zsproj";
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  downloadBlob(blob, filename);
+};
+
+const validateZsproj = (parsed) => {
+  if (!parsed || typeof parsed !== "object") return "Not a valid JSON object";
+  if (parsed.format !== "zsproj") return "Missing or wrong format field (expected \"zsproj\")";
+  if (parsed.version !== 1) return "Unsupported version: " + parsed.version;
+  if (!parsed.kind) return "Missing kind field";
+  if (!parsed.project || typeof parsed.project !== "object") return "Missing or invalid project field";
+  return null;
+};
+
+/* x122: Bulk .zip export of all projects */
+const exportAllProjectsAsZip = async (toast) => {
+  const studio = safeGet("studio.project", null);
+  const repurpose = safeGet("repurpose.project", null);
+  const scriptRaw = typeof window.__zs_lastScript !== "undefined" ? window.__zs_lastScript : null;
+  const entries = [];
+  if (studio && studio.name) entries.push({ kind: "studio", project: studio, name: studio.name });
+  if (repurpose && repurpose.name) entries.push({ kind: "repurpose", project: repurpose, name: repurpose.name });
+  if (scriptRaw && scriptRaw.title) entries.push({ kind: "scripts", project: scriptRaw, name: scriptRaw.title });
+  if (!entries.length) { toast && toast.push("No projects found to export", "warn"); return; }
+  try {
+    const loadZip = await awaitZipLoader();
+    const JSZip = await loadZip();
+    const zip = new JSZip();
+    const manifest = { exportedAt: Date.now(), projects: [] };
+    entries.forEach(e => {
+      const data = buildZsproj(e.kind, e.project);
+      const fn = slugify(e.name) + "-" + datestamp() + ".zsproj";
+      zip.file(fn, JSON.stringify(data, null, 2));
+      manifest.projects.push({ file: fn, kind: e.kind, name: e.name });
+    });
+    zip.file("manifest.json", JSON.stringify(manifest, null, 2));
+    const blob = await zip.generateAsync({ type: "blob" });
+    downloadBlob(blob, "zaidsaid-projects-" + datestamp() + ".zip");
+    toast && toast.push("Exported " + entries.length + " project" + (entries.length > 1 ? "s" : "") + " as zip", "success");
+  } catch(e) {
+    toast && toast.push("Zip export failed: " + (e.message || "unknown"), "error");
+  }
+};
+
+/* x122: Import from .zsproj or .zip */
+const importProjectFile = async (file, { onStudio, onRepurpose, onScripts, onConfirm, toast }) => {
+  const name = file.name || "";
+  if (name.endsWith(".zip")) {
+    try {
+      const loadZip = await awaitZipLoader();
+      const JSZip = await loadZip();
+      const zip = await JSZip.loadAsync(file);
+      const results = [];
+      const errs = [];
+      for (const [fn, entry] of Object.entries(zip.files)) {
+        if (!fn.endsWith(".zsproj") || entry.dir) continue;
+        try {
+          const text = await entry.async("text");
+          const parsed = JSON.parse(text);
+          const err = validateZsproj(parsed);
+          if (err) { errs.push(fn + ": " + err); continue; }
+          results.push(parsed);
+        } catch(e) { errs.push(fn + ": " + (e.message || "parse error")); }
+      }
+      if (errs.length && toast) toast.push("Some files skipped: " + errs.slice(0,2).join("; "), "warn");
+      if (!results.length) { toast && toast.push("No valid .zsproj files found in zip", "error"); return; }
+      let studio = 0, repurpose = 0, scripts = 0;
+      for (const parsed of results) {
+        if (parsed.kind === "studio") { onStudio && onStudio(parsed.project); studio++; }
+        else if (parsed.kind === "repurpose") { onRepurpose && onRepurpose(parsed.project); repurpose++; }
+        else if (parsed.kind === "scripts") { onScripts && onScripts(parsed.project); scripts++; }
+      }
+      const parts = [studio && (studio + " studio"), repurpose && (repurpose + " repurpose"), scripts && (scripts + " scripts")].filter(Boolean).join(", ");
+      toast && toast.push("Imported " + results.length + " project" + (results.length > 1 ? "s" : "") + ": " + parts, "success");
+    } catch(e) {
+      toast && toast.push("Zip import failed: " + (e.message || "unknown"), "error");
+    }
+    return;
+  }
+  // Single .zsproj
+  try {
+    const text = await file.text();
+    const parsed = JSON.parse(text);
+    const err = validateZsproj(parsed);
+    if (err) { toast && toast.push("Import rejected: " + err, "error"); return; }
+    const kind = parsed.kind;
+    const projName = (parsed.project && parsed.project.name) || "(unnamed)";
+    const proceed = () => {
+      if (kind === "studio") { onStudio && onStudio(parsed.project); }
+      else if (kind === "repurpose") { onRepurpose && onRepurpose(parsed.project); }
+      else if (kind === "scripts") { onScripts && onScripts(parsed.project); }
+      toast && toast.push("Imported '" + projName + "' into " + kind, "success");
+    };
+    // Confirm before overwriting existing non-empty project
+    const hasExisting = kind === "studio" ? !!(safeGet("studio.project", null) || {}).name
+                      : kind === "repurpose" ? !!(safeGet("repurpose.project", null) || {}).name
+                      : false;
+    if (hasExisting && onConfirm) {
+      onConfirm("This will replace your current " + kind + " project. Continue?", proceed);
+    } else {
+      proceed();
+    }
+  } catch(e) {
+    toast && toast.push("Import failed: " + (e.message || "parse error"), "error");
+  }
+};
+
+/* x122: hidden file input trigger */
+const triggerFileImport = (accept, onFile) => {
+  const inp = document.createElement("input");
+  inp.type = "file";
+  inp.accept = accept;
+  inp.onchange = () => { if (inp.files && inp.files[0]) onFile(inp.files[0]); };
+  inp.click();
+};
+
 /* ---------------- IndexedDB blob store ----------------
  * Keeps uploaded video/audio files across refreshes. Blob URLs die when the
  * page context is destroyed; the File itself can be persisted to IDB and a
@@ -727,8 +877,198 @@ class Boundary extends React.Component {
   }
 }
 
+/* ---------------- x122: Profile onboarding modal ---------------- */
+function ProfileOnboarding({ onDone }){
+  const [name, setName] = React.useState("");
+  const [email, setEmail] = React.useState("");
+  const [err, setErr] = React.useState("");
+  const submit = () => {
+    const n = name.trim();
+    if (!n) { setErr("Name is required"); return; }
+    const prof = { id: makeProfileId(), name: n, email: email.trim(), createdAt: Date.now(), updatedAt: Date.now() };
+    saveProfile(prof);
+    onDone(prof);
+  };
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="ob-title">
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" aria-hidden />
+      <div className="relative w-full max-w-md card p-8 zs-fade-in">
+        <div className="flex items-center gap-3 mb-5">
+          <div className="w-10 h-10 rounded-xl flex-shrink-0" style={{background:"linear-gradient(135deg,#6366f1,#22d3ee)"}} />
+          <div>
+            <div id="ob-title" className="text-xl font-bold">Welcome to Zaidsaid</div>
+          </div>
+        </div>
+        <p className="text-sm text-[color:var(--muted)] mb-5">Tell us your name so we can label your projects. No account, no password — your work stays on this device.</p>
+        <div className="space-y-4">
+          <label className="block">
+            <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Your name <span className="text-rose-400">*</span></span>
+            <input
+              autoFocus
+              value={name}
+              onChange={e => { setName(e.target.value); setErr(""); }}
+              onKeyDown={e => e.key === "Enter" && submit()}
+              placeholder="e.g. Marley"
+              className="mt-1 w-full bg-transparent border border-[color:var(--line)] rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-white/20"
+            />
+            {err && <div className="text-xs text-rose-400 mt-1">{err}</div>}
+          </label>
+          <label className="block">
+            <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Email <span className="text-[color:var(--muted)] font-normal normal-case">(optional, stored locally)</span></span>
+            <input
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && submit()}
+              placeholder="you@example.com"
+              type="email"
+              className="mt-1 w-full bg-transparent border border-[color:var(--line)] rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-white/20"
+            />
+          </label>
+        </div>
+        <button className="btn btn-primary mt-6 w-full justify-center" onClick={submit}>
+          {I.spark({size:16})} Get started
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- x122: Profile pill + dropdown ---------------- */
+function ProfilePill({ profile, onEdit, onExportProject, onExportAll, onImport, onSignOut }){
+  const [open, setOpen] = React.useState(false);
+  const ref = React.useRef(null);
+  React.useEffect(() => {
+    if (!open) return;
+    const close = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [open]);
+  const initial = (profile.name || "?")[0].toUpperCase();
+  // Deterministic color from name
+  const hue = (profile.name || "").split("").reduce((a, c) => a + c.charCodeAt(0), 0) % 360;
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="flex items-center gap-2 chip hover:border-white/20 hover:text-white cursor-pointer select-none"
+        aria-haspopup="menu"
+        aria-expanded={open}
+      >
+        <span
+          className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0"
+          style={{background:`hsl(${hue},60%,50%)`}}
+          aria-hidden
+        >{initial}</span>
+        <span className="text-[12px] max-w-[80px] truncate">{profile.name.split(" ")[0]}</span>
+        {I.down({size:12})}
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-2 w-52 card border border-[color:var(--line)] rounded-xl overflow-hidden z-30 shadow-xl" role="menu">
+          <div className="px-4 py-2.5 border-b border-[color:var(--line)]">
+            <div className="text-[11px] text-[color:var(--muted)]">Signed in as</div>
+            <div className="text-sm font-semibold truncate">{profile.name}</div>
+            {profile.email && <div className="text-[11px] text-[color:var(--muted)] truncate">{profile.email}</div>}
+          </div>
+          {[
+            { label: "Edit profile", icon: I.edit, action: () => { setOpen(false); onEdit(); } },
+            { label: "Export project as file…", icon: I.down, action: () => { setOpen(false); onExportProject(); } },
+            { label: "Export all projects (.zip)", icon: I.folder, action: () => { setOpen(false); onExportAll(); } },
+            { label: "Import project from file…", icon: I.up, action: () => { setOpen(false); onImport(); } },
+          ].map(item => (
+            <button
+              key={item.label}
+              role="menuitem"
+              onClick={item.action}
+              className="w-full flex items-center gap-3 px-4 py-2.5 text-[13px] text-[color:var(--muted)] hover:text-white hover:bg-white/5 text-left"
+            >
+              {item.icon({size:13})} {item.label}
+            </button>
+          ))}
+          <div className="border-t border-[color:var(--line)]">
+            <button
+              role="menuitem"
+              onClick={() => { setOpen(false); onSignOut(); }}
+              className="w-full flex items-center gap-3 px-4 py-2.5 text-[13px] text-rose-400 hover:text-rose-300 hover:bg-white/5 text-left"
+            >
+              {I.x({size:13})} Sign out / switch profile
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---------------- x122: Edit profile modal ---------------- */
+function EditProfileModal({ profile, onSave, onClose }){
+  const [name, setName] = React.useState(profile.name || "");
+  const [email, setEmail] = React.useState(profile.email || "");
+  const [err, setErr] = React.useState("");
+  const submit = () => {
+    const n = name.trim();
+    if (!n) { setErr("Name is required"); return; }
+    const updated = { ...profile, name: n, email: email.trim(), updatedAt: Date.now() };
+    saveProfile(updated);
+    onSave(updated);
+  };
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} aria-hidden />
+      <div className="relative w-full max-w-sm card p-6 zs-fade-in">
+        <div className="flex items-center justify-between mb-4">
+          <div className="text-lg font-semibold">Edit profile</div>
+          <button className="chip" onClick={onClose}>{I.x({size:12})}</button>
+        </div>
+        <div className="space-y-4">
+          <label className="block">
+            <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Name <span className="text-rose-400">*</span></span>
+            <input
+              autoFocus
+              value={name}
+              onChange={e => { setName(e.target.value); setErr(""); }}
+              onKeyDown={e => e.key === "Enter" && submit()}
+              className="mt-1 w-full bg-transparent border border-[color:var(--line)] rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-white/20"
+            />
+            {err && <div className="text-xs text-rose-400 mt-1">{err}</div>}
+          </label>
+          <label className="block">
+            <span className="text-[11px] uppercase tracking-widest text-[color:var(--muted)]">Email <span className="text-[color:var(--muted)] font-normal normal-case">(optional)</span></span>
+            <input
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && submit()}
+              type="email"
+              className="mt-1 w-full bg-transparent border border-[color:var(--line)] rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-white/20"
+            />
+          </label>
+        </div>
+        <div className="flex gap-2 mt-5">
+          <button className="btn flex-1 justify-center" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary flex-1 justify-center" onClick={submit}>Save</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- x122: Inline confirm dialog ---------------- */
+function ConfirmDialog({ message, onConfirm, onCancel }){
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onCancel} aria-hidden />
+      <div className="relative w-full max-w-sm card p-6 zs-fade-in">
+        <div className="text-base font-semibold mb-3">{message}</div>
+        <div className="flex gap-2 justify-end">
+          <button className="btn" onClick={onCancel}>Cancel</button>
+          <button className="btn btn-primary" onClick={onConfirm}>Replace</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ---------------- Shell ---------------- */
-function TopBar({ tab, setTab, onNewProject }){
+function TopBar({ tab, setTab, onNewProject, profile, onProfileEdit, onExportProject, onExportAll, onImport, onSignOut }){
   return (
     <header className="sticky top-0 z-20 backdrop-blur bg-[color:var(--bg)]/70 border-b border-[color:var(--line)]">
       <div className="max-w-[1400px] mx-auto px-5 py-3 flex items-center gap-4">
@@ -749,6 +1089,16 @@ function TopBar({ tab, setTab, onNewProject }){
         <div className="ml-auto flex items-center gap-2">
           {isGodMode && <span className="chip text-amber-200 !border-amber-400/30 bg-amber-500/10" title="Advanced / admin surface enabled">GOD</span>}
           <span className="chip"><span className="dot"/> all systems nominal</span>
+          {profile && (
+            <ProfilePill
+              profile={profile}
+              onEdit={onProfileEdit}
+              onExportProject={onExportProject}
+              onExportAll={onExportAll}
+              onImport={onImport}
+              onSignOut={onSignOut}
+            />
+          )}
           <button className="btn btn-primary" onClick={()=>{ onNewProject && onNewProject(); }}>
             {I.spark({size:16})} <span>New project</span>
           </button>
@@ -5519,8 +5869,19 @@ function StudioTab({ setTab, studioStep, setStudioStep }){
           <h1 className="text-3xl font-bold">Studio</h1>
           <p className="text-[color:var(--muted)] mt-1">{STUDIO_STEPS[idx].blurb}</p>
         </div>
-        <div className="flex items-center gap-2">
-          <button className="btn btn-ghost" onClick={resetProject}>{I.refresh({size:14})} Reset to example</button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button className="btn btn-ghost text-xs" onClick={resetProject}>{I.refresh({size:14})} Reset to example</button>
+          <button className="btn btn-ghost text-xs" onClick={() => { downloadZsproj("studio", project); }}>{I.down({size:13})} Save .zsproj</button>
+          <button className="btn btn-ghost text-xs" onClick={() => {
+            triggerFileImport(".zsproj", async (file) => {
+              const toast = useToast ? null : null; // noop at this scope
+              await importProjectFile(file, {
+                onStudio: (proj) => setProject(proj),
+                onConfirm: (msg, cb) => { if (window.confirm(msg)) cb(); },
+                toast: { push: (m, k) => console.log("[import]", k, m) },
+              });
+            });
+          }}>{I.up({size:13})} Open .zsproj</button>
         </div>
       </div>
       {seeded && (
@@ -8458,6 +8819,18 @@ const removeClip = (clipId) => {
           <h1 className="text-3xl font-bold">Repurpose</h1>
           <p className="text-[color:var(--muted)] mt-1">Long-form in. Ranked, branded, platform-native shorts out.</p>
         </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button className="btn btn-ghost text-xs" onClick={() => { downloadZsproj("repurpose", project); }}>{I.down({size:13})} Save .zsproj</button>
+          <button className="btn btn-ghost text-xs" onClick={() => {
+            triggerFileImport(".zsproj", async (file) => {
+              await importProjectFile(file, {
+                onRepurpose: (proj) => setProject(proj),
+                onConfirm: (msg, cb) => { if (window.confirm(msg)) cb(); },
+                toast: { push: (m, k) => console.log("[import]", k, m) },
+              });
+            });
+          }}>{I.up({size:13})} Open .zsproj</button>
+        </div>
       </div>
 
       <div className="grid gap-4">
@@ -9552,6 +9925,18 @@ function ScriptsTab({ setTab }) {
 
   // Phase 3 result
   const [script, setScript] = React.useState(null); // generate_full_script output (short-form) or long-form chapters structure
+  // x122: expose current script for header-pill export; listen for import events
+  React.useEffect(() => { window.__zs_lastScript = script; }, [script]);
+  React.useEffect(() => {
+    const onImport = (e) => {
+      const proj = e && e.detail;
+      if (!proj) return;
+      setScript(proj);
+      setPhase('review');
+    };
+    window.addEventListener("zs:import-script", onImport);
+    return () => window.removeEventListener("zs:import-script", onImport);
+  }, []);
 
   // Long-form: per-chapter collapse state in review
   const [chapterCollapsed, setChapterCollapsed] = React.useState({});
@@ -10422,6 +10807,7 @@ function ScriptsTab({ setTab }) {
             <button className="btn btn-ghost text-xs" onClick={() => { setPhase('input'); setScript(null); setStages([]); }}>{I.refresh({size:12})} Start over</button>
             <button className="btn btn-ghost text-xs" onClick={copyMd}>{I.copy({size:12})} Copy</button>
             <button className="btn btn-ghost text-xs" onClick={exportMd}>{I.down({size:12})} Export .md</button>
+            <button className="btn btn-ghost text-xs" onClick={() => { if (script) { window.__zs_lastScript = script; downloadZsproj("scripts", script); } }}>{I.down({size:12})} Save .zsproj</button>
             <button className="btn" onClick={sendToHyperFrames}>{I.film({size:12})} HyperFrames</button>
             <button className="btn btn-primary" onClick={sendToStudio}>{I.studio({size:14})} Send to Studio</button>
           </div>
@@ -12653,6 +13039,20 @@ function App(){
   const [tab, setTab] = useLocalState("tab", "home");
   const [studioStep, setStudioStepRaw] = useLocalState("studio.step", "research");
 
+  // x122: profile state — read from localStorage (lazy init sometimes
+  // doesn't fire in Babel+React 18 UMD; useEffect hydration is belt+suspenders)
+  const [profile, setProfile] = React.useState(null);
+  const [showOnboarding, setShowOnboarding] = React.useState(true);
+  const [showEditProfile, setShowEditProfile] = React.useState(false);
+  const [confirmMsg, setConfirmMsg] = React.useState(null); // { message, onConfirm }
+  const toast = useToast();
+  // Hydrate profile from localStorage on first mount
+  React.useEffect(() => {
+    const p = getProfile();
+    setProfile(p);
+    setShowOnboarding(!p);
+  }, []);
+
   const syncFromHash = () => {
     const { path, params } = parseHash();
     if(path && TABS.find(t=>t.id===path)) setTab(path);
@@ -12690,6 +13090,46 @@ function App(){
     setTab("studio");
   };
 
+  // x122: export/import handlers for header pill
+  const handleExportProject = () => {
+    // Export whichever tab is currently active
+    if (tab === "studio") {
+      const proj = safeGet("studio.project", null);
+      if (!proj || !proj.name) { toast.push && toast.push("No Studio project to export", "warn"); return; }
+      downloadZsproj("studio", proj);
+    } else if (tab === "repurpose") {
+      const proj = safeGet("repurpose.project", null);
+      if (!proj || !proj.name) { toast.push && toast.push("No Repurpose project to export", "warn"); return; }
+      downloadZsproj("repurpose", proj);
+    } else if (tab === "scripts") {
+      const sc = window.__zs_lastScript;
+      if (!sc) { toast.push && toast.push("No script to export — generate one first", "warn"); return; }
+      downloadZsproj("scripts", sc);
+    } else {
+      toast.push && toast.push("Switch to Studio, Repurpose, or Scripts tab to export the active project", "info");
+    }
+  };
+
+  const handleExportAll = () => exportAllProjectsAsZip(toast);
+
+  const handleImport = () => {
+    triggerFileImport(".zsproj,.zip", async (file) => {
+      await importProjectFile(file, {
+        onStudio: (proj) => { safeSet("studio.project", proj); if (tab !== "studio") setTab("studio"); else window.dispatchEvent(new CustomEvent("zs:reload-studio")); },
+        onRepurpose: (proj) => { safeSet("repurpose.project", proj); if (tab !== "repurpose") setTab("repurpose"); else window.dispatchEvent(new CustomEvent("zs:reload-repurpose")); },
+        onScripts: (proj) => { window.__zs_lastScript = proj; window.dispatchEvent(new CustomEvent("zs:import-script", { detail: proj })); if (tab !== "scripts") setTab("scripts"); },
+        onConfirm: (message, onConfirm) => setConfirmMsg({ message, onConfirm }),
+        toast,
+      });
+    });
+  };
+
+  const handleSignOut = () => {
+    try { localStorage.removeItem(NS + PROFILE_KEY); } catch(_){}
+    setProfile(null);
+    setShowOnboarding(true);
+  };
+
   const View = useMemo(()=> {
     switch(tab){
       case "home":         return <HomeTab setTab={setTab} startProject={startProject} />;
@@ -12710,7 +13150,34 @@ function App(){
 
   return (
     <Boundary>
-      <TopBar tab={tab} setTab={setTab} onNewProject={startProject} />
+      {showOnboarding && (
+        <ProfileOnboarding onDone={(prof) => { setProfile(prof); setShowOnboarding(false); }} />
+      )}
+      {showEditProfile && profile && (
+        <EditProfileModal
+          profile={profile}
+          onSave={(updated) => { setProfile(updated); setShowEditProfile(false); }}
+          onClose={() => setShowEditProfile(false)}
+        />
+      )}
+      {confirmMsg && (
+        <ConfirmDialog
+          message={confirmMsg.message}
+          onConfirm={() => { confirmMsg.onConfirm(); setConfirmMsg(null); }}
+          onCancel={() => setConfirmMsg(null)}
+        />
+      )}
+      <TopBar
+        tab={tab}
+        setTab={setTab}
+        onNewProject={startProject}
+        profile={profile}
+        onProfileEdit={() => setShowEditProfile(true)}
+        onExportProject={handleExportProject}
+        onExportAll={handleExportAll}
+        onImport={handleImport}
+        onSignOut={handleSignOut}
+      />
       <main id="main" role="main">{View}</main>
       <Footer />
     </Boundary>
