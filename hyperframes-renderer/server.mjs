@@ -167,13 +167,15 @@ function buildBeatBlocks(beats) {
     const trackIndex = 2 + (i % 6); // keep beats out of the bg/vignette tracks
     if (side === "split") {
       // Outro split: dimmed bg + face-cam crop on right + headline on left.
-      const text = escapeHtml(b.title || "Thanks for watching");
+      const text = escapeHtml(b.title || "Thanks for watching").replace(/\n/g, "<br>");
       return `
       <div id="${id}-bg" class="clip split-bg" data-start="${start}" data-duration="${dur}" data-track-index="${trackIndex}"></div>
       <div id="${id}-text" class="clip split-text" data-start="${start}" data-duration="${dur}" data-track-index="${trackIndex + 1}">${text}</div>`;
     }
     const eyebrow = b.eyebrow ? `<div class="eyebrow">${escapeHtml(b.eyebrow)}</div>` : "";
-    const title = b.title ? `<div class="title">${escapeHtml(b.title)}</div>` : "";
+    // Newlines in `title` are intentional line breaks (e.g. "The edit\nlive"
+    // → "The edit" / "live") — escape, then map \n to <br>.
+    const title = b.title ? `<div class="title">${escapeHtml(b.title).replace(/\n/g, "<br>")}</div>` : "";
     const karaoke = Array.isArray(b.karaoke_words) && b.karaoke_words.length
       ? `<div class="karaoke">${b.karaoke_words.map((w, wi) => {
           const ws = Number(w.start || 0).toFixed(2);

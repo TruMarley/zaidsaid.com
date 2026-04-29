@@ -52,10 +52,12 @@
         pointer-events: none;
         border-radius: inherit;
       }
-      .beat[data-side="left"]   { left: 60px;  width: 920px; max-width: 50vw; top: 50%; transform: translateY(-50%); }
-      .beat[data-side="right"]  { right: 60px; width: 920px; max-width: 50vw; top: 50%; transform: translateY(-50%); }
-      .beat[data-side="full"]   { left: 80px;  right: 80px; top: 280px; }
-      .beat[data-side="bottom"] { left: 80px;  right: 80px; bottom: 220px; }
+      /* HF root is 1080×1920, so cards size to absolute pixels.
+         Half-width cards (left/right) leave a 540 px column for the face cam. */
+      .beat[data-side="left"]   { left: 60px;  width: 480px;  top: 50%; transform: translateY(-50%); }
+      .beat[data-side="right"]  { right: 60px; width: 480px;  top: 50%; transform: translateY(-50%); }
+      .beat[data-side="full"]   { left: 80px;  width: 920px;  top: 280px; }
+      .beat[data-side="bottom"] { left: 80px;  width: 920px;  bottom: 220px; }
 
       .beat .eyebrow {
         font-size: 28px; font-weight: 700; letter-spacing: 0.18em;
