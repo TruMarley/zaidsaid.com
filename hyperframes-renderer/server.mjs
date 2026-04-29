@@ -427,13 +427,23 @@ const HF_BIN = path.join(__dirname, "node_modules", ".bin", "hyperframes");
 const HF_WORKERS = process.env.HF_WORKERS || "1";
 function runRender(cwd, outPath) {
   return new Promise((resolve, reject) => {
+    // x128e: capture stderr so when HF exits non-zero the surfaced 500
+    // response carries the real reason instead of a bare exit code.
     const child = spawn(HF_BIN, [
-      "render", "--output", outPath, "--workers", HF_WORKERS, "--quiet"
+      "render", "--output", outPath, "--workers", HF_WORKERS
     ], {
-      cwd, stdio: ["ignore", "inherit", "inherit"]
+      cwd, stdio: ["ignore", "pipe", "pipe"]
     });
+    let stdoutBuf = "", stderrBuf = "";
+    child.stdout.on("data", d => { stdoutBuf += d; process.stdout.write(d); });
+    child.stderr.on("data", d => { stderrBuf += d; process.stderr.write(d); });
     child.on("error", reject);
-    child.on("exit", code => code === 0 ? resolve() : reject(new Error(`hyperframes render exited ${code}`)));
+    child.on("exit", code => {
+      if (code === 0) return resolve();
+      // Last 1 KB of stderr is usually plenty for the "thrown error" line.
+      const tail = (stderrBuf || stdoutBuf).slice(-1024).trim();
+      reject(new Error(`hyperframes render exited ${code}: ${tail || "(no stderr)"}`));
+    });
   });
 }
 
