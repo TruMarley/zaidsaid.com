@@ -23,6 +23,8 @@ const ALLOWED_ORIGINS = [
   "http://localhost:5173"
 ];
 
+const PROTECTED_VENDORS = new Set(['anthropic', 'elevenlabs', 'stability', 'replicate', 'xai', 'heygen', 'openai']);
+
 const VENDORS = {
   elevenlabs: {
     base: "https://api.elevenlabs.io",
@@ -438,6 +440,21 @@ async function fetchYouTubeTranscript(videoId, env) {
   throw err;
 }
 
+function isPrivateHost(host) {
+  const h = host.toLowerCase().replace(/^\[|\]$/g, '');
+  // test: 'localhost' -> true; 'example.com' -> false
+  if (['localhost', '127.0.0.1', '0.0.0.0', '::1', '::'].includes(h)) return true;
+  if (/^10\./.test(h)) return true;
+  if (/^192\.168\./.test(h)) return true;
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return true;
+  if (/^169\.254\./.test(h)) return true;                                   // link-local + AWS/GCP IMDS
+  if (/^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(h)) return true;    // CGNAT 100.64-127.x
+  if (/^::ffff:/.test(h)) { return isPrivateHost(h.replace(/^::ffff:/, '')); } // IPv4-mapped IPv6
+  if (/^fc[0-9a-f]{2}:/.test(h) || /^fd[0-9a-f]{2}:/.test(h)) return true; // fc00::/7 unique-local
+  if (/^fe[89ab][0-9a-f]:/.test(h)) return true;                            // fe80::/10 link-local
+  return false;
+}
+
 export default {
   async fetch(req, env) {
     const url = new URL(req.url);
@@ -672,9 +689,8 @@ export default {
           status: 400, headers: { ...cors, "Content-Type": "application/json" }
         });
       }
-      const host = parsedTarget.hostname.toLowerCase();
-      const BLOCKED = ["localhost", "127.0.0.1", "0.0.0.0", "[::1]", "::1"];
-      if (BLOCKED.includes(host) || /^10\.|^192\.168\.|^172\.(1[6-9]|2\d|3[01])\./.test(host)) {
+      const host = parsedTarget.hostname;
+      if (isPrivateHost(host)) {
         return new Response(JSON.stringify({ error: "private addresses not allowed" }), {
           status: 400, headers: { ...cors, "Content-Type": "application/json" }
         });
@@ -1010,6 +1026,15 @@ export default {
       return new Response(JSON.stringify({ error: "unknown vendor", vendor }), {
         status: 404, headers: { ...cors, "Content-Type": "application/json" }
       });
+    }
+
+    if (PROTECTED_VENDORS.has(vendor)) {
+      const origin = req.headers.get('origin');
+      if (!origin || !ALLOWED_ORIGINS.includes(origin)) {
+        return new Response(JSON.stringify({ error: "unauthorized origin", origin: origin || "" }), {
+          status: 403, headers: { ...cors, "Content-Type": "application/json" }
+        });
+      }
     }
 
     if (req.method === "POST") {
