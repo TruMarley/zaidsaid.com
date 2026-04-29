@@ -7,14 +7,15 @@ FROM node:22-bookworm-slim
 
 ENV NODE_ENV=production \
     PORT=8788 \
-    PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
-    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium \
     HF_CORS_ORIGIN=*
+# x128f: don't skip Puppeteer's bundled Chromium download — HF uses the
+# `HeadlessExperimental.beginFrame` CDP method which the apt-get
+# `chromium` package doesn't expose. Letting Puppeteer install its own
+# Chromium (matched to its API expectations) is the supported path.
 
-# Chromium for Puppeteer + ffmpeg + the small set of fonts/libs
-# Chrome needs to render text and load video correctly.
+# ffmpeg + the small set of system libs Chromium needs at runtime.
+# Chromium itself comes from Puppeteer's npm install, not apt.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      chromium \
       ffmpeg \
       ca-certificates \
       fonts-liberation \
@@ -22,6 +23,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       libnss3 \
       libxss1 \
       libasound2 \
+      libatk1.0-0 \
+      libatk-bridge2.0-0 \
+      libcups2 \
+      libdrm2 \
+      libgbm1 \
+      libgtk-3-0 \
+      libpango-1.0-0 \
+      libxcomposite1 \
+      libxdamage1 \
+      libxfixes3 \
+      libxrandr2 \
+      libxkbcommon0 \
       dumb-init \
     && rm -rf /var/lib/apt/lists/*
 
