@@ -1,0 +1,32 @@
+name: Deploy HyperFrames Renderer (Fly.io)
+
+# Auto-deploy the hyperframes-renderer service to Fly.io on every push to
+# main that touches its source. Mirrors deploy-worker.yml.
+#
+# REQUIRED SECRET
+#   FLY_API_TOKEN — generate at https://fly.io/user/personal_access_tokens
+#                   (or `fly tokens create deploy -x 999999h`)
+#                   then `gh secret set FLY_API_TOKEN`
+#
+# Trigger manually with:
+#   gh workflow run deploy-renderer.yml
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "hyperframes-renderer/**"
+      - ".github/workflows/deploy-renderer.yml"
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Deploy
+        run: flyctl deploy --remote-only --config fly.toml
+        working-directory: hyperframes-renderer
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
