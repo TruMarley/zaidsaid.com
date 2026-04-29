@@ -32,8 +32,6 @@ primary_region = "iad"
     hard_limit = 4
 
 [[vm]]
-  size = "shared-cpu-2x"          # 2 shared vCPU (org-wide limit; can't go higher)
-  memory = "8gb"                  # x128c: 4 GB OOM'd headless Chrome+ffmpeg+libx264 during real
-                                  # renders (thumbnail path was fine, /render wasn't). Bumped to
-                                  # 8 GB; HF spawns N-2 workers so we cap concurrency in code if
-                                  # the 2-core limit becomes a bottleneck.
+  size = "shared-cpu-2x"          # 2 shared vCPU (org-wide limit)
+  memory = "4gb"                  # org-wide cap is 4 GB; HF workers reduced via --workers=1
+                                  # in server.mjs to keep peak memory under the ceiling.

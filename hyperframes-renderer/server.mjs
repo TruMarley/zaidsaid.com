@@ -420,9 +420,16 @@ function escapeHtml(s) {
 // fresh npm download (slow at best, OOM/SIGKILL at worst on a small Fly
 // machine). Using the local binary skips npx entirely.
 const HF_BIN = path.join(__dirname, "node_modules", ".bin", "hyperframes");
+// x128c: HF defaults to half-cores workers. On the 2-core / 4 GB Fly
+// machine that means 1 worker, but we set it explicitly so the design is
+// not at the mercy of the host CPU count (and so a future env tweak
+// can't accidentally bump it back into OOM territory).
+const HF_WORKERS = process.env.HF_WORKERS || "1";
 function runRender(cwd, outPath) {
   return new Promise((resolve, reject) => {
-    const child = spawn(HF_BIN, ["render", "--output", outPath, "--quiet"], {
+    const child = spawn(HF_BIN, [
+      "render", "--output", outPath, "--workers", HF_WORKERS, "--quiet"
+    ], {
       cwd, stdio: ["ignore", "inherit", "inherit"]
     });
     child.on("error", reject);
