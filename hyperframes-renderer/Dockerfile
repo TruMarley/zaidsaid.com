@@ -44,6 +44,14 @@ WORKDIR /app
 COPY package.json ./
 RUN npm install --omit=dev --no-audit --no-fund
 
+# x131b: pre-download HF's bundled Chrome at build time. HF uses a separate
+# Chrome from Puppeteer (managed by `hyperframes browser ensure`) and on a
+# read-only / ephemeral container will otherwise download 107 MB on first
+# render. Baking it into the image cuts cold-start render time from ~30s
+# (download + extract) to ~5s (just launch).
+ENV HYPERFRAMES_BROWSER_DIR=/app/.hyperframes-browser
+RUN node_modules/.bin/hyperframes browser ensure
+
 COPY server.mjs ./
 COPY templates/ ./templates/
 COPY bin/ ./bin/
